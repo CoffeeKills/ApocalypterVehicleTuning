@@ -101,6 +101,8 @@ Audit of 0.1.0-alpha against `gamecode/` and §2. Every fix below has a regressi
 
 **Not changed** (all §2 facts preserved): the steering prefix's math beyond the return/curve model (allocation-free; guards byte-identical for flat-1 return presets), the hidden-runner survival architecture, the InputBlocker recipe, one Graphic per GameObject, the mouse-only panel, no `ES3.Save`, no `vc.input.*` writes, BepInEx config as the only persistence, the GUID.
 
+**Bug fixed before release (playtest)**: the curve-editor graph rect used a zero-height anchor band with a centred pivot, which inverts the rect in Unity — the graph spilled over the rows below it, rendering "oversized" and swallowing their clicks (sliders looked unchangeable). The graph now uses full-area anchors with insets (CurveEditor.cs); its raycast area is exactly the graph.
+
 ## 1. What the mod does
 
 Seven tuning categories, each with: a master ON/OFF switch (all default OFF — every category is opt-in), a row of presets, and labelled sliders with live values, "changed" highlight, per-slider Reset and plain-language hints. Moving any slider while a built-in preset is active copies that preset into a "Custom (Base)" slot (BasedOn tracked) so presets are never mutated. Everything applies live; settings persist in a BepInEx config file; panel opens via F7 or a "Vehicle Tuning" button cloned into the game's menus.

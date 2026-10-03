@@ -2,6 +2,8 @@
 
 Read **README.md first** — it contains the verified game-architecture facts that drive every unusual design decision in this codebase (the game destroys plugin-created GameObjects on scene load; vehicle input is written by PlayMaker FSMs every frame; the game's save data must only ever be read; the ABS/TCS slip sign conventions; the NWH live-settability hazards). Treat those facts as load-bearing: a rework must preserve them. The decompiled game code you need is in `gamecode/`, and `docs/plan.md` records the design history.
 
+Playtest note: the user reported the 0.4.0 settings UI having oversized rows and controls whose values could not be changed. Root cause was found and fixed before this bundle was built (the curve-editor graph rect used a degenerate anchor band — see the comment in `plugin/Runtime/CurveEditor.cs`). Please verify that widget's layout and raycast behaviour especially during your audit; the fix is one line and has not yet been confirmed in-game.
+
 ## Your job
 
 1. **Audit** `plugin/` against the game code and the README. Find real bugs — correctness, restore-completeness, config-migration edge cases, UI problems, allocation hazards — not style nits.

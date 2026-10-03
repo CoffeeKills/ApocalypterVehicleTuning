@@ -64,7 +64,10 @@ namespace ApocalypterSteeringMod.Runtime
             editor._reset = reset;
 
             RectTransform graph = UiKit.Make("Graph", row);
-            UiKit.Place(graph, 0f, 0f, 1f, 0f, 16f, 10f, 16f, 46f);
+            // Full-area anchors (NOT a zero-height band): UiKit.Place keeps a centred
+            // pivot, which inverts the rect on degenerate bands — the graph would spill
+            // over neighbouring rows and eat their clicks.
+            UiKit.Place(graph, 0f, 0f, 1f, 1f, 16f, 10f, 16f, 46f);
             var graphic = graph.gameObject.AddComponent<CurveGraphic>();
             graphic.raycastTarget = true;
             graphic.Owner = editor;
