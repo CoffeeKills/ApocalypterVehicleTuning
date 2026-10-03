@@ -432,20 +432,19 @@ namespace ApocalypterSteeringMod.Runtime
             return row.gameObject;
         }
 
-        private static string Times(float v) { return "×" + v.ToString("0.00"); }
-        private static string Force(float n) { return n.ToString("N0") + " N"; }
-        private static string Rate(float r) { return r.ToString("N0") + " N·s/m"; }
-        private static string Length(float m) { return Mathf.RoundToInt(m * 100f) + " cm"; }
-        private static string Percent(float v) { return Mathf.RoundToInt(v * 100f) + "%"; }
-
         // ================================================================ shared semantics
 
-        private static string PresetButtonLabel<T>(PresetBook<T> book, T p) where T : class, ITunablePreset
+        // Picks the singular/plural template for the per-category vehicle status lines.
+        private static string VehicleStatus(int n, string oneFmt, string manyFmt)
         {
+            return string.Format(n == 1 ? oneFmt : manyFmt, n);
+        }
+
+        private static string PresetButtonLabel<T>(PresetBook<T> book, T p) where T : class, ITunablePreset        {
             if (p == book.Custom)
             {
                 T b = book.FindBuiltIn(p.BasedOn);
-                return b != null ? "Custom (" + b.Label + ")" : "Custom";
+                return b != null ? string.Format(UiStrings.CustomPresetFmt, b.Label) : "Custom";
             }
             return p.Label;
         }
@@ -454,8 +453,8 @@ namespace ApocalypterSteeringMod.Runtime
         {
             T b = book.FindBuiltIn(book.Custom.BasedOn);
             return b != null
-                ? "Your tuning, based on " + b.Label + ". Reset on a slider returns it to the " + b.Label + " value."
-                : "Your own tuning. Moving a slider on any preset copies it here, so presets stay intact.";
+                ? string.Format(UiStrings.CustomBasedOnDescFmt, b.Label, b.Label)
+                : UiStrings.CustomPlainDesc;
         }
 
         private void EditSuspension(Action<SuspensionPreset> edit)
@@ -575,7 +574,7 @@ namespace ApocalypterSteeringMod.Runtime
                 }
                 else
                 {
-                    desc.text = a.IsVanilla ? a.Description : a.Description + " Move any slider to customise it.";
+                    desc.text = a.IsVanilla ? a.Description : string.Format(UiStrings.PresetEditNoteFmt, a.Description);
                 }
             });
 
@@ -586,15 +585,15 @@ namespace ApocalypterSteeringMod.Runtime
             AddSlider(t, "Steering speed", "How fast the wheels turn toward your input",
                 Limits.RateMin, Limits.RateMax,
                 () => Shown.RateMultiplier, v => EditSteering(p => p.RateMultiplier = v),
-                () => SteeringSettings.Reference().RateMultiplier, Times);
+                () => SteeringSettings.Reference().RateMultiplier, UiStrings.Times);
             AddSlider(t, "Steering at speed", "How much lock you still get when going fast",
                 Limits.CurveScaleMin, Limits.CurveScaleMax,
                 () => Shown.SpeedCurveScale, v => EditSteering(p => p.SpeedCurveScale = v),
-                () => SteeringSettings.Reference().SpeedCurveScale, Times);
+                () => SteeringSettings.Reference().SpeedCurveScale, UiStrings.Times);
             AddSlider(t, "Smoothing", "Higher = softer, lazier response",
                 Limits.SmoothMin, Limits.SmoothMax,
                 () => Shown.SmoothingScale, v => EditSteering(p => p.SmoothingScale = v),
-                () => SteeringSettings.Reference().SmoothingScale, Times);
+                () => SteeringSettings.Reference().SmoothingScale, UiStrings.Times);
 
             AddSectionTitle(t, "Grip and slides");
             AddOption(t, "Grip assist", "Stops the front tyres turning past their grip limit",
@@ -602,12 +601,12 @@ namespace ApocalypterSteeringMod.Runtime
             AddSlider(t, "Grip window", "Higher = more steering before tyres slide",
                 Limits.SlipMin, Limits.SlipMax,
                 () => Shown.SlipAngleDeg, v => EditSteering(p => p.SlipAngleDeg = v),
-                () => SteeringSettings.Reference().SlipAngleDeg, v => v.ToString("0.0") + " deg",
+                () => SteeringSettings.Reference().SlipAngleDeg, v => UiStrings.Deg(v),
                 () => Shown.TractionClampEnabled);
             AddSlider(t, "Counter-steer speed", "Extra steering speed while catching a slide",
                 Limits.OppLockMin, Limits.OppLockMax,
                 () => Shown.OppositeLockBoost, v => EditSteering(p => p.OppositeLockBoost = v),
-                () => SteeringSettings.Reference().OppositeLockBoost, Times);
+                () => SteeringSettings.Reference().OppositeLockBoost, UiStrings.Times);
 
             AddSectionTitle(t, "Input");
             AddOption(t, "Custom input curve", "OFF = use each car's own response curve",
@@ -625,8 +624,8 @@ namespace ApocalypterSteeringMod.Runtime
             _refreshers.Add(() =>
             {
                 gameHint.text = GameSettingsReader.Loaded
-                    ? "Also scale by the game's own steering speed option (currently " + GameSettingsReader.Steeringspeed.ToString("0") + ", 50 = normal)"
-                    : "Also scale by the game's own steering speed option (not found, using 50)";
+                    ? string.Format(UiStrings.GameSpeedHintFoundFmt, GameSettingsReader.Steeringspeed.ToString("0"))
+                    : UiStrings.GameSpeedHintMissing;
             });
         }
 
@@ -681,23 +680,23 @@ namespace ApocalypterSteeringMod.Runtime
             AddAxleFactor(c, "Stiffness", "Higher = firmer ride, less body movement",
                 p => p.SpringFront, (p, v) => p.SpringFront = v,
                 p => p.SpringRear, (p, v) => p.SpringRear = v,
-                VehicleTuner.Readout.SpringForce, Force);
+                VehicleTuner.Readout.SpringForce, UiStrings.Force);
             AddAxleFactor(c, "Ride height", "Suspension travel; higher sits taller",
                 p => p.RideHeightFront, (p, v) => p.RideHeightFront = v,
                 p => p.RideHeightRear, (p, v) => p.RideHeightRear = v,
-                VehicleTuner.Readout.RideHeight, Length);
+                VehicleTuner.Readout.RideHeight, UiStrings.Length);
             AddAxleFactor(c, "Bump damping", "Resists compression over bumps",
                 p => p.BumpFront, (p, v) => p.BumpFront = v,
                 p => p.BumpRear, (p, v) => p.BumpRear = v,
-                VehicleTuner.Readout.BumpRate, Rate);
+                VehicleTuner.Readout.BumpRate, UiStrings.Rate);
             AddAxleFactor(c, "Rebound damping", "Stops the body bouncing back up",
                 p => p.ReboundFront, (p, v) => p.ReboundFront = v,
                 p => p.ReboundRear, (p, v) => p.ReboundRear = v,
-                VehicleTuner.Readout.ReboundRate, Rate);
+                VehicleTuner.Readout.ReboundRate, UiStrings.Rate);
             AddAxleFactor(c, "Anti-roll bar", "Higher = flatter in corners",
                 p => p.ArbFront, (p, v) => p.ArbFront = v,
                 p => p.ArbRear, (p, v) => p.ArbRear = v,
-                VehicleTuner.Readout.ArbForce, Force);
+                VehicleTuner.Readout.ArbForce, UiStrings.Force);
 
             Text status = AddNote(content, "Status", 44f, 14);
             _refreshers.Add(() =>
@@ -707,7 +706,7 @@ namespace ApocalypterSteeringMod.Runtime
                     ? "Suspension tuning is off. Vehicles use their original setup."
                     : n == 0
                         ? "No vehicles found yet. Settings apply as soon as one spawns."
-                        : "Applied to " + n + (n == 1 ? " vehicle." : " vehicles.") + " A vehicle without an anti-roll bar is never given one.";
+                        : VehicleStatus(n, UiStrings.AppliedOneArbFmt, UiStrings.AppliedManyArbFmt);
             });
         }
 
@@ -731,13 +730,13 @@ namespace ApocalypterSteeringMod.Runtime
                     setF(p, v);
                     setR(p, v);
                 }),
-                () => getF(SuspensionSettings.Reference()), Times, null, readoutF);
+                () => getF(SuspensionSettings.Reference()), UiStrings.Times, null, readoutF);
             GameObject front = AddSlider(content, title + " (front)", hint, Limits.FactorMin, Limits.FactorMax,
                 () => getF(SuspensionSettings.Shown), v => EditSuspension(p => setF(p, v)),
-                () => getF(SuspensionSettings.Reference()), Times, null, readoutF);
+                () => getF(SuspensionSettings.Reference()), UiStrings.Times, null, readoutF);
             GameObject rear = AddSlider(content, title + " (rear)", hint, Limits.FactorMin, Limits.FactorMax,
                 () => getR(SuspensionSettings.Shown), v => EditSuspension(p => setR(p, v)),
-                () => getR(SuspensionSettings.Reference()), Times, null, readoutR);
+                () => getR(SuspensionSettings.Reference()), UiStrings.Times, null, readoutR);
 
             _refreshers.Add(() =>
             {
@@ -784,15 +783,15 @@ namespace ApocalypterSteeringMod.Runtime
             AddSlider(c, "Downforce", "How hard the car is pushed onto the road",
                 Limits.AeroScaleMin, Limits.AeroScaleMax,
                 () => AeroSettings.Shown.DownforceScale, v => EditAero(p => p.DownforceScale = v),
-                () => AeroSettings.Reference().DownforceScale, Times);
+                () => AeroSettings.Reference().DownforceScale, UiStrings.Times);
             AddSlider(c, "Drag", "Air resistance (higher = slower top speed)",
                 Limits.AeroScaleMin, Limits.AeroScaleMax,
                 () => AeroSettings.Shown.DragScale, v => EditAero(p => p.DragScale = v),
-                () => AeroSettings.Reference().DragScale, Times);
+                () => AeroSettings.Reference().DragScale, UiStrings.Times);
             AddSlider(c, "Downforce speed range", "How fast the downforce keeps growing",
                 Limits.AeroSpeedScaleMin, Limits.AeroSpeedScaleMax,
                 () => AeroSettings.Shown.MaxDownforceSpeedScale, v => EditAero(p => p.MaxDownforceSpeedScale = v),
-                () => AeroSettings.Reference().MaxDownforceSpeedScale, Times);
+                () => AeroSettings.Reference().MaxDownforceSpeedScale, UiStrings.Times);
 
             Text status = AddNote(content, "Status", 44f, 14);
             _refreshers.Add(() =>
@@ -802,7 +801,7 @@ namespace ApocalypterSteeringMod.Runtime
                     ? "Aero tuning is off. Vehicles use their original aerodynamics."
                     : n == 0
                         ? "No vehicles found yet. Settings apply as soon as one spawns."
-                        : "Applied to " + n + (n == 1 ? " vehicle." : " vehicles.") + " Vehicles without a downforce setup get drag tuning only.";
+                        : VehicleStatus(n, UiStrings.AppliedOneAeroFmt, UiStrings.AppliedManyAeroFmt);
             });
         }
 
@@ -842,23 +841,23 @@ namespace ApocalypterSteeringMod.Runtime
             AddSlider(c, "Brake strength", "How hard the brakes bite",
                 Limits.BrakeTorqueMin, Limits.BrakeTorqueMax,
                 () => BrakesSettings.Shown.TorqueScale, v => EditBrakes(p => p.TorqueScale = v),
-                () => BrakesSettings.Reference().TorqueScale, Times);
+                () => BrakesSettings.Reference().TorqueScale, UiStrings.Times);
             AddSlider(c, "Front brakes", "Front axle bite (brake balance)",
                 Limits.BrakeAxleMin, Limits.BrakeAxleMax,
                 () => BrakesSettings.Shown.FrontBrakeScale, v => EditBrakes(p => p.FrontBrakeScale = v),
-                () => BrakesSettings.Reference().FrontBrakeScale, Times);
+                () => BrakesSettings.Reference().FrontBrakeScale, UiStrings.Times);
             AddSlider(c, "Rear brakes", "Rear axle bite (brake balance)",
                 Limits.BrakeAxleMin, Limits.BrakeAxleMax,
                 () => BrakesSettings.Shown.RearBrakeScale, v => EditBrakes(p => p.RearBrakeScale = v),
-                () => BrakesSettings.Reference().RearBrakeScale, Times);
+                () => BrakesSettings.Reference().RearBrakeScale, UiStrings.Times);
             AddSlider(c, "Handbrake", "Handbrake strength",
                 Limits.BrakeAxleMin, Limits.BrakeAxleMax,
                 () => BrakesSettings.Shown.HandbrakeScale, v => EditBrakes(p => p.HandbrakeScale = v),
-                () => BrakesSettings.Reference().HandbrakeScale, Times);
+                () => BrakesSettings.Reference().HandbrakeScale, UiStrings.Times);
             AddSlider(c, "Pedal response", "Higher = slower brake application",
                 Limits.BrakeTorqueMin, Limits.BrakeTorqueMax,
                 () => BrakesSettings.Shown.ActuationScale, v => EditBrakes(p => p.ActuationScale = v),
-                () => BrakesSettings.Reference().ActuationScale, Times);
+                () => BrakesSettings.Reference().ActuationScale, UiStrings.Times);
 
             Text status = AddNote(content, "Status", 44f, 14);
             _refreshers.Add(() =>
@@ -868,7 +867,7 @@ namespace ApocalypterSteeringMod.Runtime
                     ? "Brake tuning is off. Vehicles use their original brakes."
                     : n == 0
                         ? "No vehicles found yet. Settings apply as soon as one spawns."
-                        : "Applied to " + n + (n == 1 ? " vehicle." : " vehicles.");
+                        : VehicleStatus(n, UiStrings.AppliedOneFmt, UiStrings.AppliedManyFmt);
             });
         }
 
@@ -908,15 +907,15 @@ namespace ApocalypterSteeringMod.Runtime
             AddSlider(c, "Longitudinal grip", "Grip under acceleration and braking",
                 Limits.GripMin, Limits.GripMax,
                 () => GripSettings.Shown.LongitudinalScale, v => EditGrip(p => p.LongitudinalScale = v),
-                () => GripSettings.Reference().LongitudinalScale, Times);
+                () => GripSettings.Reference().LongitudinalScale, UiStrings.Times);
             AddSlider(c, "Lateral grip", "Grip in corners",
                 Limits.GripMin, Limits.GripMax,
                 () => GripSettings.Shown.LateralScale, v => EditGrip(p => p.LateralScale = v),
-                () => GripSettings.Reference().LateralScale, Times);
+                () => GripSettings.Reference().LateralScale, UiStrings.Times);
             AddSlider(c, "Tire stiffness", "How quickly the tires reach peak grip",
                 Limits.GripMin, Limits.GripMax,
                 () => GripSettings.Shown.StiffnessScale, v => EditGrip(p => p.StiffnessScale = v),
-                () => GripSettings.Reference().StiffnessScale, Times);
+                () => GripSettings.Reference().StiffnessScale, UiStrings.Times);
 
             Text status = AddNote(content, "Status", 44f, 14);
             _refreshers.Add(() =>
@@ -926,8 +925,9 @@ namespace ApocalypterSteeringMod.Runtime
                     ? "Grip tuning is off. Vehicles use their original tires."
                     : n == 0
                         ? "No vehicles found yet. Settings apply as soon as one spawns."
-                        : "Applied to " + n + (n == 1 ? " vehicle." : " vehicles.") + " Surface changes (mud, asphalt) still apply on top."
-                          + (_tuner.AnyTyreWear ? " Warning: a vehicle has a tire-wear component that rewrites grip." : "");
+                        : VehicleStatus(n,
+                            _tuner.AnyTyreWear ? UiStrings.AppliedOneGripWarnFmt : UiStrings.AppliedOneGripFmt,
+                            _tuner.AnyTyreWear ? UiStrings.AppliedManyGripWarnFmt : UiStrings.AppliedManyGripFmt);
             });
         }
 
@@ -967,35 +967,35 @@ namespace ApocalypterSteeringMod.Runtime
             AddSlider(c, "Engine power", "How much power the engine makes",
                 Limits.PowerMin, Limits.PowerMax,
                 () => DrivetrainSettings.Shown.PowerScale, v => EditDrivetrain(p => p.PowerScale = v),
-                () => DrivetrainSettings.Reference().PowerScale, Times);
+                () => DrivetrainSettings.Reference().PowerScale, UiStrings.Times);
             AddSlider(c, "Rev limit", "The engine's redline",
                 Limits.RevLimitMin, Limits.RevLimitMax,
                 () => DrivetrainSettings.Shown.RevLimiterScale, v => EditDrivetrain(p => p.RevLimiterScale = v),
-                () => DrivetrainSettings.Reference().RevLimiterScale, Times);
+                () => DrivetrainSettings.Reference().RevLimiterScale, UiStrings.Times);
             AddSlider(c, "Engine braking", "Off-throttle engine drag",
                 Limits.FactorMin, Limits.FactorMax,
                 () => DrivetrainSettings.Shown.LossScale, v => EditDrivetrain(p => p.LossScale = v),
-                () => DrivetrainSettings.Reference().LossScale, Times);
+                () => DrivetrainSettings.Reference().LossScale, UiStrings.Times);
             AddSlider(c, "Turbo / boost", "Forced induction gain (inert on electrics)",
                 Limits.FactorMin, Limits.FactorMax,
                 () => DrivetrainSettings.Shown.BoostScale, v => EditDrivetrain(p => p.BoostScale = v),
-                () => DrivetrainSettings.Reference().BoostScale, Times);
+                () => DrivetrainSettings.Reference().BoostScale, UiStrings.Times);
             AddSlider(c, "Final drive", "Overall gearing (higher = shorter)",
                 Limits.FinalDriveMin, Limits.FinalDriveMax,
                 () => DrivetrainSettings.Shown.FinalDriveScale, v => EditDrivetrain(p => p.FinalDriveScale = v),
-                () => DrivetrainSettings.Reference().FinalDriveScale, Times);
+                () => DrivetrainSettings.Reference().FinalDriveScale, UiStrings.Times);
             AddSlider(c, "Upshift RPM", "Where the auto box shifts up (kept below redline)",
                 Limits.ShiftRpmMin, Limits.ShiftRpmMax,
                 () => DrivetrainSettings.Shown.UpshiftScale, v => EditDrivetrain(p => p.UpshiftScale = v),
-                () => DrivetrainSettings.Reference().UpshiftScale, Times);
+                () => DrivetrainSettings.Reference().UpshiftScale, UiStrings.Times);
             AddSlider(c, "Downshift RPM", "Where the auto box shifts down",
                 Limits.ShiftRpmMin, Limits.ShiftRpmMax,
                 () => DrivetrainSettings.Shown.DownshiftScale, v => EditDrivetrain(p => p.DownshiftScale = v),
-                () => DrivetrainSettings.Reference().DownshiftScale, Times);
+                () => DrivetrainSettings.Reference().DownshiftScale, UiStrings.Times);
             AddSlider(c, "Shift time", "How long a gear change takes",
                 Limits.FactorMin, Limits.FactorMax,
                 () => DrivetrainSettings.Shown.ShiftDurationScale, v => EditDrivetrain(p => p.ShiftDurationScale = v),
-                () => DrivetrainSettings.Reference().ShiftDurationScale, Times);
+                () => DrivetrainSettings.Reference().ShiftDurationScale, UiStrings.Times);
 
             AddSectionTitle(c, "Differentials");
             AddPresetButtons(c, "DiffFront", DiffModeLabels.Length, DiffModeLabels.Length,
@@ -1012,8 +1012,8 @@ namespace ApocalypterSteeringMod.Runtime
             Text diffFrontNote = AddNote(c, "DiffFrontNote", 26f, 13);
             _refreshers.Add(() =>
             {
-                diffFrontNote.text = "Front axle: " + DiffModeLabels[DiffModeIndex(DrivetrainSettings.Shown.DiffFrontMode)]
-                    + ". Axles are found from the wheels each diff drives; an axle without a diff keeps its stock setup.";
+                diffFrontNote.text = string.Format(UiStrings.FrontAxleFmt,
+                    DiffModeLabels[DiffModeIndex(DrivetrainSettings.Shown.DiffFrontMode)]);
             });
             AddPresetButtons(c, "DiffRear", DiffModeLabels.Length, DiffModeLabels.Length,
                 i => DiffModeLabels[i],
@@ -1028,17 +1028,17 @@ namespace ApocalypterSteeringMod.Runtime
             Text diffRearNote = AddNote(c, "DiffRearNote", 26f, 13);
             _refreshers.Add(() =>
             {
-                diffRearNote.text = "Rear axle: " + DiffModeLabels[DiffModeIndex(DrivetrainSettings.Shown.DiffRearMode)]
-                    + ". Centre (AWD) diffs always keep their stock type.";
+                diffRearNote.text = string.Format(UiStrings.RearAxleFmt,
+                    DiffModeLabels[DiffModeIndex(DrivetrainSettings.Shown.DiffRearMode)]);
             });
             AddSlider(c, "Diff stiffness", "How hard the diff locks",
                 Limits.DiffScaleMin, Limits.DiffScaleMax,
                 () => DrivetrainSettings.Shown.DiffStiffnessScale, v => EditDrivetrain(p => p.DiffStiffnessScale = v),
-                () => DrivetrainSettings.Reference().DiffStiffnessScale, Times);
+                () => DrivetrainSettings.Reference().DiffStiffnessScale, UiStrings.Times);
             AddSlider(c, "Diff bias (AWD)", "Front/rear split of a centre diff only",
                 Limits.DiffScaleMin, Limits.DiffScaleMax,
                 () => DrivetrainSettings.Shown.DiffBiasScale, v => EditDrivetrain(p => p.DiffBiasScale = v),
-                () => DrivetrainSettings.Reference().DiffBiasScale, Times);
+                () => DrivetrainSettings.Reference().DiffBiasScale, UiStrings.Times);
 
             Text status = AddNote(content, "Status", 44f, 14);
             _refreshers.Add(() =>
@@ -1048,7 +1048,7 @@ namespace ApocalypterSteeringMod.Runtime
                     ? "Drivetrain tuning is off. Vehicles use their original engine and gearing."
                     : n == 0
                         ? "No vehicles found yet. Settings apply as soon as one spawns."
-                        : "Applied to " + n + (n == 1 ? " vehicle." : " vehicles.") + " The engine sound's max RPM follows the stock value.";
+                        : VehicleStatus(n, UiStrings.AppliedOneDtFmt, UiStrings.AppliedManyDtFmt);
             });
         }
 
@@ -1117,12 +1117,12 @@ namespace ApocalypterSteeringMod.Runtime
             AddSlider(c, "ABS cutoff speed", "No ABS below this speed",
                 Limits.CutoffSpeedMin, Limits.CutoffSpeedMax,
                 () => AssistsSettings.Shown.AbsCutoffSpeed, v => EditAssists(p => p.AbsCutoffSpeed = v),
-                () => AssistsSettings.Reference().AbsCutoffSpeed, v => v.ToString("0.0") + " m/s",
+                () => AssistsSettings.Reference().AbsCutoffSpeed, v => UiStrings.SpeedMps(v),
                 () => AssistsSettings.Shown.AbsEnabled);
             AddSlider(c, "ABS release force", "Brake strength while releasing",
                 Limits.CutMultMin, Limits.CutMultMax,
                 () => AssistsSettings.Shown.AbsCutMultiplier, v => EditAssists(p => p.AbsCutMultiplier = v),
-                () => AssistsSettings.Reference().AbsCutMultiplier, Percent,
+                () => AssistsSettings.Reference().AbsCutMultiplier, UiStrings.Percent,
                 () => AssistsSettings.Shown.AbsEnabled);
 
             AddSectionTitle(c, "TCS");
@@ -1136,12 +1136,12 @@ namespace ApocalypterSteeringMod.Runtime
             AddSlider(c, "TCS cutoff speed", "No TCS below this speed",
                 Limits.CutoffSpeedMin, Limits.CutoffSpeedMax,
                 () => AssistsSettings.Shown.TcsCutoffSpeed, v => EditAssists(p => p.TcsCutoffSpeed = v),
-                () => AssistsSettings.Reference().TcsCutoffSpeed, v => v.ToString("0.0") + " m/s",
+                () => AssistsSettings.Reference().TcsCutoffSpeed, v => UiStrings.SpeedMps(v),
                 () => AssistsSettings.Shown.TcsEnabled);
             AddSlider(c, "TCS cut strength", "Power allowed while spinning",
                 Limits.CutMultMin, Limits.CutMultMax,
                 () => AssistsSettings.Shown.TcsCutMultiplier, v => EditAssists(p => p.TcsCutMultiplier = v),
-                () => AssistsSettings.Reference().TcsCutMultiplier, Percent,
+                () => AssistsSettings.Reference().TcsCutMultiplier, UiStrings.Percent,
                 () => AssistsSettings.Shown.TcsEnabled);
 
             Text status = AddNote(content, "Status", 44f, 14);
@@ -1152,7 +1152,7 @@ namespace ApocalypterSteeringMod.Runtime
                     ? "Assists are off. The game's own ABS/TCS still work if a vehicle has them."
                     : n == 0
                         ? "No vehicles found yet. Assists attach as soon as one spawns."
-                        : "Active on " + n + (n == 1 ? " vehicle." : " vehicles.");
+                        : VehicleStatus(n, UiStrings.ActiveOnOneFmt, UiStrings.ActiveOnManyFmt);
             });
         }
 

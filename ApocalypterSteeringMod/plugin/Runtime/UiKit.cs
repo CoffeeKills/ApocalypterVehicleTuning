@@ -160,7 +160,9 @@ namespace ApocalypterSteeringMod.Runtime
             t.alignment = anchor;
             t.horizontalOverflow = wrap ? HorizontalWrapMode.Wrap : HorizontalWrapMode.Overflow;
             t.verticalOverflow = VerticalWrapMode.Overflow;
-            t.supportRichText = false;
+            // Rich text on: ApocaLanguage translations may carry rich-text tags.
+            // Our own strings contain no angle brackets, so this costs nothing.
+            t.supportRichText = true;
             t.raycastTarget = false;
             t.text = text;
             return t;
