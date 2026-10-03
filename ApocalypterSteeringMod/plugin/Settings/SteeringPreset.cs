@@ -99,20 +99,21 @@ namespace ApocalypterSteeringMod.Settings
                 },
                 new SteeringPreset
                 {
-                    Name = "Truck-sim",
-                    Label = "Truck",
-                    Description = "Slow, heavy and stable. Gentle inputs and much less lock at speed.",
-                    RateMultiplier = 0.7f,
+                    Name = "Euro Truck",
+                    Label = "Euro Truck",
+                    Description = "Heavy highway-truck feel: slow steering, soft response and very little lock at speed.",
+                    RateMultiplier = 0.5f,
                     CurveOverride = true,
                     SpeedCurve = new AnimationCurve(
                         new Keyframe(0f, 1f),
-                        new Keyframe(0.25f, 0.7f),
-                        new Keyframe(1f, 0.25f)),
-                    SmoothingScale = 1.4f,
-                    SlipAngleDeg = 7f,
-                    OppositeLockBoost = 1.25f,
+                        new Keyframe(0.2f, 0.6f),
+                        new Keyframe(0.5f, 0.3f),
+                        new Keyframe(1f, 0.12f)),
+                    SmoothingScale = 1.7f,
+                    SlipAngleDeg = 6.5f,
+                    OppositeLockBoost = 1f,
                     LinearityOverride = true,
-                    LinearityExponent = 1.15f
+                    LinearityExponent = 1.35f
                 },
                 new SteeringPreset
                 {

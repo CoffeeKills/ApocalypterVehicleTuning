@@ -11,7 +11,8 @@ namespace ApocalypterSteeringMod.Settings
     {
         public static readonly PresetBook<SteeringPreset> Book = new PresetBook<SteeringPreset>(
             SteeringPreset.Presets, SteeringPreset.Vanilla, SteeringPreset.Custom,
-            SteeringPreset.Defaults, SteeringPreset.Custom);
+            SteeringPreset.Defaults, SteeringPreset.Custom,
+            name => name == "Truck-sim" ? "Euro Truck" : name);
 
         // v3.2: opt-in — the mod changes nothing until the player enables it.
         public static bool Enabled = false;

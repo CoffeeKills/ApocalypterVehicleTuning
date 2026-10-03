@@ -70,6 +70,8 @@ namespace ApocalypterSteeringMod.Persistence
             _assistsTcsThr, _assistsTcsCut, _assistsTcsMult;
 
         private static ConfigEntry<string> _toggleKey;
+        // Read by Apocasetter via Chainloader (not wired to OnSettingChanged — we never read it).
+        private static ConfigEntry<bool> _apocasetter;
 
         public static string ToggleKeyString
         {
@@ -101,7 +103,10 @@ namespace ApocalypterSteeringMod.Persistence
 
             _toggleKey = config.Bind("UI", "ToggleKey", "F7",
                 "Hotkey that opens/closes the tuning panel (a Unity KeyCode name, e.g. F7, F8, Home). Restart the game after changing.");
+            _apocasetter = config.Bind("General", "Apocasetter", true,
+                "Show this mod in the Apocasetter Mods menu (requires Apocasetter installed).");
 
+            MigrateLegacySteeringPreset();
             PushAllToRuntime();
             MigrateLegacySuspension();
 
@@ -116,7 +121,7 @@ namespace ApocalypterSteeringMod.Persistence
             _steerEnabled = _config.Bind("Steering", "Enabled", false,
                 "Master switch for the mod's steering (opt-in).");
             _steerPreset = _config.Bind("Steering", "Preset", "Custom",
-                "Active steering preset: Vanilla, GTA-style Keyboard, Truck-sim, Sim/Race, Drift, Custom.");
+                "Active steering preset: Vanilla, GTA-style Keyboard, Euro Truck, Sim/Race, Drift, Custom.");
             _matchGameSteeringSpeed = _config.Bind("Steering", "MatchGameSteeringSpeed", true,
                 "Scale the steering rate with the game's own steering speed setting.");
             _steerBasedOn = _config.Bind("Steering.Custom", "BasedOn", "",
@@ -271,6 +276,33 @@ namespace ApocalypterSteeringMod.Persistence
         }
 
         // ---------------------------------------------------------------- migration
+
+        /// <summary>
+        /// v0.3.0: "Truck-sim" was replaced by the "Euro Truck" preset. The runtime
+        /// Book already maps the old name; also rewrite the entries so the file stops
+        /// carrying the dead name. The BasedOn rewrite matters: RestoreBaseCurve
+        /// needs a resolvable name or Custom silently loses its speed curve.
+        /// </summary>
+        private static void MigrateLegacySteeringPreset()
+        {
+            bool wasSyncing = _syncing;
+            _syncing = true;
+            try
+            {
+                if (string.Equals(_steerPreset.Value, "Truck-sim", StringComparison.Ordinal))
+                {
+                    _steerPreset.Value = "Euro Truck";
+                }
+                if (string.Equals(_steerBasedOn.Value, "Truck-sim", StringComparison.Ordinal))
+                {
+                    _steerBasedOn.Value = "Euro Truck";
+                }
+            }
+            finally
+            {
+                _syncing = wasSyncing;
+            }
+        }
 
         /// <summary>
         /// One-time v3.1 -> v3.2 migration: fold the legacy [Suspension.User]
