@@ -1,89 +1,76 @@
-# Plan: ApocalypterSteeringMod v3 — In-Game Settings Panel, Steering Presets, Suspension Tuning
+# Plan: ApocalypterSteeringMod v3.2 — Suspension Slider Rework + Vehicle Tuning Expansion
 
 ## Context
 
-The user's BepInEx steering mod for "Apocalypter" (Unity 2020.3, NWH Vehicle Physics 2, BepInEx 5.4.23.5) currently patches `Steering.CalculateSteerAngles` with a traction-edge clamp whose tuning is hardcoded. The user wants: (1) all settings customizable in-game, (2) realistic suspension tuning, (3) steering presets (GTA-style keyboard, Truck-sim, Sim/Race, Drift, Vanilla, Custom). User decisions: **hotkey-only overlay panel** (not injected into the FSM-driven pause menu), **wheel support deferred** (design stays input-agnostic).
+v3.1.0 (reviewed, tested, installed) works. The user wants v3.2:
+1. **Suspension sliders like steering**: sliders show the active preset's factor values; moving one copies preset → Custom ("Custom (Race)") with BasedOn tracking; per-slider Reset returns to origin. The separate user-multiplier layer is removed (preset factor IS the slider value).
+2. **Absolute readouts** next to factors (e.g. "×1.18 / 38 000 N") computed from tracked vehicles' stock values (user chose multipliers + readout).
+3. **New categories, presets everywhere**: Aero, Brakes, Grip, Drivetrain, Assists (ABS + TCS) — each with master switch + presets + sliders (user chose full scope + presets).
+4. **Steering.Enabled default = false** (opt-in; existing cfg files keep their saved values — BepInEx file-value-wins).
 
-Key architecture facts (verified from decompiled source + game data):
-- Game has no compiled menu code — pause menu is PlayMaker FSM + scene uGUI; nothing to patch. Panel = own overlay canvas.
-- Game FSMs write `VehicleController.input.*` every frame via PlayMaker SetProperty reflection; NWH input providers unused. Mod must never write `vc.input.Steering` (overwritten next frame) — only post-process what it reads.
-- Game's native `steeringspeed` setting lives in `SaveSettings.es3` (ES3, read-only import via `ES3.Load<T>(key, filePath, defaultValue)` — ES3.cs:352, verified read-only; game's `ES3SettingsMod` mutates shared static `ES3Settings.defaultSettings.path`, so always pass explicit absolute path, never `ES3.Save`).
-- Suspension setters are abstract members of `WheelUAPI` (NWH.Common `WheelUAPI.cs:41-53`): `SpringMaxForce`, `SpringMaxLength`, `DamperBumpRate`, `DamperReboundRate` — live-settable per wheel, **no cast needed**. Per-axle ARB: `WheelGroup.antiRollBarForce` (public field). Digressive damper params: intentionally untouched.
-- UI factory pattern: `CameraMovementRuntimeCreator.cs` (ScreenSpaceOverlay canvas, sliders/toggles/buttons, string-keyed dicts, cursor unlock). Fonts: TMP `"Fonts & Materials/LiberationSans SDF"` with legacy-Arial fallback. Legacy Input enabled (game's own InputManager uses it) → `Input.GetKeyDown(F7)` works. Avoid F11/F12/P/Return (taken).
+All API claims verified against the decompiled source: `ManagerVehicleComponent.AddAndOnboardNewComponent` (ManagerVehicleComponent.cs:30), AeroModule fields (dimensions/frontalCd/sideCd/simulateDrag/simulateDownforce/maxDownforceSpeed/downforcePoints), `Brakes.brakeTorqueModifiers` (List<BrakeTorqueModifier> delegate), `EngineComponent.powerModifiers` (List<PowerModifier>), `TransmissionComponent.UpshiftRPM/DownshiftRPM` properties, `WheelUAPI.LongitudinalFrictionGrip/LateralFrictionGrip` abstract, `DiffFrontType` indexes `differentials[0]` unguarded (VehicleController.cs:158-166) — **tuner must use `powertrain.differentials[i]` with Count guards, never the convenience properties**.
 
-## File structure (project `ApocalypterSteeringMod`, version → 3.0.0, assembly rename `SteeringFix` → `ApocalypterSteeringMod`; install note: delete old `BepInEx\plugins\SteeringFix.dll` to avoid double-patching)
+## Architecture (three structural changes)
 
+### 1. `Settings/PresetBook.cs` (new) — generic preset semantics for all 7 categories
+```csharp
+public interface ITunablePreset { string Name; string Label; string BasedOn; bool CanEdit; void CopyValuesFrom(ITunablePreset src); }
+public sealed class PresetBook<T> where T : class, ITunablePreset {
+    T[] Presets; T Identity; T Custom; T Defaults; T NotFound; T Active;
+    Func<string,string> legacyName (optional, e.g. Street→Stock);
+    void SetByName(string); void Select(T); T BeginEdit(); T Reference(); T FindBuiltIn(string); void ResetCustom();
+}
 ```
-Plugin.cs                              — slim entry: ModConfig.Load() → GameSettingsReader.Read() → PatchAll → persistent runtime GO (DontDestroyOnLoad) with SuspensionApplier + SettingsPanelManager
-PluginInfo.cs                          — GUID (unchanged), name, version
-Settings\SteeringPreset.cs             — data class + static factory (6 presets, static readonly AnimationCurves)
-Settings\SteeringSettings.cs           — static runtime holder (Enabled, ActivePreset, MatchGameSteeringSpeed; setters mutating the Custom instance)
-Settings\SuspensionPreset.cs           — data class + static factory (4 presets, absolute per-axle baselines)
-Settings\SuspensionSettings.cs         — static runtime holder (Enabled, ActivePreset, 10 user multipliers)
-Persistence\ModConfig.cs               — BepInEx ConfigFile binding, load/save, SettingChanged → static SettingsChanged event
-Game\GameSettingsReader.cs             — read-only ES3 import of steeringspeed/smoothinput/normalizeinput (try/catch, absolute path)
-Patching\TractionEdgeSteeringPatch.cs  — existing patch moved from Plugin.cs, parameterized (allocation-free)
-Runtime\SuspensionApplier.cs           — MonoBehaviour: vehicle discovery, baseline cache, apply/restore
-Runtime\SettingsPanelManager.cs        — F7 hotkey, panel lifecycle, cursor/EventSystem handling
-Runtime\SettingsPanelBuilder.cs        — static uGUI factory (canvas, cycle buttons, sliders, toggles)
-```
+- `BeginEdit()`: Custom active → Custom; Identity with `CanEdit == false` (steering Vanilla only) → null; else copy active into Custom (BasedOn = active.Name, "" when copying Identity), return Custom. Uniform across all categories.
+- `Reference()`: built-in → itself; Custom → FindBuiltIn(BasedOn) ?? Defaults.
+- `SteeringPreset`/`SteeringSettings` keep their public surface but delegate to a book (`ActivePreset` property over `Book.Active`; ResetAll sets Enabled=false). Patch untouched.
+- `SuspensionPreset` gains Custom (all 1.0) + Defaults + BasedOn; 5 existing factor tables unchanged; Presets = {Stock, Comfort, Sport, Off-road, Race, Custom}. `SuspensionSettings`: delete the 10 user multipliers; `Spring(front)` etc. return the active preset factor directly; `LinkRearToFront()` must `BeginEdit()` first; legacy "Street"→"Stock" mapping kept.
 
-## Settings model
+### 2. New per-category preset/settings classes (each `XPreset.cs` + `XSettings.cs`, all factors on captured stock)
+- **AeroPreset**: DownforceScale (0–2), DragScale (0–2), MaxDownforceSpeedScale (0.5–2). Presets: Stock, Street (0.8/1.0/1.0), Sport (1.2/1.1/1.1), Off-road (0.6/1.05/0.85), Race (1.6/1.35/1.25), Custom.
+- **BrakesPreset**: TorqueScale (0.5–2), FrontBrakeScale/RearBrakeScale (0–2), HandbrakeScale (0–2), ActuationScale (0.5–2). Presets: Stock, Sport (1.1/1.1/1.05/1.0/0.9), Race (1.3/1.15/1.1/0.8/0.75), Off-road (1.05/0.9/0.9/1.2/1.1), Drift (1.0/0.95/0.95/1.6/1.0), Custom.
+- **GripPreset**: LongitudinalScale/LateralScale/StiffnessScale (0.25–2). Presets: Stock, Sport (1.05/1.1/1.0), Race (1.1/1.25/1.1), Off-road (0.8/0.85/0.8), Drift (0.95/0.55/0.8), Custom.
+- **DrivetrainPreset**: PowerScale (0.5–2.5), RevLimiterScale (0.8–1.2), LossScale, BoostScale, FinalDriveScale (0.7–1.5), UpshiftScale/DownshiftScale (0.8–1.2), ShiftDurationScale, DiffFrontMode/DiffRearMode (enum DiffMode {Stock, Open, Locked, LimitedSlip}), DiffStiffnessScale, DiffBiasScale. Presets: Stock, Street, Off-road (Locked front/LSD rear), Sport, Race (both Locked), Drift (rear Locked, front Open), Custom.
+- **AssistsPreset** (delegate-only, no vehicle fields): AbsEnabled/AbsSlipThreshold (0.02–0.5, 0.1)/AbsCutoffSpeed (0–5, 1)/AbsCutMultiplier (0–1, 0.01); Tcs* same (defaults 0.1/2/0.01). Presets: Off (identity), Standard (both on, NWH defaults), Sport (0.12/0.08), Off-road (ABS only), Race (ABS only), Custom.
+- `Limits.cs`: add the factor/scale ranges above (single source for config AcceptableValueRange + sliders).
 
-### Steering presets (steering patch knobs)
-Fields: `IsVanilla`, `RateMultiplier` (× degreesPerSecondLimit), `CurveOverride`+`SpeedCurve` (evaluated at Speed/50, vanilla normalization), `SpeedCurveScale` (× vehicle curve when no override), `SmoothingScale` (× speedSensitiveSmoothingCurve), `TractionClampEnabled`, `SlipAngleDeg` (2–15, replaces 8.5 const), `OppositeLockBoost` (1.0–3.0), `LinearityOverride`+`LinearityExponent` (pow(|input|,exp)).
+### 3. `Runtime/VehicleTuner.cs` replaces `SuspensionApplier.cs`
+Single vehicle registry + one capture pass (mean-Z axle detection, now also reading grip/brake/drivetrain/aero baselines, each system null-guarded independently); per-system `ApplyX/RestoreX` driven by per-category `Enabled` with applied-flags; allocation-free hot paths; 2 s unscaled scan + `ReapplyNow` + cheap `ApplyLive`; `OnDestroy → RestoreAll`; records kept until vehicle destroyed. Files: `VehicleTuner.cs` (core), `VehicleTuner.Systems.cs`, `VehicleTuner.Assists.cs`.
+- **Aero**: use the real `AerodynamicsModule` — find in `vc.moduleManager.Components`; absent → onboard via `AddAndOnboardNewComponent(new AerodynamicsModule())` + `VC_Enable(false)` (module stays in Components for reuse; `FillComponentList` only re-scans when list null — no duplicates). Deep-copy fields+points as baseline; apply Cd/points scaled; **no downforce-point synthesis** (vehicles without points get drag tuning only — readout shows "—"); restore fields + `VC_Disable` if onboarded.
+- **Brakes**: `maxTorque ×`, per-group `brakeCoefficient` (clamp 0..1) / `handbrakeCoefficient` (clamp 0..2) ×, `actuationTime ×`.
+- **Grip**: per-wheel `LongitudinalFrictionGrip/LateralFrictionGrip` (+Stiffness pair) ×; GroundDetection overwrites FrictionPreset/rolling resistance only (not these — verified). If `TyreWear` MonoBehaviour present on a wheel (never referenced by game code, but possible on prefabs), dim grip tab with note (cheap detection at capture).
+- **Drivetrain**: apply `revLimiterRPM` first, then shift RPMs; `engineLossPercent` clamp 0..1; `powerGainMultiplier` clamp 1..3 (inert on EVs — hint note); diffs via `powertrain.differentials[i]` with Count guard (NEVER `vc.DiffFrontType` — unguarded indexer, verified).
+- **Assists**: register once per vehicle (flag-guarded, same delegate instance reused) into `vc.brakes.brakeTorqueModifiers` / `vc.powertrain.engine.powerModifiers`; delegate bodies read live preset fields each tick (allocation-free, mirror NWH's ABSModule/TCSModule slip-check semantics with cutoff speed + cut multiplier); removal on disable via `list.Remove(instance)`; no removal needed on vehicle destruction (whole cycle unreachable when record dropped).
+- **Readout API**: `MeanBaseline(Readout kind, bool front)` (mean of tracked vehicles' axle stock values; 0 when none) + `TrackedVehicles` — panel shows "×1.18" / "38 000 N".
 
-| Preset | Rate | Speed curve | Smooth | Clamp/Slip | OppLock | Linearity |
-|---|---|---|---|---|---|---|
-| GTA-style Keyboard | 1.6 | (0,1)(0.35,0.45)(1,0.15) | 0.8 | ON / 8.5° | 1.75 | pow 1.3 |
-| Truck-sim | 0.7 | (0,1)(0.25,0.7)(1,0.25) | 1.4 | ON / 7.0° | 1.25 | pow 1.15 |
-| Sim/Race | 1.0 | (0,1)(0.5,0.35)(1,0.22) | 1.0 | ON / 8.5° | 1.5 | vehicle curve |
-| Drift | 1.4 | (0,1)(0.4,0.55)(1,0.3) | 0.6 | ON / 12.0° | 2.0 | pow 1.0 |
-| Vanilla | — (IsVanilla=true → prefix returns true, stock NWH) | | | | | |
-| **Custom (default)** | 1.0 | vehicle curve × 1.0 | 1.0 | ON / 8.5° | 1.75 | vehicle curve |
+## Config schema + migration (ModConfig.cs)
 
-Custom defaults reproduce v2.0.0 exactly (no change for existing users). Steering master `Enabled = true` default.
+- New sections: `Aero`, `Brakes`, `Grip`, `Drivetrain`, `Assists` (each `Enabled=false` + `Preset="Stock"/"Off"` + `Custom.*` with BasedOn + factor keys, ranges from Limits); `Suspension.Custom.*` (10 factor keys 0.5–2, BasedOn); `Steering.Enabled` default **false**; `UI.ToggleKey` unchanged. Keep bind/wire/push/save trio pattern, `_syncing` guard, one write per save.
+- **v3.1 migration (one-time)**: after PushAllToRuntime — (1) `Suspension.Preset="Street"`→"Stock" (kept); (2) if any of the 10 bound legacy `Suspension.User` values ≠ 1.0: fold `Custom_i = Clamp(presetFactor_i × user_i, 0.5, 2)`, `BasedOn` = old preset name if built-in non-Stock else "", ActivePreset = Custom, write into Suspension.Custom entries; (3) always `config.Remove("Suspension.User", key)` ×10 → fold is one-time by construction (next load binds defaults 1.0 → no-op). Tests cover no-double-fold, all-1.0 skip, Stock+user fold.
+- `Save()`/`PushAllToRuntime()` per-category private helpers; steering keeps `RestoreBaseCurve()`.
 
-`MatchGameSteeringSpeed` (default true): effective rate ×= `Clamp(gameSteeringspeed/50, 0.35, 2.5)` — respects the player's in-game steering-speed choice proportionally.
+## UI (SettingsPanel.cs, 7 tabs in 800×880)
 
-### Suspension presets (absolute per-axle baselines)
-Fields per preset: Spring F/R (N/m), RideHeight F/R (m), Bump F/R, Rebound F/R (N·s/m), Arb F/R. Presets: **Comfort** 30k/27k, 0.34/0.33, 2.8k/2.5k, 4.2k/3.8k, 8k/6k; **Street (default)** 42k/38k, 0.30/0.29, 3.8k/3.4k, 5.7k/5.1k, 14k/10k; **Off-road** 26k/24k, 0.40/0.39, 2.2k/2.0k, 3.3k/3.0k, 5k/3.5k; **Race** 65k/58k, 0.26/0.25, 5.5k/4.9k, 8.2k/7.4k, 24k/18k.
-
-User multipliers: 10 sliders (0.5–2.0, default 1.0), front/rear split for spring, ride height, bump, rebound, ARB.
-
-**Apply formula: `effective = presetAbsolute[axle] × userSlider[axle]`** (presets set correct absolutes; sliders scale on top; vehicle originals cached only for restore-on-disable). Suspension master **default OFF** (opt-in, preserves stock feel on upgrade).
-
-## Persistence
-BepInEx ConfigFile (NOT ES3 — avoids corrupting the game's save file whose shared `ES3Settings.defaultSettings.path` the game mutates). Sections: `[Steering]`, `[Steering.Custom]`, `[Suspension]`, `[Suspension.User]`, `[UI]` (`ToggleKey="F7"`). ConfigEntries bound on load, pushed into runtime holders; `SettingChanged` → re-apply + static `SettingsChanged` event (panel + applier subscribe). Save on panel close / Plugin.Disable / Application.quitting.
-
-Game settings import: `ES3.Load<T>(key, absolutePathToSaveSettings.es3, default)` in try/catch, at startup + panel "Reload" button. No `ES3.Save` anywhere in the mod.
-
-## Steering patch rework
-Keep patch permanently applied; prefix guard: `if (!SteeringSettings.Enabled) return true;` then `if (ActivePreset == null || IsVanilla) return true;` (a branch, not runtime patch/unpatch — fragile). Snapshot preset reference into a local once per call. Pipeline identical to current v2 code with parameterization: preset curve/scale → linearity → traction clamp (preset slip angle, only if enabled) → SmoothDamp (×SmoothingScale) → MoveTowards (`degreesPerSecondLimit × RateMultiplier × gameSteeringSpeedFactor × [OppositeLockBoost]`). Allocation-free: no LINQ/strings/closures/boxing in the prefix; static curves.
-
-## Suspension applier
-MonoBehaviour on the runtime GO. Every 2 s (Update, scaled) + on SettingsChanged + on panel open: `Object.FindObjectsOfType<VehicleController>()`; per vehicle cache originals (keyed by WheelUAPI instance: 4 values + `IsFront = InverseTransformPoint(wheelPos).z > 0`; per WheelGroup: original ARB). Prune Unity-null records. Apply idempotently to every known vehicle (self-heals external resets); when master OFF, restore originals once and skip. `OnDestroy` → RestoreAll. Digressive damper params untouched (comment explains why).
-
-## Settings UI
-F7 (config-editable, F8/F9 fallback) toggles panel; works while paused (Update, no timeScale changes). On open: cursor lock none + visible (restore prior on close); EventSystem find-or-create (`StandaloneInputModule`; remember+restore enabled state; never duplicate). Canvas: ScreenSpaceOverlay + CanvasScaler (1920×1080, match 0.5) + GraphicRaycaster; panel ~460×720 right-center, dark bg, ScrollRect content. Fonts: TMP LiberationSans SDF via Resources.Load (try/catch) → legacy Arial fallback.
-
-Layout: title + hint → **STEERING**: master toggle, preset **cycle button** (`<  Custom  >` — no dropdown: TMP_Dropdown needs template assets that don't exist as loadable resources), Custom sliders (rate/smoothing/curve scale/traction toggle/slip/opp-lock/linearity toggle+exponent) or read-only summary for other presets, MatchGameSteeringSpeed toggle → **SUSPENSION**: master toggle, preset cycle button, 5 rows × (front slider, rear slider, value labels, per-row reset): spring/ride height/bump/rebound/ARB → **GAME SETTINGS**: read-only steeringspeed/smoothinput/normalizeinput + Reload button. Slider onValueChanged → write runtime holder immediately (live apply) + refresh label; suspension changes → `SuspensionApplier.ReapplyAll()`. Config hot-reload refreshes widgets when panel open.
-
-## Build changes (csproj)
-Add references (all from game's Managed, `Private=false`): `UnityEngine.UIModule.dll`, `UnityEngine.UI.dll`, `UnityEngine.InputLegacyModule.dll`, `UnityEngine.TextRenderingModule.dll`, `Unity.TextMeshPro.dll`, `Assembly-CSharp-firstpass.dll`. Not needed: Unity.InputSystem. Rename `<AssemblyName>` → `ApocalypterSteeringMod`.
+- Tabs: Steering, Suspension, Aero, Brakes, Grip, Drivetrain, Assists — arrays sized 7, buttons at i/7..(i+1)/7, font 16. Footer reset: `Action[]` + `string[]` per tab (two-click arm pattern kept); each reset also `_tuner.ReapplyNow()` where vehicle fields are written.
+- `SettingsPanel.Create(VehicleTuner tuner, Action requestClose)`; `_applier`→`_tuner`.
+- Shared `PresetButtonLabel<T>` ("Custom (Race)" when BasedOn set). `AddSlider` gains optional readout formatter: value box 86→150 px, second Text line 12 px muted (factor top, absolute bottom). Formats: "×1.18", "38 000 N", "3 400 N·s/m", "30 cm".
+- Suspension tab rewritten: sliders get/set via `SuspensionSettings.Shown.<Field>` / `BeginEdit()` + `ApplyLive()`, reference = `Reference().<Field>`, readout = `_tuner.MeanBaseline(kind, front) × factor`. BeginEdit never null for suspension → sliders work on Stock too (copies with BasedOn=""). SplitFrontRear kept.
+- New tabs follow the same recipe (master → presets → description → sliders → status note). Drivetrain adds two 4-button diff-mode grids (Stock/Open/Locked/LSD). Assists: ABS + TCS sections with switches + threshold/cutoff/cut-multiplier sliders.
+- Single `_refreshers` list runs all tabs (accepted; per-tab lists are the documented fallback if it ever matters).
 
 ## Verification
-Without the game: `dotnet build -c Release` zero errors; grep prefix/applier paths for allocations (LINQ/ToString/closures); confirm no `ES3.Save` anywhere; confirm patch target unchanged.
-In-game checklist (user): BepInEx log shows plugin + game-settings import; F7 opens/closes panel with cursor freed/restored; panel works while paused; cycle all 6 steering presets while driving — **Vanilla must feel exactly like unmodded game** (key regression test), Custom ≈ old v2.0.0; traction clamp + opposite lock catch behavior; suspension presets visibly change ride (Street stiff → Off-road soft/tall → Race stiff/low), sliders scale proportionally, master OFF restores stock bounce; switch vehicles → applied within 2 s, no errors on despawn; game's own steering-speed change + Reload shows new value and rate follows when MatchGameSteeringSpeed on; restart → settings persist in cfg; edit cfg while playing → hot-applies; LogOutput.log clean.
 
-## Risks
-1. Never write `vc.input.*` (FSM overwrites next frame) — input post-processing only.
-2. ES3: explicit absolute paths only, read-only, try/catch (file may be mid-write).
-3. Prefix must stay allocation-free (GC in FixedUpdate).
-4. Vanilla = branch guard, not unpatch.
-5. EventSystem find-or-create, restore state, never duplicate.
-6. TMP load fallback to Arial so panel always renders.
-7. F7 collision possible with scene-serialized FSMs (unverifiable) — config-editable fallback.
-8. Panel open while driving: game input keeps driving — document "open while stopped/paused".
-9. Suspension overrides per-vehicle tuning globally — opt-in default OFF.
-10. Old DLL must be deleted (assembly renamed) or the prefix double-runs.
+- **verify/ stubs**: add Brakes/brakeTorqueModifiers, EngineComponent.powerModifiers, TransmissionComponent (UpshiftRPM/DownshiftRPM setters), DifferentialComponent.Type, Powertrain.engine/transmission/differentials/wheels, WheelGroup.brakeCoefficient/handbrakeCoefficient, WheelUAPI grip props + IsGrounded + LongitudinalSlip, ModuleManager.AddAndOnboardNewComponent + Components, AerodynamicsModule/DownforcePoint.
+- **Tests**: update steering-default expectation (Enabled==false); rewrite suspension applier tests for preset-factor semantics (BeginEdit on Stock, Reference, idempotence, restore); new migration tests (fold math, no-double-fold after Save+reload, all-1.0 skip, Street mapping); preset-book tests; per-system apply tests (brakes clamps, grip, drivetrain diff mode + 0-differential survival, aero onboard/reuse/disable, assists delegate register-once/call-with-fake-wheel/remove/re-register); config clamp tests for new keys.
+- **run.sh fix**: version-agnostic SDK glob (`sdk/*/ | sort -V | tail -1`), keep NETStandard ref pack glob with NETCore.App.Ref fallback; runtimeconfig rollForward LatestMajor already handles SDK 10.
+- In-game smoke test: each tab applies + restores; vehicle switch/spawn/despawn; config round-trip; aero onboarding log clean; assists react to induced slip; panel open/close behavior unchanged.
+
+## Risks (documented mitigations)
+TyreWear grip fight (detect + dim/note); GroundDetection overwrites only FrictionPreset/rolling resistance (grip props safe — verified); aero onboarding logs a benign "State definition not found" (`VC_LoadStateFromStateSettings`); power sliders trivialize game (accepted); RES2 engine sound reads revLimiterRPM at Start only (cosmetic — hint note); EVs ignore boost (hint note); game's own ABS/TCS modules multiply harmlessly with ours; steering default flip only affects fresh cfg files.
+
+## Critical files
+- `Settings/PresetBook.cs` (new), `Settings/Limits.cs`, `Settings/*Preset.cs`, `Settings/*Settings.cs`
+- `Runtime/VehicleTuner.cs` + `.Systems.cs` + `.Assists.cs` (replace `SuspensionApplier.cs`)
+- `Persistence/ModConfig.cs`, `Runtime/SettingsPanel.cs`, `Runtime/SettingsPanelManager.cs`, `Plugin.cs`, `PluginInfo.cs` (3.2.0)
+- `verify/stubs/*.cs`, `verify/tests/Tests.cs`, `verify/run.sh`
+- csproj: no reference changes (all new types in already-referenced NWH DLLs)
