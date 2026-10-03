@@ -32,6 +32,12 @@ specifiers (`"0.00"`) appear in the sweep but are never shown. Display strings b
    `VEHICLE TUNING` when the template button it copies is all-caps. Section titles are
    displayed uppercased by the panel; ApocaLanguage matches case-insensitively, but a
    translation pack may provide both forms.
+6. **Curve editors (0.4.0)** — the two graph rows (`Lock at speed`, `Return to center`)
+   receive their title and hint as static literals passed from `SettingsPanel.cs`
+   (the sweep command above captures them). Drag feedback ("63 km/h · 40%") and the
+   point-count readout are built by concatenation in `CurveEditor.cs` and contain no
+   templates; only the fixed `km/h`, `%`, `points` and `·` fragments are translatable
+   via exact-match entries.
 
 ## Dynamic templates (UiStrings.cs)
 

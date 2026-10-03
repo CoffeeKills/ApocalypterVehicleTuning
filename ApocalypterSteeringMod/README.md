@@ -1,4 +1,4 @@
-# Apocalypter Vehicle Tuning — Audit Bundle (v0.3.0)
+# Apocalypter Vehicle Tuning — Audit Bundle (v0.4.0)
 
 A BepInEx mod for **Apocalypter** (SawyerK Games, Unity 2020.3.49, BepInEx 5.4.23.5 + Harmony 2) that adds a full vehicle-tuning panel: steering, suspension, aero, brakes, tire grip, drivetrain and stability assists (ABS/TCS), all applied live to every vehicle in the game.
 
@@ -90,6 +90,17 @@ Audit of 0.1.0-alpha against `gamecode/` and §2. Every fix below has a regressi
 
 **Not changed** (all §2 facts preserved): the steering prefix (byte-identical), the hidden-runner survival architecture, the InputBlocker recipe, one Graphic per GameObject, the mouse-only panel, no `ES3.Save`, no `vc.input.*` writes, BepInEx config as the only persistence, the GUID.
 
+## Changes in 0.4.0-alpha
+
+**Steering settings rework: visual curve editors + speed-sensing center return**
+
+1. **Two editable curve graphs replace the opaque steering sliders.** "Lock at speed" (how much steering you keep as speed rises; left edge = stopped, right edge = 180 km/h+) and "Return to center" (how fast the wheel straightens after you let go) are now visual graphs: **click to add a point, drag to move, double-click to remove** (2–8 points, piecewise-linear). The curves are drawn live and apply immediately, like the sliders. The old "Steering at speed" scale slider and "Center return" slider are gone — the curves replace them. "Use the vehicle's own curve" (lock) and "Use the vehicle's input curve" (linearity) toggles remain, and the grip section got clearer labels ("Front slip clamp", "Slip window").
+2. **Speed-dependent center return — the Euro Truck preset now holds the wheels where you leave them when stopped and straightens them out as you drive** (its return curve ramps 0 at rest → 0.7 at top speed). A return curve that starts at 0 takes over low-speed steering (the mod runs its pipeline below 1.5 m/s, skipping the traction model), so "leave the wheels turned, press go" works: the truck drives off in that direction and eases straight. A flat return curve at 1 keeps vanilla's own low-speed behavior byte-identical — every non-Euro-Truck configuration feels exactly as in 0.3.0. True reverse always stays vanilla.
+3. **New config keys, one-time migration.** `Steering.Custom` gains `UseVehicleCurve`, `LockCurve` (`"x:y;x:y"`, 2–8 points), `ReturnCurve`; `SpeedCurveScale` and `CenterReturnScale` are folded on load and removed: the old scale multiplies the BasedOn preset's lock curve (exact old behavior), the old center-return value becomes a flat return curve. Known caveat: a vehicle-curve user (BasedOn empty) with a scale ≠ 1 loses that scale — the old knob has no equivalent. Garbage hand-edited curve strings fall back to the BasedOn preset's curves.
+4. **Presets keep their exact curves** (GTA, Euro Truck, Sim/Race, Drift — byte-identical keyframes, now editable). Forking a preset into Custom deep-copies its curves, so built-in presets can never be mutated by the editors.
+
+**Not changed** (all §2 facts preserved): the steering prefix's math beyond the return/curve model (allocation-free; guards byte-identical for flat-1 return presets), the hidden-runner survival architecture, the InputBlocker recipe, one Graphic per GameObject, the mouse-only panel, no `ES3.Save`, no `vc.input.*` writes, BepInEx config as the only persistence, the GUID.
+
 ## 1. What the mod does
 
 Seven tuning categories, each with: a master ON/OFF switch (all default OFF — every category is opt-in), a row of presets, and labelled sliders with live values, "changed" highlight, per-slider Reset and plain-language hints. Moving any slider while a built-in preset is active copies that preset into a "Custom (Base)" slot (BasedOn tracked) so presets are never mutated. Everything applies live; settings persist in a BepInEx config file; panel opens via F7 or a "Vehicle Tuning" button cloned into the game's menus.
@@ -125,9 +136,10 @@ These drove several unusual design decisions; treat them as load-bearing when re
 
 ```
 Plugin.cs                       Slim entry: config load → ES3 read-only import → Harmony patches (steering + InputBlocker) → hidden runner GO; sceneLoaded → recreate runner.
-PluginInfo.cs                   GUID "dev.apocalypter.tractionsteering" (unchanged for config continuity), name, version "0.3.0" (numeric-only: BepInEx 5 skips "-alpha" tags).
+PluginInfo.cs                   GUID "dev.apocalypter.tractionsteering" (unchanged for config continuity), name, version "0.4.0" (numeric-only: BepInEx 5 skips "-alpha" tags).
 Settings/PresetBook.cs          Generic preset semantics shared by all 7 categories: ITunablePreset + PresetBook<T> (Identity/Custom/Defaults/NotFound, SetByName with legacy-name mapping, BeginEdit copy-to-Custom with BasedOn, Reference for per-slider Reset, ResetCustom).
-Settings/SteeringPreset.cs      6 presets (Vanilla/GTA/Euro Truck/Sim-Race/Drift/Custom) + Defaults; v2.0.0-behavior defaults; Custom mutated by UI; RestoreBaseCurve() re-attaches the BasedOn preset's speed curve after config load.
+Settings/EditableCurve.cs       Piecewise-linear curve over [0,1]², 2-8 points: allocation-free Evaluate (prefix hot path), add/move/remove, Clone, "x:y;x:y" (de)serialization with validation.
+Settings/SteeringPreset.cs      6 presets (Vanilla/GTA/Euro Truck/Sim-Race/Drift/Custom) + Defaults; UseVehicleCurve + LockCurve + ReturnCurve; v2.0.0-behavior defaults; Custom mutated by UI; RestoreBaseCurve() re-attaches the BasedOn preset's curves (config-parse fallback).
 Settings/SteeringSettings.cs    Book delegate; Enabled default FALSE (opt-in); MatchGameSteeringSpeed; GameSteeringSpeedFactor.
 Settings/SuspensionPreset.cs    5 presets + Custom as multipliers on stock (Stock/Comfort/Sport/Off-road/Race); the preset factor IS the slider value.
 Settings/SuspensionSettings.cs  Book delegate (legacy "Street"→"Stock"); SplitFrontRear; LinkRearToFront (BeginEdit first); factor accessors Spring(front) etc.
@@ -138,7 +150,7 @@ Settings/DrivetrainPreset.cs    PowerScale/RevLimiterScale/LossScale/BoostScale/
 Settings/AssistsPreset.cs       AbsEnabled/AbsSlipThreshold/AbsCutoffSpeed/AbsCutMultiplier + Tcs*; presets Off/Standard/Sport/Off-road/Race/Custom.
 Settings/Limits.cs              Single source of truth for every slider/config range.
 Game/GameSettingsReader.cs      Read-only ES3 import of steeringspeed/smoothinput/normalizeinput; re-read on panel open.
-Persistence/ModConfig.cs        BepInEx ConfigFile binding for all categories; AcceptableValueRange clamping; SettingChanged → runtime push + event; one write per save; v3.1→v3.2 + v0.3.0 migrations (see §5); [General] Apocasetter opt-in key.
+Persistence/ModConfig.cs        BepInEx ConfigFile binding for all categories; AcceptableValueRange clamping; SettingChanged → runtime push + event; one write per save; v3.1→v3.2, v0.3.0 and v0.4.0 migrations (see §5); [General] Apocasetter opt-in key.
 Patching/TractionEdgeSteeringPatch.cs  The steering prefix (allocation-free; target/guards unchanged since v3.0; Vanilla preset = early return true).
 Runtime/VehicleTuner.cs         The multi-system tuner (replaces SuspensionApplier): 2 s unscaled scans (FindObjectsOfType), per-vehicle baseline capture (one pass, per-system null guards, mean-wheel-Z axle detection, TyreWear flag), per-category apply/restore with applied-flags, OnDestroy → RestoreAll, MeanBaseline readout API, TrackedVehicles.
 Runtime/VehicleTuner.Systems.cs Suspension/Grip/Brakes/Drivetrain/Aero apply+restore. Aero: find module in vc.moduleManager.Components; onboard when absent AND the preset differs from Stock; re-enable after restore; no downforce-point synthesis (Stock = exactly as shipped).
@@ -147,6 +159,7 @@ Runtime/InputBlocker.cs        PlayMaker input suppression + timeScale freeze (s
 Runtime/SettingsPanelManager.cs On the hidden runner: hotkey/Esc polling (dual input), menu-button injection (§2.7), panel lifecycle, per-frame cursor freeing, EventSystem find-or-create, auto-save on close.
 Runtime/SettingsPanel.cs        The 7-tab panel (anchored layout, one Graphic per GO, mouse-only widgets, single refresher list for all tabs, two-click per-tab reset-all, dim-click close, absolute readouts on suspension sliders).
 Runtime/UiStrings.cs            Every dynamic panel string as a {0} template + value formatters, so ApocaLanguage can translate them (docs/strings.md).
+Runtime/CurveEditor.cs          The visual curve editor row: MaskableGraphic graph (grid + curve + mesh-drawn handles), click-add / drag-move / double-click-remove, ScrollRect-friendly drag handling.
 Runtime/UiKit.cs                Tiny uGUI widget kit (anchored layout, built-in Arial font with fallbacks, HitArea sliders, scroll view with auto-hide scrollbar).
 icon.png                        Mod icon for the Apocasetter Mods window (generated by tools/make_icon.ps1; installs beside the DLL as ApocalypterSteeringMod.png).
 tools/make_icon.ps1             Reproducible icon generator (System.Drawing); icon.png may be hand-replaced.
@@ -156,7 +169,7 @@ gamecode/, PROMPT.md            Audit-bundle files, now kept in the tree (gameco
 
 ## 4. Settings model (summary — full data in the preset classes)
 
-- Steering knobs: `RateMultiplier` (× degreesPerSecondLimit) · `CurveOverride`+`SpeedCurve` (evaluated at Speed/50, vanilla normalization) · `SpeedCurveScale` (applies to both preset and vehicle curves) · `SmoothingScale` (× speedSensitiveSmoothingCurve) · `TractionClampEnabled` · `SlipAngleDeg` · `OppositeLockBoost` · `CenterReturnScale` (× rate while unwinding toward center, below 1 = lazy return) · `LinearityOverride`+`LinearityExponent`. Custom defaults reproduce the v2.0.0 feel.
+- Steering knobs: `RateMultiplier` (× degreesPerSecondLimit) · `SmoothingScale` (× speedSensitiveSmoothingCurve) · `LinearityOverride`+`LinearityExponent` · `UseVehicleCurve` + `LockCurve` (editable lock-at-speed curve, y = fraction of max steer, evaluated at Speed/50) · `ReturnCurve` (editable return-to-center curve, y = fraction of the steer-in rate used while unwinding; flat 1 = symmetric, 0 at rest = holds the wheels) · `TractionClampEnabled` · `SlipAngleDeg` · `OppositeLockBoost`. Custom defaults reproduce the v2.0.0 feel.
 - Steering physics: front-axle slip geometry `frontSlip ≈ bodySlip + (a/v)·yawRate − steerAngle`; clamp to ±SlipAngleDeg yields opposite-lock freedom, into-slide suppression and plow prevention. Clamp bounds are limited to `maximumSteerAngle` BEFORE clamping (fixes the v3.0 inverted-bounds bug).
 - Suspension/other categories: `effective = capturedStock × presetFactor`; presets are authored factors; sliders edit them through Custom. Suspension readouts: mean stock baseline across tracked vehicles × factor.
 - `MatchGameSteeringSpeed` (default true): effective steering rate ×= `Clamp(gameSteeringspeed/50, 0.35, 2.5)`.
@@ -169,11 +182,13 @@ Sections: `Steering` (Enabled **false** by default, Preset, MatchGameSteeringSpe
 
 **v0.2.0 → v0.3.0 migration (one-time, in `ModConfig.MigrateLegacySteeringPreset`)**: `Steering.Preset = "Truck-sim"` and `Steering.Custom.BasedOn = "Truck-sim"` are rewritten to `"Euro Truck"` on load (the runtime preset book also maps the name, so either layer alone would load correctly; the file rewrite stops the dead name from lingering). The BasedOn rewrite matters: `RestoreBaseCurve()` needs a resolvable name or Custom silently loses its speed curve. Covered by tests.
 
+**v0.3.0 → v0.4.0 migration (one-time, in `ModConfig.MigrateLegacySteeringCurves`)**: triggered by the presence of the legacy keys in the raw file text (checked before any Bind — a post-migration file never re-folds). `SpeedCurveScale` multiplies the BasedOn preset's lock curve (exact old behavior); `CenterReturnScale` becomes a flat return curve. Both keys are removed on every load. Vehicle-curve users (BasedOn empty) with a scale ≠ 1 lose the scale (documented). Covered by tests.
+
 ## 6. Build and test (no terminal needed on the target machine — but instructions for whoever runs it)
 
 ```
 cd plugin && dotnet build -c Release          # real DLL, references game DLLs at D:\SteamLibrary\...\Apocalypter_Data\Managed (adjust paths in the csproj)
-cd verify && bash run.sh                      # stubs compile + 148 tests (142 logic + 6 prefix); .NET SDK 8+; refs/ already populated
+cd verify && bash run.sh                      # stubs compile + 205 tests (191 logic + 14 prefix); .NET SDK 8+; refs/ already populated
 ```
 Install: copy the DLL to `BepInEx\plugins\` and `icon.png` next to it as `ApocalypterSteeringMod.png` (the Apocasetter Mods-window icon). Rebuild the install zip with both files at the zip root. **Never run it alongside an old `SteeringFix.dll`** (earlier assembly name) — both prefixes would double-process steering. The GUID is deliberately unchanged, so the existing config file migrates in place.
 
@@ -181,7 +196,7 @@ Install: copy the DLL to `BepInEx\plugins\` and `icon.png` next to it as `Apocal
 
 The Apocasetter updater installs mods from its GitHub index (`DeonUrist/Apocasetter-Index`); its contract for a loose-DLL mod like this one:
 
-- a public GitHub repo with a release whose tag equals the `[BepInPlugin]` version (`0.3.0`),
+- a public GitHub repo with a release whose tag equals the `[BepInPlugin]` version (`0.4.0`),
 - a release `.zip` that unpacks into `BepInEx\plugins` — i.e. `ApocalypterSteeringMod.dll` + `ApocalypterSteeringMod.png` at the zip root (the layout of `BepInEx\plugins\ApocalypterSteeringMod.zip`),
 - the `[General] Apocasetter = true` config entry (bound on load, written on first run),
 - one-time submission via the index repo's "Submit a mod" issue template.
@@ -226,7 +241,7 @@ powershell Compress-Archive README.md,PROMPT.md,plugin,verify,gamecode,docs ..\A
 
 ## 10. In-game test checklist (for the machine with the game)
 
-1. Log shows `Apocalypter Vehicle Tuning 0.3.0 loaded.` and no errors.
+1. Log shows `Apocalypter Vehicle Tuning 0.4.0 loaded.` and no errors.
 2. F7 (or the "Vehicle Tuning" button in the pause menu) opens the panel centred; cursor free; game frozen. Esc/F7/X/Done/click-outside close it.
 3. Each of the 7 tabs: master ON applies the preset, sliders live-edit (preset → "Custom (Base)"), Reset returns to the preset origin, OFF restores stock feel.
 4. Steering tab: Vanilla must feel exactly unmodded; Custom defaults ≈ the old v2.0.0 feel; traction clamp + opposite lock behave as before.
@@ -238,6 +253,10 @@ powershell Compress-Archive README.md,PROMPT.md,plugin,verify,gamecode,docs ..\A
 10. **0.3.0 — migration:** with a cfg containing `Steering.Preset = Truck-sim` (or `BasedOn = Truck-sim`), after launch the panel shows Euro Truck active, the cfg now says `Preset = Euro Truck`, and a Custom's speed curve is preserved.
 11. **0.3.0 — Apocasetter (install v2.0.6 first):** the Mods window lists "Apocalypter Vehicle Tuning" with the square icon; all seven sections' entries appear as live editors with ranges/descriptions; editing there updates the panel (SettingChanged is already wired); the cfg contains `[General] Apocasetter = true`. In the pause menu the "MODS" and "Vehicle Tuning" buttons sit stacked in the top-right corner without overlapping, and both click through.
 12. **0.3.0 — ApocaLanguage (install v1.5.2 + a language pack):** panel labels translate on language switch; dynamic templates ("×1.40", "Custom (Race)") translate when the pack covers them; the "Vehicle Tuning" menu label translates.
+13. **0.4.0 — curve editors:** both graphs draw the active preset's curves; dragging a point on a built-in preset forks it into "Custom (…)" and the graph recolors; click adds a point, double-click removes; dragging the scrollbar/list area still scrolls (no scroll stealing). Reset per graph returns the preset curve.
+14. **0.4.0 — hold-then-straighten (Euro Truck):** with the wheels turned, stop and release the key — the wheels stay turned. Drive off: the truck follows the held angle, then straightens out as speed builds. At standstill, steering input still winds the wheels to lock at the normal rate. True reverse behaves like vanilla.
+15. **0.4.0 — flat-1 regression:** on any non-Euro-Truck preset (or a Custom with a flat return line), low-speed and parking behavior matches 0.3.0 exactly (vanilla below 1.5 m/s).
+16. **0.4.0 — migration:** with a 0.3.0 cfg containing `SpeedCurveScale`/`CenterReturnScale`, after launch the cfg has `UseVehicleCurve`, `LockCurve = …`, `ReturnCurve = …` and neither legacy key; the panel's graphs show the folded values; a reload does not change them again.
 
 ## 11. Translation (ApocaLanguage)
 
