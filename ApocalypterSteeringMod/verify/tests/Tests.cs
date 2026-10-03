@@ -194,6 +194,12 @@ public static class Tests
         Console.WriteLine("Config hardening (0.2.0)");
         TestConfigHardening(dir);
 
+        Console.WriteLine("0.3.0 regressions (Euro Truck, Apocasetter key, UiStrings)");
+        TestEuroTruck();
+        TestLegacySteeringMigration(dir);
+        TestApocasetterKey(dir);
+        TestUiStrings();
+
         Console.WriteLine();
         Console.WriteLine(_pass + " passed, " + _fail + " failed");
         return _fail == 0 ? 0 : 1;
@@ -704,5 +710,107 @@ public static class Tests
         Check(SuspensionSettings.AxlesDiffer(), "Race has different axles");
         SuspensionSettings.ResetAll();
         DrivetrainSettings.ResetAll();
+    }
+
+    private static void TestEuroTruck()
+    {
+        SteeringPreset euro = SteeringPreset.FindBuiltIn("Euro Truck");
+        Check(euro != null, "Euro Truck preset exists");
+        Check(SteeringPreset.FindBuiltIn("Truck-sim") == null, "Truck-sim preset removed");
+        Check(SteeringPreset.Presets.Length == 6, "still 6 steering presets");
+        Check(SteeringPreset.Presets[0] == SteeringPreset.Vanilla
+              && SteeringPreset.Presets[1].Name == "GTA-style Keyboard"
+              && SteeringPreset.Presets[2].Name == "Euro Truck"
+              && SteeringPreset.Presets[3].Name == "Sim/Race"
+              && SteeringPreset.Presets[4].Name == "Drift"
+              && SteeringPreset.Presets[5] == SteeringPreset.Custom,
+            "preset order: Vanilla, GTA-style Keyboard, Euro Truck, Sim/Race, Drift, Custom");
+        Check(Near(euro.RateMultiplier, 0.5f) && Near(euro.SmoothingScale, 1.7f)
+              && Near(euro.SlipAngleDeg, 6.5f) && Near(euro.OppositeLockBoost, 1f)
+              && Near(euro.LinearityExponent, 1.35f),
+            "Euro Truck values: rate 0.5, smoothing 1.7, slip 6.5, opp-lock 1.0, linearity 1.35");
+        Check(euro.TractionClampEnabled && euro.CurveOverride && euro.LinearityOverride,
+            "Euro Truck enables the traction clamp and both overrides");
+        Check(euro.SpeedCurve != null && Near(euro.SpeedCurve.Evaluate(0f), 1f)
+              && Near(euro.SpeedCurve.Evaluate(0.5f), 0.3f) && Near(euro.SpeedCurve.Evaluate(1f), 0.12f),
+            "Euro Truck speed curve: 1 @ 0, 0.3 @ 0.5, 0.12 @ 1");
+        SteeringSettings.SetPresetByName("Truck-sim");
+        Check(SteeringSettings.ActivePreset == euro, "runtime SetByName('Truck-sim') resolves to Euro Truck");
+        SteeringSettings.SetPresetByName("Custom");
+        SteeringSettings.ResetAll();
+    }
+
+    private static void TestLegacySteeringMigration(string dir)
+    {
+        string path = Path.Combine(dir, "steer-mig.cfg");
+        File.WriteAllText(path,
+            "[Steering]\nEnabled = true\nPreset = Truck-sim\n\n[Steering.Custom]\nBasedOn = Truck-sim\nRateMultiplier = 1.2\n");
+        ModConfig.Load(new ConfigFile(path, true));
+        Check(SteeringSettings.ActivePreset == SteeringPreset.FindBuiltIn("Euro Truck"),
+            "saved 'Truck-sim' preset loads as Euro Truck");
+        Check(SteeringPreset.Custom.BasedOn == "Euro Truck",
+            "saved Custom.BasedOn 'Truck-sim' rewritten to Euro Truck");
+        Check(SteeringPreset.Custom.CurveOverride && SteeringPreset.Custom.SpeedCurve == SteeringPreset.FindBuiltIn("Euro Truck").SpeedCurve,
+            "Custom keeps the Euro Truck speed curve (RestoreBaseCurve resolves)");
+        Check(Near(SteeringPreset.Custom.RateMultiplier, 1.2f), "Custom values survive the migration");
+        string txt = File.ReadAllText(path);
+        Check(txt.Contains("Preset = Euro Truck") && !txt.Contains("Truck-sim"),
+            "cfg file rewritten to Euro Truck, no Truck-sim left");
+        SteeringSettings.ResetAll();
+    }
+
+    private static void TestApocasetterKey(string dir)
+    {
+        string path = Path.Combine(dir, "apocasetter.cfg");
+        File.WriteAllText(path, "");
+        ModConfig.Load(new ConfigFile(path, true));
+        string txt = File.ReadAllText(path);
+        Check(txt.Contains("[General]") && txt.Contains("Apocasetter = true"),
+            "Apocasetter opt-in key written to the cfg ([General] Apocasetter = true)");
+    }
+
+    private static void TestUiStrings()
+    {
+        bool templatesOk = true;
+        foreach (FieldInfo f in typeof(UiStrings).GetFields(BindingFlags.Public | BindingFlags.Static))
+        {
+            if (f.FieldType != typeof(string) || !f.IsInitOnly)
+            {
+                continue;
+            }
+            string v = (string)f.GetValue(null);
+            if (v == null || !v.Contains("{"))
+            {
+                continue;
+            }
+            for (int i = 0; i < v.Length; i++)
+            {
+                if (v[i] == '{')
+                {
+                    int close = v.IndexOf('}', i);
+                    if (close < 0 || v.Substring(i, close - i + 1) != "{0}")
+                    {
+                        templatesOk = false;
+                        Console.WriteLine("  bad template " + f.Name);
+                    }
+                    i = close;
+                }
+                else if (v[i] == '}')
+                {
+                    templatesOk = false;
+                    Console.WriteLine("  stray } in " + f.Name);
+                }
+            }
+        }
+        Check(templatesOk, "every UiStrings template uses only {0} placeholders");
+        Check(UiStrings.Times(1.4f) == "×1.40", "Times(1.4) = ×1.40");
+        Check(UiStrings.Force(42000f) == 42000f.ToString("N0") + " N", "Force(42000) = N0-grouped number + ' N'");
+        Check(UiStrings.Rate(3800f) == 3800f.ToString("N0") + " N·s/m", "Rate(3800) = N0-grouped number + ' N·s/m'");
+        Check(UiStrings.Length(0.3f) == "30 cm", "Length(0.3) = 30 cm");
+        Check(UiStrings.Percent(0.25f) == "25%", "Percent(0.25) = 25%");
+        Check(UiStrings.Deg(6.5f) == "6.5 deg", "Deg(6.5) = 6.5 deg");
+        Check(UiStrings.SpeedMps(2f) == "2.0 m/s", "SpeedMps(2) = 2.0 m/s");
+        Check(UiStrings.CustomPresetFmt.IndexOf("{0}") >= 0 && UiStrings.CustomPresetFmt.IndexOf("{0}", UiStrings.CustomPresetFmt.IndexOf("{0}") + 1) < 0,
+            "CustomPresetFmt has exactly one {0}");
     }
 }
