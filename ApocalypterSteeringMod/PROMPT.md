@@ -7,7 +7,7 @@ Read **README.md first** — it contains the verified game-architecture facts th
 1. **Audit** `plugin/` against the game code and the README. Find real bugs — correctness, restore-completeness, config-migration edge cases, UI problems, allocation hazards — not style nits.
 2. **Rework** what you find, and improve the design where you can justify it in the README. Follow the existing patterns: `PresetBook` preset semantics (copy-to-Custom with BasedOn), allocation-free hot paths, the `VehicleTuner` capture/apply/restore model, the anchored uGUI kit. Do **not** change the hidden-runner survival architecture, the PlayMaker input-blocking recipe, the one-Graphic-per-GameObject rule, or the mouse-only panel without calling it out explicitly in your changelog.
 3. **Test everything you change.** `verify/` is a self-contained harness: `bash verify/run.sh` compiles the plugin against stubs and runs the logic + steering-prefix tests (needs a .NET SDK 8+; `verify/refs/` is already populated). Extend `verify/stubs/` to mirror real signatures from `gamecode/` whenever you add new API usage. All tests must pass.
-4. **Update the README**: add a "Changes in \<new version\>" section listing bugs fixed and design changes, any new config keys, and migration rules for existing config files. Version the mod below 1.0 (e.g. `0.2.0-alpha`).
+4. **Update the README**: add a "Changes in \<new version\>" section listing bugs fixed and design changes, any new config keys, and migration rules for existing config files. Version the mod below 1.0 (e.g. `0.3.0-alpha`; the BepInEx version string itself must stay numeric-only, e.g. `0.3.0`).
 
 ## Hard constraints
 
