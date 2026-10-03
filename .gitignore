@@ -1,0 +1,6 @@
+ApocalypterSource/
+.negcheck/
+*.zip
+**/bin/
+**/obj/
+ApocalypterSteeringMod/verify/out/

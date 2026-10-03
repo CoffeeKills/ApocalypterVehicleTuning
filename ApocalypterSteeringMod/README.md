@@ -1,0 +1,193 @@
+# Apocalypter Vehicle Tuning — Audit Bundle (v0.2.0)
+
+A BepInEx mod for **Apocalypter** (SawyerK Games, Unity 2020.3.49, BepInEx 5.4.23.5 + Harmony 2) that adds a full vehicle-tuning panel: steering, suspension, aero, brakes, tire grip, drivetrain and stability assists (ABS/TCS), all applied live to every vehicle in the game.
+
+This bundle is assembled so a third-party AI (or human) can audit and rework the mod **without terminal access**. It contains:
+
+- `plugin/` — the complete mod source (no build artifacts; build with `dotnet build -c Release`, see §6)
+- `verify/` — the self-contained test harness: Unity/NWH compile stubs, a 131-test suite (125 logic + 6 steering-prefix), `run.sh` (bash, needs a .NET SDK 8+), **plus `verify/refs/` with the BepInEx 5 core DLLs it needs**
+- `gamecode/` — the relevant portions of the game's decompiled assemblies (ILSpy output): every game type the mod touches
+- `docs/plan.md` — the approved v3.2 implementation plan incl. exploration findings; `docs/decomSource.ps1` — the script that produced the decompiled source
+
+## Changes in 0.2.0-alpha
+
+Audit of 0.1.0-alpha against `gamecode/` and §2. Every fix below has a regression test in `verify/tests/Tests.cs` that **fails on 0.1.0-alpha** and passes now (negative control run: 23 of the new checks fail on the old plugin, the old plugin also crashes outright on a vehicle without a module manager). Suite: 131 tests (125 logic + 6 steering-prefix), all passing.
+
+**Not changed** (all §2 facts preserved): the steering prefix (byte-identical), the hidden-runner survival architecture, the InputBlocker recipe, one Graphic per GameObject, the mouse-only panel, no `ES3.Save`, no `vc.input.*` writes, BepInEx config as the only persistence, the GUID.
+
+### Bugs fixed
+
+**Assists**
+1. **ABS killed the handbrake.** `Brakes.VC_FixedUpdate` multiplies the brake-torque modifiers into the handbrake torque as well. A handbrake-locked rear wheel exceeded the ABS slip threshold, the delegate returned 0.01, and the handbrake dropped to 1% — no handbrake turns with assists on. NWH's own `ABSModule` has a `input.Handbrake < 0.1f` guard that the mod's copy lacked. Added (read-only access to `vc.input.Handbrake`).
+
+**Drivetrain**
+2. **Front/rear diff mapping by list index was wrong for RWD and AWD cars.** `differentials[0]` was always treated as the front axle, so the single (rear) diff of a RWD car got the *front* mode (Drift: rear "Locked" became "Open"), and the centre diff of an AWD car (index 2) got the rear mode. Each diff's axle is now resolved from what it drives: an axle diff's `OutputB` is a `WheelComponent` (front/rear taken from that wheel's captured flag), a centre diff's `OutputB` is another `DifferentialComponent`. The index convention (0 front, 1 rear, 2+ centre — what `vc.DiffFrontType` etc. use) remains only as a fallback for diffs whose outputs are not wired yet. Centre diffs keep their stock type.
+3. **"Stock" diff mode did not restore.** Switching from Race (Locked) to Stock, or clicking "Stock" on a diff, while the category was enabled left the diffs Locked until the whole category was turned off. "Stock" now writes the captured type back.
+4. **Allocation on every apply.** The `DifferentialType` setter re-assigns NWH's split delegate (a new delegate allocation). It was assigned on every `ApplyLive` (every 2 s and on every slider tick). It is now assigned only when the type actually changes, in both apply and restore.
+5. **External diffs.** Assigning `Type.External` does not re-assign the split delegate (`AssignDifferentialDelegate` breaks out), so forcing and later restoring an External diff left the forced delegate behind. External diffs are never touched now.
+6. **Diff bias made axle diffs one-sided.** `biasAB` is the A/B (left/right) torque split on an axle diff. Scaling it (×1.5 → 75/25) made the car pull to one side under power. The slider's own hint said "torque split between the axles", so it now applies to **centre diffs only** (relabelled "Diff bias (AWD)"). Axle diffs keep their stock bias.
+7. **Diff stiffness above NWH's 0..1 range.** Stiffness × factor is now capped at `max(1, stock)`, because a locking diff above 1 winds up and oscillates (NWH tooltip).
+8. **Gearbox lock-up from scaled shift points.** On transmissions without `variableShiftPoint`, NWH uses `UpshiftRPM` raw as the shift target (`TransmissionComponent.AutomaticShift`). Only the variable path clamps to `revLimiterRPM × 0.97`. An upshift at or above the scaled rev limiter is then reached only on limiter overshoot, or never, so the box sits bouncing on the limiter. The built-in Race preset does this on any vehicle whose stock upshift is ≥ ~96% of its limiter (test: 4500/4700 rpm → upshift 5175 against a 5170 limiter), and Custom factors can do it on any vehicle. Downshift ≥ upshift made the box hunt between gears, since the non-variable path has no clamp there either. The fixed-point upshift is now capped at 97% of the *scaled* limiter (the ceiling NWH applies to its own variable target), and the downshift at 90% of the upshift. Each cap relaxes to the vehicle's own stock ratio when the stock setup already exceeds it, so the Stock preset reproduces the shipped values exactly.
+
+**Brakes**
+9. **Axle and handbrake factors above 1 were dead.** NWH caps every wheel at `brakes.maxTorque`, and the mod clamped `brakeCoefficient` to 0..1, where the stock value is usually 1.0. So Front/Rear ×1.1–2.0 did nothing, the Race preset's front/rear factors were no-ops, and Drift's "much stronger handbrake" (×1.6) was capped back to ×1.0 on a full pull. Brakes are now *balance-preserving*: with `k = max(1, peak requested coefficient ÷ peak stock coefficient)` (for both pedal and handbrake), `maxTorque = stock × TorqueScale × k` and every coefficient is divided by `k`. Every brake path (pedal, handbrake, off-throttle, idle, disabled, reverse) goes through `AddBrakeTorque × coefficient`, so the per-axle torques are exactly `stock × Torque × axle factor`. Only the per-wheel cap moves with them. Stock factors give `k = 1`, i.e. the shipped values unchanged. Caveat: `AddBrakeTorqueAllWheels` also clamps the *sum* of simultaneous brake sources at `maxTorque`, so that sum ceiling rises by `k` too. **Behaviour change:** presets with axle/handbrake factors above 1 (Sport, Race, Off-road, Drift) now actually deliver them, so they brake somewhat harder than in 0.1.0.
+
+**Aero**
+10. **Stock was not stock.** On vehicles with a shipped `AerodynamicsModule`, every preset including Stock forced `simulateDrag = true` and switched `simulateDownforce` on whenever downforce points existed, even if the vehicle's designer had turned them off. The shipped switches are now kept, and scaling never turns a disabled effect on.
+11. **Onboarded module left active on Stock.** Switching back to Stock (or a Custom with all factors 1) *while enabled* left the onboarded module running with default Cd 0.35 drag on a vehicle that never had aero. An identity preset now parks the module exactly like a restore does.
+12. **Restore relied on "disabled" alone.** NWH can re-enable a disabled component (`UpdateLOD` with a state-settings `lodIndex`, or a parent `VC_Enable`). A restored onboarded module is now also made inert (`simulateDrag = simulateDownforce = false`, default coefficients), so re-enabling it is harmless.
+13. **Onboarded module could stay uninitialised.** `AddAndOnboardNewComponent` loads `state.isEnabled` from the vehicle's state settings *without* initialising the module. The re-enable check now uses `IsActive` (enabled **and** initialised), so `VC_Enable` always initialises it. Without this, such a module would never run.
+14. **Null guards.** A vehicle with no `moduleManager` threw a NullReferenceException in the apply pass every 2 s, which aborted every category after Aero for all vehicles. A null `downforcePoints` list on a module also threw. Both are guarded now.
+
+**Lifecycle / restore completeness**
+15. **A deactivated runner left vehicles tuned, and its replacement compounded.** Only `OnDestroy` restored. If the runner was deactivated rather than destroyed, `EnsureRunner` built a second runner whose tuner captured the *tuned* values as stock. Factors then compounded, and OFF "restored" to tuned values. Now `VehicleTuner.OnDisable` restores (and `OnEnable` re-applies on the next frame), and `EnsureRunner` destroys a stale inactive runner before creating the new one. *(Survival-architecture note: the hidden-runner + `sceneLoaded` recreation design is unchanged. This only hardens the "runner exists but inactive" branch of `EnsureRunner`.)*
+16. **Restore clobbered categories that were never applied.** `RestoreAll` wrote captured values for all six categories even when a category was never switched on, overwriting anything the game had changed on those fields since capture. It now restores only applied categories.
+17. **Injected menu buttons outlived their manager.** The clones live inside the *game's* canvases, so a replaced runner left a dead button behind and a second one appeared. `SettingsPanelManager.OnDestroy` now destroys its clones. A slot whose clone was destroyed by the game is re-injected (at most 5 attempts per canvas), where 0.1.0 left that menu without a button for the rest of the session.
+18. **Input could stay blocked.** If the panel was closed and the manager was disabled in the same frame, before the deferred one-frame unblock ran, `InputBlocker` stayed active with `timeScale = 0`. `OnDisable` now completes the pending unblock.
+
+**Config**
+19. **Diff modes.** `Enum.TryParse` accepted any integer (`DiffFrontMode = 7` became an undefined `DiffMode`), and rejected `LSD`, the label the panel shows. The parser now accepts names only (case/space-tolerant) plus `LSD`; anything else falls back to Stock.
+20. **Legacy `Suspension.Preset = Street`** was mapped at runtime, but the dead name stayed in the file until the panel was opened and closed. It is now rewritten to `Stock` during load.
+
+**UI**
+21. Clicking the already-active diff mode forked the preset into "Custom (…)" with nothing changed. It is a no-op now.
+22. Turning "Separate front and rear" OFF on a built-in preset whose axles are already equal (Stock, Comfort, Off-road) forked it into Custom. It now forks only when the axles differ.
+23. **Allocation:** the 4 Hz menu-button scan allocated a `Button[]` per canvas per scan. Per-slot `List<Button>` buffers are now refilled in place.
+24. Preset texts that contradicted their values: Aero "Street" said "less drag, stock downforce" but is ×0.8 downforce / ×1.0 drag. Brakes "Race" said "rear bias" but is front 1.15 / rear 1.10. The descriptions were corrected (values unchanged). Brake and diff slider hints were updated for fixes 6 and 9.
+
+### Config keys and migration
+
+- **No new keys, no renamed keys, no removed keys** (GUID unchanged). A 0.1.0-alpha config file loads as is. Only some key *descriptions* changed (BepInEx rewrites the comment lines on save).
+- Load-time normalisation: `Suspension.Preset = Street` → `Stock` (same runtime result as before). `Drivetrain.Custom.DiffFrontMode/DiffRearMode` values `LSD`/`lsd` → `LimitedSlip`, and numeric or unknown values → `Stock` (written back on the next save).
+- The v3.1 → v3.2 `[Suspension.User]` fold (§5) is unchanged and still one-time.
+- Saved Custom values keep their meaning. The behaviour changes users will notice are fixes 6, 8 and 9: `DiffBiasScale` now affects only centre diffs, extreme shift-point factors are capped, and brake axle/handbrake factors above 1 now take effect.
+
+### Verification harness
+- Stubs (mirroring `gamecode/` signatures): `PowertrainComponent` base for `WheelComponent`/`DifferentialComponent`, `DifferentialComponent.OutputB`, `VehicleInputHandler.Handbrake` (with the real 0..1 clamp), `VehicleComponent.IsActive` as enabled-and-initialised, `StateDefinition.initialized`, `AddAndOnboardNewComponent` calling `VC_LoadStateFromStateSettings`/`UpdateLOD`, and `Component.GetComponentsInChildren<T>(bool, List<T>)`. Test hooks: `DifferentialComponent.TypeAssignments` (counts setter calls) and `ManagerVehicleComponent.OnboardEnablesState` (simulates state settings that pre-enable a module).
+- New test groups: brakes balance, drivetrain diffs + shift points, aero stock fidelity, ABS handbrake, lifecycle (Unity's `OnDisable`/`OnDestroy` invoked by reflection, as Unity calls them), config hardening.
+- `run.sh` itself is unchanged.
+
+### In-game checks to add to §10
+- Assists Standard + Brakes Drift: the handbrake still locks the rear (fix 1), and the handbrake is clearly stronger than Stock (fix 9).
+- RWD car, Drivetrain Drift: the rear diff is Locked (with F-key telemetry or by feel). Then switch to Stock while enabled: the diff opens again.
+- Drivetrain Race on the highest-revving vehicle: the automatic box still upshifts.
+- Aero: on a car without aero, Race → Stock while enabled gives no extra drag (top speed back to stock).
+
+## 1. What the mod does
+
+Seven tuning categories, each with: a master ON/OFF switch (all default OFF — every category is opt-in), a row of presets, and labelled sliders with live values, "changed" highlight, per-slider Reset and plain-language hints. Moving any slider while a built-in preset is active copies that preset into a "Custom (Base)" slot (BasedOn tracked) so presets are never mutated. Everything applies live; settings persist in a BepInEx config file; panel opens via F7 or a "Vehicle Tuning" button cloned into the game's menus.
+
+| Category | Model | Applied via |
+|---|---|---|
+| Steering | Harmony prefix on `Steering.CalculateSteerAngles`; traction-edge clamp on the vanilla pipeline | patch (allocation-free) |
+| Suspension | per-wheel spring/ride-height/damper × factor, per-axle ARB × factor | WheelUAPI properties + WheelGroup field |
+| Aero | drag/downforce × factor on NWH's real `AerodynamicsModule` (onboarded when absent) | module fields |
+| Brakes | torque ×, per-axle brake / handbrake factors ×, actuation × — balance-preserving (maxTorque raised by k, coefficients ÷ k, see Changes) | Brakes + WheelGroup fields |
+| Grip | per-wheel longitudinal/lateral grip + stiffness × | WheelUAPI properties |
+| Drivetrain | power/revLimiter/loss/boost/finalDrive/shift-RPMs (guarded)/shiftDuration ×, diff modes (Stock/Open/Locked/LSD) per axle resolved from the wheels each diff drives, centre-diff bias ×, diff stiffness × | Powertrain fields |
+| Assists | ABS + TCS via NWH's public delegate hooks — no modules, no vehicle fields | `brakes.brakeTorqueModifiers` / `engine.powerModifiers` |
+
+All factors are **multipliers on each vehicle's captured stock values** (effective = stock × factor). Stock baselines are captured once per vehicle and restored exactly when a category is switched off. The suspension tab additionally shows computed **absolute readouts** (mean stock baseline × factor, e.g. "×1.40 / 42 000 N").
+
+## 2. Load-bearing game facts (verified against decompiled source + game data)
+
+These drove several unusual design decisions; treat them as load-bearing when reworking.
+
+1. **The game has no compiled game code.** `Assembly-CSharp` is 99% asset-store code (PlayMaker actions, InsaneSystems.InputManager, NWH, …). All game logic and UI are **PlayMaker FSMs serialized in scenes** inside `data.unity3d`. There is no pause-menu class, no MenuManager.
+2. **Vehicle input is written by FSMs** via PlayMaker `SetProperty` reflection every frame (`VehicleController.input.*`). NWH input providers unused. **The mod must never write `vc.input.*`** — it is overwritten next frame. Assists act through `engine.powerModifiers` / `brakes.brakeTorqueModifiers` / `AddBrakeTorque` instead.
+3. **The game destroys plugin-created GameObjects on scene load.** A PlayMaker scene-cleanup sweep disables/destroys unknown scene-root objects. Workaround (proven): host all runtime logic on a GameObject with `hideFlags = HideFlags.HideAndDontSave`, recreated on `SceneManager.sceneLoaded`. Harmony patches survive (they live in IL). **Preserve this architecture.**
+4. **Game input is legacy `UnityEngine.Input`** (its InputManager uses `Input.GetKeyDown`/axes); `Keyboard.current` from Unity.InputSystem also exists at runtime. The mod reads hotkeys through both.
+5. **Game settings use Easy Save 3** (`SaveSettings.es3`). `ES3.Load<T>(key, filePath, defaultValue)` is read-only; the game's `ES3SettingsMod` mutates the shared static `ES3Settings.defaultSettings.path`, so the mod always passes an explicit absolute path and **never calls `ES3.Save`**. Key `steeringspeed` (float, default 50) scales the keyboard steering ramp and can scale the mod's steering rate ("Follow game's steering speed").
+6. **uGUI rule that bit us**: Unity allows only **one `Graphic` component per GameObject** (an `Image` background and a `Text` label cannot share a GameObject). Panel labels live on child objects with `raycastTarget = false`.
+7. **Menu-button recipe** (Apocasetter, proven): every enabled canvas showing game menu buttons (named Settings/Credits/Tutorial/Codex/Quit/Quit_To_Menu/Exit/Options) gets a clone with PlayMaker FSMs stripped, relabeled "Vehicle Tuning", `onClick` rewired, pinned top-right, shown/hidden with the canvas. Re-scan every 0.25 s; inactive canvases are invisible to `GameObject.Find`.
+8. **Input capture while the panel is open** (Apocasetter's InputBlocker): Harmony-prefix all PlayMaker `FsmStateAction` subclasses whose name matches `^(GetAxis|GetButton|GetKey|GetMouse|MouseLook|MousePick|AnyKey|GetTouch|GetAxisKeyAxis|Input|Mouse)` — on `OnUpdate`/`OnFixedUpdate`/`OnLateUpdate` — returning false while the panel is open, plus `Time.timeScale = 0` (saved/restored, including a pause-menu 0). Cursor re-freed every frame in LateUpdate. Widgets deliberately have `Navigation.Mode.None` (mouse-only panel — a user decision).
+9. **NWH live-settability** (all verified): `WheelUAPI` abstract settable properties (`SpringMaxForce`, `SpringMaxLength`, `DamperBumpRate`, `DamperReboundRate`, `LongitudinalFrictionGrip/LateralFrictionGrip/LongitudinalFrictionStiffness/LateralFrictionStiffness`) need no cast; `WheelGroup.brakeCoefficient/handbrakeCoefficient/antiRollBarForce` are public fields; `Brakes.maxTorque/actuationTime` public; engine/transmission/differential fields public and read every tick; `transmission.UpshiftRPM/DownshiftRPM` are settable properties; `DifferentialComponent.DifferentialType` setter re-assigns the split delegate live. **Hazards**: `vc.DiffFrontType`/`DiffRearType` getters index `differentials[0/1]` unguarded (use `powertrain.differentials[i]` with a Count guard — the tuner does); `GroundDetection` overwrites `FrictionPreset` + rolling resistance every ~0.1 s (it does NOT overwrite the grip multipliers the mod uses); a `TyreWear` component, if present on a prefab, rewrites the grip properties every frame (the tuner flags it and the panel warns); `AerodynamicsModule` may be absent on prefabs — the tuner onboards one via `vc.moduleManager.AddAndOnboardNewComponent(new AerodynamicsModule())` + `VC_Enable(false)` and disables (not removes) it on restore.
+10. **ABS/TCS hooks**: `Brakes.brakeTorqueModifiers` (List<BrakeTorqueModifier>) and `EngineComponent.powerModifiers` (List<PowerModifier>) are the exact hooks NWH's own modules use. Sign conventions (from `ABSModule.cs`/`TCSModule.cs`): ABS triggers on `+LongitudinalSlip × sign(LocalForwardVelocity) > threshold`; TCS on `−LongitudinalSlip × sign(LocalForwardVelocity) > threshold` (spinning wheels have negative slip). The mod registers one delegate per vehicle, flag-guarded against duplicates, removed on disable. Like `ABSModule`, the mod's ABS stands down while `vc.input.Handbrake >= 0.1` (read only) — `Brakes` multiplies the modifier into the handbrake torque too.
+
+## 3. Architecture (file-by-file)
+
+```
+Plugin.cs                       Slim entry: config load → ES3 read-only import → Harmony patches (steering + InputBlocker) → hidden runner GO; sceneLoaded → recreate runner.
+PluginInfo.cs                   GUID "dev.apocalypter.tractionsteering" (unchanged for config continuity), name, version "0.2.0-alpha".
+Settings/PresetBook.cs          Generic preset semantics shared by all 7 categories: ITunablePreset + PresetBook<T> (Identity/Custom/Defaults/NotFound, SetByName with legacy-name mapping, BeginEdit copy-to-Custom with BasedOn, Reference for per-slider Reset, ResetCustom).
+Settings/SteeringPreset.cs      6 presets (Vanilla/GTA/Truck/Sim-Race/Drift/Custom) + Defaults; v2.0.0-behavior defaults; Custom mutated by UI; RestoreBaseCurve() re-attaches the BasedOn preset's speed curve after config load.
+Settings/SteeringSettings.cs    Book delegate; Enabled default FALSE (opt-in); MatchGameSteeringSpeed; GameSteeringSpeedFactor.
+Settings/SuspensionPreset.cs    5 presets + Custom as multipliers on stock (Stock/Comfort/Sport/Off-road/Race); the preset factor IS the slider value.
+Settings/SuspensionSettings.cs  Book delegate (legacy "Street"→"Stock"); SplitFrontRear; LinkRearToFront (BeginEdit first); factor accessors Spring(front) etc.
+Settings/AeroPreset.cs          DownforceScale/DragScale/MaxDownforceSpeedScale; presets Stock/Street/Sport/Off-road/Race/Custom.
+Settings/BrakesPreset.cs        TorqueScale/FrontBrakeScale/RearBrakeScale/HandbrakeScale/ActuationScale; presets Stock/Sport/Race/Off-road/Drift/Custom.
+Settings/GripPreset.cs          LongitudinalScale/LateralScale/StiffnessScale; presets Stock/Sport/Race/Off-road/Drift/Custom.
+Settings/DrivetrainPreset.cs    PowerScale/RevLimiterScale/LossScale/BoostScale/FinalDriveScale/UpshiftScale/DownshiftScale/ShiftDurationScale/DiffFrontMode/DiffRearMode (DiffMode enum)/DiffStiffnessScale/DiffBiasScale; presets Stock/Street/Off-road/Sport/Race/Drift/Custom.
+Settings/AssistsPreset.cs       AbsEnabled/AbsSlipThreshold/AbsCutoffSpeed/AbsCutMultiplier + Tcs*; presets Off/Standard/Sport/Off-road/Race/Custom.
+Settings/Limits.cs              Single source of truth for every slider/config range.
+Game/GameSettingsReader.cs      Read-only ES3 import of steeringspeed/smoothinput/normalizeinput; re-read on panel open.
+Persistence/ModConfig.cs        BepInEx ConfigFile binding for all categories; AcceptableValueRange clamping; SettingChanged → runtime push + event; one write per save; v3.1→v3.2 migration (see §5).
+Patching/TractionEdgeSteeringPatch.cs  The steering prefix (allocation-free; target/guards unchanged since v3.0; Vanilla preset = early return true).
+Runtime/VehicleTuner.cs         The multi-system tuner (replaces SuspensionApplier): 2 s unscaled scans (FindObjectsOfType), per-vehicle baseline capture (one pass, per-system null guards, mean-wheel-Z axle detection, TyreWear flag), per-category apply/restore with applied-flags, OnDestroy → RestoreAll, MeanBaseline readout API, TrackedVehicles.
+Runtime/VehicleTuner.Systems.cs Suspension/Grip/Brakes/Drivetrain/Aero apply+restore. Aero: find module in vc.moduleManager.Components; onboard when absent AND the preset differs from Stock; re-enable after restore; no downforce-point synthesis (Stock = exactly as shipped).
+Runtime/VehicleTuner.Assists.cs ABS/TCS delegate factory (allocated once per vehicle, reads live settings each tick) + registration/removal with flags.
+Runtime/InputBlocker.cs        PlayMaker input suppression + timeScale freeze (see §2.8).
+Runtime/SettingsPanelManager.cs On the hidden runner: hotkey/Esc polling (dual input), menu-button injection (§2.7), panel lifecycle, per-frame cursor freeing, EventSystem find-or-create, auto-save on close.
+Runtime/SettingsPanel.cs        The 7-tab panel (anchored layout, one Graphic per GO, mouse-only widgets, single refresher list for all tabs, two-click per-tab reset-all, dim-click close, absolute readouts on suspension sliders).
+Runtime/UiKit.cs                Tiny uGUI widget kit (anchored layout, built-in Arial font with fallbacks, HitArea sliders, scroll view with auto-hide scrollbar).
+```
+
+## 4. Settings model (summary — full data in the preset classes)
+
+- Steering knobs: `RateMultiplier` (× degreesPerSecondLimit) · `CurveOverride`+`SpeedCurve` (evaluated at Speed/50, vanilla normalization) · `SpeedCurveScale` (applies to both preset and vehicle curves) · `SmoothingScale` (× speedSensitiveSmoothingCurve) · `TractionClampEnabled` · `SlipAngleDeg` · `OppositeLockBoost` · `LinearityOverride`+`LinearityExponent`. Custom defaults reproduce the v2.0.0 feel.
+- Steering physics: front-axle slip geometry `frontSlip ≈ bodySlip + (a/v)·yawRate − steerAngle`; clamp to ±SlipAngleDeg yields opposite-lock freedom, into-slide suppression and plow prevention. Clamp bounds are limited to `maximumSteerAngle` BEFORE clamping (fixes the v3.0 inverted-bounds bug).
+- Suspension/other categories: `effective = capturedStock × presetFactor`; presets are authored factors; sliders edit them through Custom. Suspension readouts: mean stock baseline across tracked vehicles × factor.
+- `MatchGameSteeringSpeed` (default true): effective steering rate ×= `Clamp(gameSteeringspeed/50, 0.35, 2.5)`.
+
+## 5. Config schema and migration
+
+Sections: `Steering` (Enabled **false** by default, Preset, MatchGameSteeringSpeed) + `Steering.Custom.*` · `Suspension` (Enabled, Preset, SplitFrontRear) + `Suspension.Custom.*` (10 factor keys + BasedOn) · `Aero` / `Brakes` / `Grip` / `Drivetrain` / `Assists` (Enabled, Preset) + per-category `Custom.*` (incl. DiffFrontMode/DiffRearMode strings, Abs/Tcs keys) · `UI.ToggleKey`. All numeric entries carry AcceptableValueRanges from `Limits`.
+
+**v3.1 → v3.2 migration (one-time, in `ModConfig.MigrateLegacySuspension`)**: (1) `Suspension.Preset = "Street"` maps to "Stock"; (2) if any legacy `[Suspension.User]` multiplier ≠ 1.0, fold `Custom_i = Clamp(presetFactor_i × user_i, 0.5, 2)` into the Suspension.Custom entries with BasedOn set, ActivePreset = Custom; (3) the 10 legacy keys are `config.Remove`d every load so the fold can never run twice. Covered by tests.
+
+## 6. Build and test (no terminal needed on the target machine — but instructions for whoever runs it)
+
+```
+cd plugin && dotnet build -c Release          # real DLL, references game DLLs at D:\SteamLibrary\...\Apocalypter_Data\Managed (adjust paths in the csproj)
+cd verify && bash run.sh                      # stubs compile + 131 tests (125 logic + 6 prefix); .NET SDK 8+; refs/ already populated
+```
+Install: copy the DLL to `BepInEx\plugins\`. **Never run it alongside an old `SteeringFix.dll`** (earlier assembly name) — both prefixes would double-process steering. The GUID is deliberately unchanged, so the existing config file migrates in place.
+
+## 7. Audit checklist (suggested focus)
+
+1. **Settings respected**: prefix honors `useRawInput`, `returnToCenter`, vehicle curves, `degreesPerSecondLimit`, `maximumSteerAngle`, `externallyAddedAngle`; every category restores captured stock values on disable (aero disables onboarded modules; assists remove delegates).
+2. **Allocation-free hot paths**: `Prefix`, tuner apply/restore, and the ABS/TCS delegate bodies must not allocate (no LINQ/ToString/closures/boxing in per-tick paths).
+3. **No writes to the game's save data** (no `ES3.Save` anywhere) and **no writes to `vc.input.*`**.
+4. **Survival**: hidden runner + sceneLoaded recreation; Harmony patch target unchanged; `_buildFailed` guard on panel build.
+5. **Physics correctness**: traction-clamp sign conventions (§4), ABS/TCS slip sign conventions (§2.10), diff-mode index mapping (0=Stock 1=Open 2=Locked 3=LSD), brake/handbrake range clamps.
+6. **Config hygiene**: migration one-time-ness, range clamping, `_syncing` guard, Save on close/disable.
+7. **UI hygiene**: one Graphic per GO, labels raycastTarget=false, EventSystem never duplicated, cursor restored, timeScale restored, input unblocked one frame late.
+
+## 8. Known limitations / deliberate decisions
+
+- Suspension/other tuning applies globally to all vehicles (opt-in per category; stock restored on disable). Factors preserve each vehicle's own character.
+- The panel pauses the game while open (blocker recipe). Widgets are mouse-only (user decision — no keyboard navigation).
+- Vehicles without an aero module get drag tuning only (no downforce-point synthesis); onboarded modules stay in `Components` (disabled and inert) after restore and are reused. A shipped module's own `simulateDrag`/`simulateDownforce` switches are never changed.
+- The mod's TCS keeps a low-speed cutoff (`TcsCutoffSpeed`, default 2 m/s). NWH's `TCSModule` declares `lowerSpeedThreshold` but never reads it, so the stock module also cuts during a standing-start; the mod's launch behaviour therefore differs below the cutoff (set it to 0 for NWH-like launches). Left as is in 0.2.0 — it is a feel decision that needs in-game testing.
+- Digressive damper valving params are deliberately untouched. `brakeOffThrottleIntensity` is deliberately untouched.
+- The engine sound's max RPM (NWH2_RES2) is read once at Start — rev-limiter slider changes won't re-pitch existing sounds (cosmetic). Electric engines ignore the boost slider.
+- Physical steering-wheel support is deferred; the steering patch is input-agnostic.
+- The game's own ABS/TCS modules (if a prefab has them) run alongside the mod's delegates; modifier values multiply (harmless).
+- Power sliders can trivialize the game (accepted — single-player tuning mod).
+
+## 9. Provenance
+
+- Decompilation: ILSpy over every DLL in `Apocalypter_Data\Managed` (`docs/decomSource.ps1`).
+- Survival/menu-button/input-blocker recipes validated against existing Apocalypter mods: [Apocasetter](https://github.com/DeonUrist/Apocasetter) and [ApocalypterInspector](https://github.com/FiveDollaGobby/ApocalypterInspector). The mod implements the same techniques with its own code.
+- NWH Vehicle Physics 2 / WheelController 3D excerpts in `gamecode/` are provided for audit reference only.
+
+## 10. In-game test checklist (for the machine with the game)
+
+1. Log shows `Apocalypter Vehicle Tuning 0.2.0-alpha loaded.` and no errors.
+2. F7 (or the "Vehicle Tuning" button in the pause menu) opens the panel centred; cursor free; game frozen. Esc/F7/X/Done/click-outside close it.
+3. Each of the 7 tabs: master ON applies the preset, sliders live-edit (preset → "Custom (Base)"), Reset returns to the preset origin, OFF restores stock feel.
+4. Steering tab: Vanilla must feel exactly unmodded; Custom defaults ≈ the old v2.0.0 feel; traction clamp + opposite lock behave as before.
+5. Suspension: Race visibly stiffens/lowers, Off-road softens/raises; readouts show plausible absolutes; split front/rear works.
+6. Aero: enable on a vehicle without a downforce setup → drag change only; disable → restored. Brakes: handbrake preset in Drift is noticeably stronger. Grip: Drift slides easily. Drivetrain: Race revs higher; diff lock on; restore exact.
+7. Assists: Standard prevents lock-up under hard braking (feel + no flicker); TCS cuts wheelspin on launch.
+8. Restart → settings persist; config file contains the new sections and no `[Suspension.User]`.

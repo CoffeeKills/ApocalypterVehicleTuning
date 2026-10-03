@@ -1,0 +1,91 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <AssemblyName>ApocalypterSteeringMod</AssemblyName>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Game Core -->
+    <Reference Include="Assembly-CSharp">
+      <HintPath>D:\SteamLibrary\steamapps\common\Apocalypter\Apocalypter_Data\Managed\Assembly-CSharp.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine">
+      <HintPath>D:\SteamLibrary\steamapps\common\Apocalypter\Apocalypter_Data\Managed\UnityEngine.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>D:\SteamLibrary\steamapps\common\Apocalypter\Apocalypter_Data\Managed\UnityEngine.CoreModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.PhysicsModule">
+      <HintPath>D:\SteamLibrary\steamapps\common\Apocalypter\Apocalypter_Data\Managed\UnityEngine.PhysicsModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+
+    <!-- NWH Vehicle Physics Modules -->
+    <Reference Include="NWH.Common">
+      <HintPath>D:\SteamLibrary\steamapps\common\Apocalypter\Apocalypter_Data\Managed\NWH.Common.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="NWH.VehiclePhysics2">
+      <HintPath>D:\SteamLibrary\steamapps\common\Apocalypter\Apocalypter_Data\Managed\NWH.VehiclePhysics2.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="NWH.WheelController">
+      <HintPath>D:\SteamLibrary\steamapps\common\Apocalypter\Apocalypter_Data\Managed\NWH.WheelController.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+
+    <!-- BepInEx & Harmony -->
+    <Reference Include="BepInEx">
+      <HintPath>D:\SteamLibrary\steamapps\common\Apocalypter\BepInEx\core\BepInEx.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="0Harmony">
+      <HintPath>D:\SteamLibrary\steamapps\common\Apocalypter\BepInEx\core\0Harmony.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+
+    <!-- UI (settings panel) -->
+    <Reference Include="UnityEngine.UIModule">
+      <HintPath>D:\SteamLibrary\steamapps\common\Apocalypter\Apocalypter_Data\Managed\UnityEngine.UIModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.UI">
+      <HintPath>D:\SteamLibrary\steamapps\common\Apocalypter\Apocalypter_Data\Managed\UnityEngine.UI.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.InputLegacyModule">
+      <HintPath>D:\SteamLibrary\steamapps\common\Apocalypter\Apocalypter_Data\Managed\UnityEngine.InputLegacyModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Unity.InputSystem">
+      <HintPath>D:\SteamLibrary\steamapps\common\Apocalypter\Apocalypter_Data\Managed\Unity.InputSystem.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.TextRenderingModule">
+      <HintPath>D:\SteamLibrary\steamapps\common\Apocalypter\Apocalypter_Data\Managed\UnityEngine.TextRenderingModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Unity.TextMeshPro">
+      <HintPath>D:\SteamLibrary\steamapps\common\Apocalypter\Apocalypter_Data\Managed\Unity.TextMeshPro.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+
+    <!-- Easy Save 3 (read-only import of the game's own settings) -->
+    <Reference Include="Assembly-CSharp-firstpass">
+      <HintPath>D:\SteamLibrary\steamapps\common\Apocalypter\Apocalypter_Data\Managed\Assembly-CSharp-firstpass.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+
+    <!-- PlayMaker (strip FSMs from cloned menu buttons) -->
+    <Reference Include="PlayMaker">
+      <HintPath>D:\SteamLibrary\steamapps\common\Apocalypter\Apocalypter_Data\Managed\PlayMaker.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+</Project>
