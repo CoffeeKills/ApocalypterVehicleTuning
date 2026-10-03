@@ -26,7 +26,7 @@ namespace ApocalypterSteeringMod.Persistence
         private static ConfigEntry<string> _steerPreset;
         private static ConfigEntry<bool> _matchGameSteeringSpeed;
         private static ConfigEntry<string> _steerBasedOn;
-        private static ConfigEntry<float> _steerRate, _steerSmoothing, _steerCurveScale, _steerSlip, _steerOppLock, _steerLinExp;
+        private static ConfigEntry<float> _steerRate, _steerSmoothing, _steerCurveScale, _steerSlip, _steerOppLock, _steerReturn, _steerLinExp;
         private static ConfigEntry<bool> _steerTraction, _steerLinearityOverride;
 
         // Suspension
@@ -138,6 +138,8 @@ namespace ApocalypterSteeringMod.Persistence
                 "Peak-grip tire slip angle in degrees.");
             _steerOppLock = BindRange("Steering.Custom", "OppositeLockBoost", 1.75f, Limits.OppLockMin, Limits.OppLockMax,
                 "Steering rate boost while applying opposite lock.");
+            _steerReturn = BindRange("Steering.Custom", "CenterReturnScale", 1f, Limits.ReturnScaleMin, Limits.ReturnScaleMax,
+                "Steering rate multiplier while the wheel unwinds toward center (below 1 = lazier return, holds the angle).");
             _steerLinearityOverride = _config.Bind("Steering.Custom", "LinearityOverride", false,
                 "Replace the vehicle's input linearity curve with pow(|input|, exponent).");
             _steerLinExp = BindRange("Steering.Custom", "LinearityExponent", 1f, Limits.LinExpMin, Limits.LinExpMax,
@@ -255,7 +257,7 @@ namespace ApocalypterSteeringMod.Persistence
         {
             Wire(_steerEnabled); Wire(_steerPreset); Wire(_matchGameSteeringSpeed); Wire(_steerBasedOn);
             Wire(_steerRate); Wire(_steerSmoothing); Wire(_steerCurveScale); Wire(_steerTraction);
-            Wire(_steerSlip); Wire(_steerOppLock); Wire(_steerLinearityOverride); Wire(_steerLinExp);
+            Wire(_steerSlip); Wire(_steerOppLock); Wire(_steerReturn); Wire(_steerLinearityOverride); Wire(_steerLinExp);
             Wire(_suspEnabled); Wire(_suspPreset); Wire(_suspSplit); Wire(_suspBasedOn);
             Wire(_suspSpringF); Wire(_suspSpringR); Wire(_suspHeightF); Wire(_suspHeightR);
             Wire(_suspBumpF); Wire(_suspBumpR); Wire(_suspReboundF); Wire(_suspReboundR);
@@ -414,6 +416,7 @@ namespace ApocalypterSteeringMod.Persistence
                 _steerTraction.Value = sc.TractionClampEnabled;
                 _steerSlip.Value = sc.SlipAngleDeg;
                 _steerOppLock.Value = sc.OppositeLockBoost;
+                _steerReturn.Value = sc.CenterReturnScale;
                 _steerLinearityOverride.Value = sc.LinearityOverride;
                 _steerLinExp.Value = sc.LinearityExponent;
 
@@ -544,6 +547,7 @@ namespace ApocalypterSteeringMod.Persistence
             sc.TractionClampEnabled = _steerTraction.Value;
             sc.SlipAngleDeg = _steerSlip.Value;
             sc.OppositeLockBoost = _steerOppLock.Value;
+            sc.CenterReturnScale = _steerReturn.Value;
             sc.LinearityOverride = _steerLinearityOverride.Value;
             sc.LinearityExponent = _steerLinExp.Value;
             sc.RestoreBaseCurve();

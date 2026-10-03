@@ -379,7 +379,11 @@ namespace ApocalypterSteeringMod.Runtime
                     cg.blocksRaycasts = true;
                 }
 
-                // Escape any layout group and pin to the top-right corner.
+                // Escape any layout group and pin to the top-right corner, BELOW
+                // Apocasetter's MODS button (it pins at (-30,-30); ours sat on top
+                // of it and swallowed its clicks). Stack directly under it when
+                // detected, otherwise keep a fixed clearance so a later injection
+                // by Apocasetter still cannot cover us.
                 LayoutElement le = go.GetComponent<LayoutElement>() ?? go.AddComponent<LayoutElement>();
                 le.ignoreLayout = true;
                 RectTransform rt = (RectTransform)go.transform;
@@ -392,7 +396,18 @@ namespace ApocalypterSteeringMod.Runtime
                 rt.anchorMax = new Vector2(1f, 1f);
                 rt.pivot = new Vector2(1f, 1f);
                 rt.sizeDelta = new Vector2(Mathf.Max(size.x, 240f), size.y);
-                rt.anchoredPosition = new Vector2(-30f, -30f);
+                RectTransform modsButton = FindModsButton(canvas);
+                float topY = -30f;
+                if (modsButton != null)
+                {
+                    float h = modsButton.rect.size.y > 10f ? modsButton.rect.size.y : 50f;
+                    topY = modsButton.anchoredPosition.y - h - 6f;
+                }
+                else
+                {
+                    topY = -85f;   // clears the standard Apocasetter pin even if it injects after us
+                }
+                rt.anchoredPosition = new Vector2(-30f, topY);
                 rt.localScale = Vector3.one;
                 go.transform.SetAsLastSibling();
                 go.SetActive(false);
@@ -403,6 +418,38 @@ namespace ApocalypterSteeringMod.Runtime
             {
                 Plugin.Log.LogWarning("Could not inject menu button into " + canvas.name + ": " + ex.Message);
             }
+        }
+
+        // Apocasetter's injected MODS button, if it exists on this canvas.
+        // Its clone keeps the template's GameObject name, so match the label.
+        private static RectTransform FindModsButton(Canvas canvas)
+        {
+            Button[] buttons = canvas.GetComponentsInChildren<Button>(true);
+            for (int i = 0; i < buttons.Length; i++)
+            {
+                Button b = buttons[i];
+                if (b == null || b.gameObject == null)
+                {
+                    continue;
+                }
+                foreach (Text tx in b.GetComponentsInChildren<Text>(true))
+                {
+                    string t = (tx.text ?? "").Trim();
+                    if (t == "MODS" || t == "Mods")
+                    {
+                        return (RectTransform)b.transform;
+                    }
+                }
+                foreach (TMP_Text tx in b.GetComponentsInChildren<TMP_Text>(true))
+                {
+                    string t = (tx.text ?? "").Trim();
+                    if (t == "MODS" || t == "Mods")
+                    {
+                        return (RectTransform)b.transform;
+                    }
+                }
+            }
+            return null;
         }
 
         private static bool IsAllCaps(string s)

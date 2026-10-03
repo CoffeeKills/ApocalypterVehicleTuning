@@ -118,6 +118,21 @@ public static class PrefixTests
             TractionEdgeSteeringPatch.Prefix(s);
             Check(Math.Abs(s.angle) <= 30.001f, "large left slide stays within +/-30 (angle " + s.angle.ToString("0.0") + ")");
 
+            // ETS center return: unwinding toward center is scaled, winding on is not.
+            SteeringPreset.Custom.CenterReturnScale = 0.25f;
+            s.degreesPerSecondLimit = 100f;                 // 2 deg per tick at full rate
+            s.angle = 10f;
+            vc.input.Steering = 0f;                         // release: target -> 0
+            vc.vehicleRigidbody.velocity = new Vector3(0f, 0f, 20f);
+            TractionEdgeSteeringPatch.Prefix(s);
+            Check(s.angle > 9.49f && s.angle < 10f, "release unwinds at the scaled rate (angle " + s.angle.ToString("0.00") + ")");
+            s.angle = 0f;
+            vc.input.Steering = 1f;
+            TractionEdgeSteeringPatch.Prefix(s);
+            Check(s.angle >= 1.9f, "winding on still uses the full rate (angle " + s.angle.ToString("0.00") + ")");
+            SteeringPreset.Custom.CenterReturnScale = 1f;
+            s.degreesPerSecondLimit = 100000f;
+
             // Vanilla preset falls through.
             SteeringSettings.Select(SteeringPreset.Vanilla);
             Check(TractionEdgeSteeringPatch.Prefix(s), "Vanilla preset -> vanilla code runs");

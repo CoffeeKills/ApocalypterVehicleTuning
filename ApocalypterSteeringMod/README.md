@@ -76,7 +76,7 @@ Audit of 0.1.0-alpha against `gamecode/` and §2. Every fix below has a regressi
 ## Changes in 0.3.0-alpha
 
 **Steering preset**
-1. **"Truck-sim" is replaced by "Euro Truck".** The old preset was already the truck-ish option, but its tuning was too quick for a heavy-highway feel. Euro Truck: rate ×0.5 (was ×0.7), speed curve (0,1)(0.2,0.6)(0.5,0.3)(1,0.12) — at 80–90 km/h cruise the wheel cuts to roughly a third of full lock — smoothing ×1.7, slip clamp 6.5°, **no** opposite-lock boost (you counter-steer yourself; the wheel never snaps), linearity pow 1.35 (gentle around centre). A saved `Steering.Preset = Truck-sim` (and `Steering.Custom.BasedOn = Truck-sim`) migrates to Euro Truck on load, both at runtime (preset-book legacy map) and in the config file (rewritten on load, like the earlier Street→Stock migration). The Custom speed curve survives the migration.
+1. **"Truck-sim" is replaced by "Euro Truck".** The old preset was already the truck-ish option, but its tuning was too quick for a heavy-highway feel. Euro Truck: rate ×0.5 (was ×0.7), speed curve (0,1)(0.2,0.6)(0.5,0.3)(1,0.12) — at 80–90 km/h cruise the wheel cuts to roughly a third of full lock — smoothing ×1.7, slip clamp 6.5°, **no** opposite-lock boost (you counter-steer yourself; the wheel never snaps), linearity pow 1.35 (gentle around centre), and **center return ×0.25**: unwinding toward center runs at a quarter of the steer-in rate, so the wheel stays where you put it and eases back instead of springing to center (a new `Steering.Custom.CenterReturnScale` knob, range 0.1–1, default 1 = symmetric; other presets unchanged). A saved `Steering.Preset = Truck-sim` (and `Steering.Custom.BasedOn = Truck-sim`) migrates to Euro Truck on load, both at runtime (preset-book legacy map) and in the config file (rewritten on load, like the earlier Street→Stock migration). The Custom speed curve survives the migration.
 
 **Apocasetter integration (zero code dependency)**
 2. **The mod registers with the Apocasetter Mods menu.** A new `[General] Apocasetter = true` config entry (the opt-in convention Apocasetter reads via Chainloader) lists the mod with its square icon in the Mods window, where every config entry gets a described, ranged, live-editing control for free. No DLL reference to Apocasetter — it works exactly as before without it.
@@ -84,6 +84,9 @@ Audit of 0.1.0-alpha against `gamecode/` and §2. Every fix below has a regressi
 
 **Localization groundwork**
 4. **The panel is translatable via ApocaLanguage.** Every dynamic string moved into `Runtime/UiStrings.cs` as `{0}` templates (value formats, preset "Custom (…)" labels, status lines — singular/plural split), so ApocaLanguage's uGUI `Text` hooks can translate them; static labels already flowed through `Text.text` and need no change. Panel labels now render rich text so translated tags display correctly. `docs/strings.md` documents the full inventory and the translator rules (preset `Name` = config ID, never translated; `Label` = display). No dependency on ApocaLanguage — without it, everything renders in English as before.
+
+**Menu button**
+5. **The "Vehicle Tuning" button no longer covers Apocasetter's MODS button.** Both mods pinned their injected menu button at (-30,-30) top-right; ours drew on top and ate the MODS clicks. Ours now pins below: it stacks directly under a detected MODS-labeled button, or at a fixed clearance that a later Apocasetter injection still cannot overlap.
 
 **Not changed** (all §2 facts preserved): the steering prefix (byte-identical), the hidden-runner survival architecture, the InputBlocker recipe, one Graphic per GameObject, the mouse-only panel, no `ES3.Save`, no `vc.input.*` writes, BepInEx config as the only persistence, the GUID.
 
@@ -153,7 +156,7 @@ gamecode/, PROMPT.md            Audit-bundle files, now kept in the tree (gameco
 
 ## 4. Settings model (summary — full data in the preset classes)
 
-- Steering knobs: `RateMultiplier` (× degreesPerSecondLimit) · `CurveOverride`+`SpeedCurve` (evaluated at Speed/50, vanilla normalization) · `SpeedCurveScale` (applies to both preset and vehicle curves) · `SmoothingScale` (× speedSensitiveSmoothingCurve) · `TractionClampEnabled` · `SlipAngleDeg` · `OppositeLockBoost` · `LinearityOverride`+`LinearityExponent`. Custom defaults reproduce the v2.0.0 feel.
+- Steering knobs: `RateMultiplier` (× degreesPerSecondLimit) · `CurveOverride`+`SpeedCurve` (evaluated at Speed/50, vanilla normalization) · `SpeedCurveScale` (applies to both preset and vehicle curves) · `SmoothingScale` (× speedSensitiveSmoothingCurve) · `TractionClampEnabled` · `SlipAngleDeg` · `OppositeLockBoost` · `CenterReturnScale` (× rate while unwinding toward center, below 1 = lazy return) · `LinearityOverride`+`LinearityExponent`. Custom defaults reproduce the v2.0.0 feel.
 - Steering physics: front-axle slip geometry `frontSlip ≈ bodySlip + (a/v)·yawRate − steerAngle`; clamp to ±SlipAngleDeg yields opposite-lock freedom, into-slide suppression and plow prevention. Clamp bounds are limited to `maximumSteerAngle` BEFORE clamping (fixes the v3.0 inverted-bounds bug).
 - Suspension/other categories: `effective = capturedStock × presetFactor`; presets are authored factors; sliders edit them through Custom. Suspension readouts: mean stock baseline across tracked vehicles × factor.
 - `MatchGameSteeringSpeed` (default true): effective steering rate ×= `Clamp(gameSteeringspeed/50, 0.35, 2.5)`.
@@ -231,9 +234,9 @@ powershell Compress-Archive README.md,PROMPT.md,plugin,verify,gamecode,docs ..\A
 6. Aero: enable on a vehicle without a downforce setup → drag change only; disable → restored. Brakes: handbrake preset in Drift is noticeably stronger. Grip: Drift slides easily. Drivetrain: Race revs higher; diff lock on; restore exact.
 7. Assists: Standard prevents lock-up under hard braking (feel + no flicker); TCS cuts wheelspin on launch.
 8. Restart → settings persist; config file contains the new sections and no `[Suspension.User]`.
-9. **0.3.0 — Euro Truck:** the steering tab shows "Euro Truck" (no "Truck"); values read ×0.50 rate, ×1.70 smoothing, 6.5°, ×1.00 counter-steer. At highway speed the wheel is clearly slower and cuts less lock than the old Truck-sim; no counter-steer snap when catching a slide.
+9. **0.3.0 — Euro Truck:** the steering tab shows "Euro Truck" (no "Truck"); values read ×0.50 rate, ×1.70 smoothing, 6.5°, ×1.00 counter-steer, ×0.25 center return. At highway speed the wheel is clearly slower and cuts less lock than the old Truck-sim; releasing the key does NOT snap the wheel back — it eases toward center at the reduced rate; no counter-steer snap when catching a slide.
 10. **0.3.0 — migration:** with a cfg containing `Steering.Preset = Truck-sim` (or `BasedOn = Truck-sim`), after launch the panel shows Euro Truck active, the cfg now says `Preset = Euro Truck`, and a Custom's speed curve is preserved.
-11. **0.3.0 — Apocasetter (install v2.0.6 first):** the Mods window lists "Apocalypter Vehicle Tuning" with the square icon; all seven sections' entries appear as live editors with ranges/descriptions; editing there updates the panel (SettingChanged is already wired); the cfg contains `[General] Apocasetter = true`.
+11. **0.3.0 — Apocasetter (install v2.0.6 first):** the Mods window lists "Apocalypter Vehicle Tuning" with the square icon; all seven sections' entries appear as live editors with ranges/descriptions; editing there updates the panel (SettingChanged is already wired); the cfg contains `[General] Apocasetter = true`. In the pause menu the "MODS" and "Vehicle Tuning" buttons sit stacked in the top-right corner without overlapping, and both click through.
 12. **0.3.0 — ApocaLanguage (install v1.5.2 + a language pack):** panel labels translate on language switch; dynamic templates ("×1.40", "Custom (Race)") translate when the pack covers them; the "Vehicle Tuning" menu label translates.
 
 ## 11. Translation (ApocaLanguage)

@@ -131,6 +131,15 @@ namespace ApocalypterSteeringMod.Patching
             SteerVelocityRef(__instance) = steerVelocity;
             TargetAngleRef(__instance) = smoothedTarget;
 
+            // ETS feel: unwinding toward center is slower than winding on — the
+            // wheel stays where it was put and eases back instead of snapping.
+            // Only when the target is smaller than the current angle; held input
+            // keeps the full wind rate.
+            if (preset.CenterReturnScale < 1f && Mathf.Abs(smoothedTarget) < Mathf.Abs(__instance.angle))
+            {
+                rateLimit *= preset.CenterReturnScale;
+            }
+
             __instance.angle = Mathf.MoveTowards(__instance.angle, smoothedTarget, rateLimit * vc.fixedDeltaTime);
 
             // Apply Ackermann geometry exactly as the game does.

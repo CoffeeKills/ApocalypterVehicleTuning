@@ -594,6 +594,10 @@ namespace ApocalypterSteeringMod.Runtime
                 Limits.SmoothMin, Limits.SmoothMax,
                 () => Shown.SmoothingScale, v => EditSteering(p => p.SmoothingScale = v),
                 () => SteeringSettings.Reference().SmoothingScale, UiStrings.Times);
+            AddSlider(t, "Center return", "How fast the wheel unwinds toward center (lower = it stays where you put it)",
+                Limits.ReturnScaleMin, Limits.ReturnScaleMax,
+                () => Shown.CenterReturnScale, v => EditSteering(p => p.CenterReturnScale = v),
+                () => SteeringSettings.Reference().CenterReturnScale, UiStrings.Times);
 
             AddSectionTitle(t, "Grip and slides");
             AddOption(t, "Grip assist", "Stops the front tyres turning past their grip limit",

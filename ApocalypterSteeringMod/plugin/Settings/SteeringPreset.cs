@@ -24,7 +24,6 @@ namespace ApocalypterSteeringMod.Settings
 
         // Multiplier on the vehicle's configured degreesPerSecondLimit.
         public float RateMultiplier = 1f;
-
         // true = replace the vehicle's speedSensitiveSteeringCurve with SpeedCurve
         // (evaluated at Speed/50f, same normalization as vanilla).
         public bool CurveOverride;
@@ -42,6 +41,11 @@ namespace ApocalypterSteeringMod.Settings
 
         // Steering rate boost while applying opposite lock (1.0 = none).
         public float OppositeLockBoost = 1.75f;
+
+        // Multiplier on the steering rate while the wheel unwinds toward center
+        // (|target| < |angle|). Below 1 = the wheel stays where it was put and
+        // eases back instead of snapping — the ETS/truck feel. 1.0 = symmetric.
+        public float CenterReturnScale = 1f;
 
         // true = use pow(|input|, LinearityExponent) instead of the vehicle's linearity curve.
         public bool LinearityOverride;
@@ -112,6 +116,7 @@ namespace ApocalypterSteeringMod.Settings
                     SmoothingScale = 1.7f,
                     SlipAngleDeg = 6.5f,
                     OppositeLockBoost = 1f,
+                    CenterReturnScale = 0.25f,
                     LinearityOverride = true,
                     LinearityExponent = 1.35f
                 },
@@ -166,6 +171,7 @@ namespace ApocalypterSteeringMod.Settings
             OppositeLockBoost = src.OppositeLockBoost;
             LinearityOverride = src.LinearityOverride;
             LinearityExponent = src.LinearityExponent;
+            CenterReturnScale = src.CenterReturnScale;
         }
 
         /// <summary>A real tunable preset by config name (never Custom / Vanilla), or null.</summary>

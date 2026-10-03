@@ -195,7 +195,7 @@ public static class Tests
         TestConfigHardening(dir);
 
         Console.WriteLine("0.3.0 regressions (Euro Truck, Apocasetter key, UiStrings)");
-        TestEuroTruck();
+        TestEuroTruck(dir);
         TestLegacySteeringMigration(dir);
         TestApocasetterKey(dir);
         TestUiStrings();
@@ -712,7 +712,7 @@ public static class Tests
         DrivetrainSettings.ResetAll();
     }
 
-    private static void TestEuroTruck()
+    private static void TestEuroTruck(string dir)
     {
         SteeringPreset euro = SteeringPreset.FindBuiltIn("Euro Truck");
         Check(euro != null, "Euro Truck preset exists");
@@ -731,12 +731,30 @@ public static class Tests
             "Euro Truck values: rate 0.5, smoothing 1.7, slip 6.5, opp-lock 1.0, linearity 1.35");
         Check(euro.TractionClampEnabled && euro.CurveOverride && euro.LinearityOverride,
             "Euro Truck enables the traction clamp and both overrides");
+        Check(Near(euro.CenterReturnScale, 0.25f), "Euro Truck center return x0.25 (lazy unwind)");
+        Check(Near(SteeringPreset.FindBuiltIn("GTA-style Keyboard").CenterReturnScale, 1f)
+              && Near(SteeringPreset.FindBuiltIn("Sim/Race").CenterReturnScale, 1f)
+              && Near(SteeringPreset.FindBuiltIn("Drift").CenterReturnScale, 1f)
+              && Near(SteeringPreset.Custom.CenterReturnScale, 1f),
+            "other presets keep symmetric return (1.0)");
         Check(euro.SpeedCurve != null && Near(euro.SpeedCurve.Evaluate(0f), 1f)
               && Near(euro.SpeedCurve.Evaluate(0.5f), 0.3f) && Near(euro.SpeedCurve.Evaluate(1f), 0.12f),
             "Euro Truck speed curve: 1 @ 0, 0.3 @ 0.5, 0.12 @ 1");
         SteeringSettings.SetPresetByName("Truck-sim");
         Check(SteeringSettings.ActivePreset == euro, "runtime SetByName('Truck-sim') resolves to Euro Truck");
         SteeringSettings.SetPresetByName("Custom");
+        SteeringSettings.ResetAll();
+
+        // CenterReturnScale persists through the config file (own file: _config
+        // points at whatever the previous test loaded).
+        string rt = Path.Combine(dir, "return.cfg");
+        File.WriteAllText(rt, "");
+        ModConfig.Load(new ConfigFile(rt, true));
+        SteeringPreset.Custom.CenterReturnScale = 0.4f;
+        ModConfig.Save();
+        SteeringSettings.ResetAll();
+        ModConfig.Load(new ConfigFile(rt, true));
+        Check(Near(SteeringPreset.Custom.CenterReturnScale, 0.4f), "CenterReturnScale config round-trip");
         SteeringSettings.ResetAll();
     }
 

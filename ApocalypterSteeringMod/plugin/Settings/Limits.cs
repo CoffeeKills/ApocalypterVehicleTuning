@@ -12,6 +12,7 @@ namespace ApocalypterSteeringMod.Settings
         public const float CurveScaleMin = 0.5f, CurveScaleMax = 2f;
         public const float SlipMin = 2f, SlipMax = 15f;
         public const float OppLockMin = 1f, OppLockMax = 3f;
+        public const float ReturnScaleMin = 0.1f, ReturnScaleMax = 1f;
         public const float LinExpMin = 0.3f, LinExpMax = 3f;
 
         // Suspension fine-tune sliders (multiplier on top of the preset).
