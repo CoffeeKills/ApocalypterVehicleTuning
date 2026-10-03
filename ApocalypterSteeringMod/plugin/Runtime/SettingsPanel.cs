@@ -549,6 +549,23 @@ namespace ApocalypterSteeringMod.Runtime
             }
         }
 
+        /// <summary>
+        /// Curve-editor edit entry: forks the active preset into Custom (copying
+        /// its curves), applies the mutation to the chosen curve and returns the
+        /// live curve, or null when the active preset cannot be edited (Vanilla).
+        /// </summary>
+        private EditableCurve EditCurve(Func<SteeringPreset, EditableCurve> pick, Action<EditableCurve> mutate)
+        {
+            SteeringPreset p = SteeringSettings.BeginEdit();
+            if (p == null)
+            {
+                return null;
+            }
+            mutate(pick(p));
+            Refresh();
+            return pick(p);
+        }
+
         private void BuildSteering(RectTransform content)
         {
             AddMasterSwitch(content, "Steering tuning", "OFF = the game's original steering, exactly as shipped.",
@@ -581,28 +598,54 @@ namespace ApocalypterSteeringMod.Runtime
             CanvasGroup tuning = AddGroup(c, "Tuning", out RectTransform t);
             BindGroup(tuning, () => !IsVanilla);
 
-            AddSectionTitle(t, "Feel");
+            AddSectionTitle(t, "Response");
             AddSlider(t, "Steering speed", "How fast the wheels turn toward your input",
                 Limits.RateMin, Limits.RateMax,
                 () => Shown.RateMultiplier, v => EditSteering(p => p.RateMultiplier = v),
                 () => SteeringSettings.Reference().RateMultiplier, UiStrings.Times);
-            AddSlider(t, "Steering at speed", "How much lock you still get when going fast",
-                Limits.CurveScaleMin, Limits.CurveScaleMax,
-                () => Shown.SpeedCurveScale, v => EditSteering(p => p.SpeedCurveScale = v),
-                () => SteeringSettings.Reference().SpeedCurveScale, UiStrings.Times);
             AddSlider(t, "Smoothing", "Higher = softer, lazier response",
                 Limits.SmoothMin, Limits.SmoothMax,
                 () => Shown.SmoothingScale, v => EditSteering(p => p.SmoothingScale = v),
                 () => SteeringSettings.Reference().SmoothingScale, UiStrings.Times);
-            AddSlider(t, "Center return", "How fast the wheel unwinds toward center (lower = it stays where you put it)",
-                Limits.ReturnScaleMin, Limits.ReturnScaleMax,
-                () => Shown.CenterReturnScale, v => EditSteering(p => p.CenterReturnScale = v),
-                () => SteeringSettings.Reference().CenterReturnScale, UiStrings.Times);
+            AddOption(t, "Use the vehicle's input curve", "OFF = pow curve with the exponent below",
+                () => !Shown.LinearityOverride, v => EditSteering(p => p.LinearityOverride = !v));
+            AddSlider(t, "Centre sensitivity", "Low = twitchy at centre, high = gentle",
+                Limits.LinExpMin, Limits.LinExpMax,
+                () => Shown.LinearityExponent, v => EditSteering(p => p.LinearityExponent = v),
+                () => SteeringSettings.Reference().LinearityExponent, v => v.ToString("0.00"),
+                () => Shown.LinearityOverride);
+
+            AddOption(t, "Use the vehicle's own curve", "OFF = use the custom lock curve below",
+                () => Shown.UseVehicleCurve, v => EditSteering(p => p.UseVehicleCurve = v));
+            CurveEditor lockEditor = CurveEditor.Create(t,
+                "Lock at speed",
+                "How much steering you keep at speed. Left edge = stopped, right edge = 180 km/h and above. Click = add a point, drag = move, double-click = remove.",
+                () => Shown.LockCurve,
+                () => SteeringSettings.Reference().LockCurve,
+                mutate => EditCurve(pp => pp.LockCurve, mutate));
+            _refreshers.Add(lockEditor.Refresh);
+            GameObject lockRow = lockEditor.Row;
+            _refreshers.Add(() =>
+            {
+                bool on = !Shown.UseVehicleCurve;
+                if (lockRow.activeSelf != on)
+                {
+                    lockRow.SetActive(on);
+                }
+            });
+
+            CurveEditor returnEditor = CurveEditor.Create(t,
+                "Return to center",
+                "How fast the wheel straightens after you let go. Flat at 1 = steers back as fast as it steers in. A lower line = lazier. Ramping up from 0 = holds the wheels while stopped, then straightens out as you drive. Flat at the left edge = vanilla low-speed handling.",
+                () => Shown.ReturnCurve,
+                () => SteeringSettings.Reference().ReturnCurve,
+                mutate => EditCurve(pp => pp.ReturnCurve, mutate));
+            _refreshers.Add(returnEditor.Refresh);
 
             AddSectionTitle(t, "Grip and slides");
-            AddOption(t, "Grip assist", "Stops the front tyres turning past their grip limit",
+            AddOption(t, "Front slip clamp", "Stops the front tyres turning past their grip limit",
                 () => Shown.TractionClampEnabled, v => EditSteering(p => p.TractionClampEnabled = v));
-            AddSlider(t, "Grip window", "Higher = more steering before tyres slide",
+            AddSlider(t, "Slip window", "Higher = more steering before tyres slide",
                 Limits.SlipMin, Limits.SlipMax,
                 () => Shown.SlipAngleDeg, v => EditSteering(p => p.SlipAngleDeg = v),
                 () => SteeringSettings.Reference().SlipAngleDeg, v => UiStrings.Deg(v),
@@ -611,15 +654,6 @@ namespace ApocalypterSteeringMod.Runtime
                 Limits.OppLockMin, Limits.OppLockMax,
                 () => Shown.OppositeLockBoost, v => EditSteering(p => p.OppositeLockBoost = v),
                 () => SteeringSettings.Reference().OppositeLockBoost, UiStrings.Times);
-
-            AddSectionTitle(t, "Input");
-            AddOption(t, "Custom input curve", "OFF = use each car's own response curve",
-                () => Shown.LinearityOverride, v => EditSteering(p => p.LinearityOverride = v));
-            AddSlider(t, "Centre sensitivity", "Low = twitchy at centre, high = gentle",
-                Limits.LinExpMin, Limits.LinExpMax,
-                () => Shown.LinearityExponent, v => EditSteering(p => p.LinearityExponent = v),
-                () => SteeringSettings.Reference().LinearityExponent, v => v.ToString("0.00"),
-                () => Shown.LinearityOverride);
 
             AddSectionTitle(c, "Game setting");
             Text gameHint = AddOption(c, "Follow game's steering speed", "",

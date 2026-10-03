@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using ApocalypterSteeringMod.Settings;
 using BepInEx.Configuration;
 using UnityEngine;
@@ -26,7 +27,11 @@ namespace ApocalypterSteeringMod.Persistence
         private static ConfigEntry<string> _steerPreset;
         private static ConfigEntry<bool> _matchGameSteeringSpeed;
         private static ConfigEntry<string> _steerBasedOn;
-        private static ConfigEntry<float> _steerRate, _steerSmoothing, _steerCurveScale, _steerSlip, _steerOppLock, _steerReturn, _steerLinExp;
+        private static ConfigEntry<float> _steerRate, _steerSmoothing, _steerSlip, _steerOppLock, _steerLinExp;
+        private static ConfigEntry<bool> _steerUseVehicleCurve;
+        private static ConfigEntry<string> _steerLockCurve, _steerReturnCurve;
+        // Legacy v0.3.x curve knobs — bound for one-time migration, then removed.
+        private static ConfigEntry<float> _legacySteerCurveScale, _legacySteerReturn;
         private static ConfigEntry<bool> _steerTraction, _steerLinearityOverride;
 
         // Suspension
@@ -88,6 +93,25 @@ namespace ApocalypterSteeringMod.Persistence
         {
             _config = config;
 
+            // Capture legacy-key presence BEFORE any Bind. ConfigFile.ContainsKey
+            // only sees bound entries, so read the raw file text instead (the file
+            // is what a <= 0.3.x install wrote). Presence == "file last written by
+            // <= 0.3.x" — the migration must not clobber post-migration curves.
+            bool hadLegacySteeringCurves = false;
+            try
+            {
+                string cfgPath = config.ConfigFilePath;
+                if (!string.IsNullOrEmpty(cfgPath) && File.Exists(cfgPath))
+                {
+                    string raw = File.ReadAllText(cfgPath);
+                    hadLegacySteeringCurves = raw.Contains("SpeedCurveScale") || raw.Contains("CenterReturnScale");
+                }
+            }
+            catch (Exception)
+            {
+                // Missing/unreadable file: nothing to migrate.
+            }
+
             // One file write at the end instead of one per Bind.
             bool autoSave = config.SaveOnConfigSet;
             config.SaveOnConfigSet = false;
@@ -107,6 +131,7 @@ namespace ApocalypterSteeringMod.Persistence
                 "Show this mod in the Apocasetter Mods menu (requires Apocasetter installed).");
 
             MigrateLegacySteeringPreset();
+            MigrateLegacySteeringCurves(hadLegacySteeringCurves);
             PushAllToRuntime();
             MigrateLegacySuspension();
 
@@ -125,25 +150,31 @@ namespace ApocalypterSteeringMod.Persistence
             _matchGameSteeringSpeed = _config.Bind("Steering", "MatchGameSteeringSpeed", true,
                 "Scale the steering rate with the game's own steering speed setting.");
             _steerBasedOn = _config.Bind("Steering.Custom", "BasedOn", "",
-                "Built-in preset the Custom tuning was copied from (restores that preset's speed curve). Leave empty for none.");
+                "Built-in preset the Custom tuning was copied from (restores that preset's curves). Leave empty for none.");
             _steerRate = BindRange("Steering.Custom", "RateMultiplier", 1f, Limits.RateMin, Limits.RateMax,
                 "Multiplier on the vehicle's configured deg/s steering rate.");
             _steerSmoothing = BindRange("Steering.Custom", "SmoothingScale", 1f, Limits.SmoothMin, Limits.SmoothMax,
                 "Multiplier on the vehicle's smoothing time.");
-            _steerCurveScale = BindRange("Steering.Custom", "SpeedCurveScale", 1f, Limits.CurveScaleMin, Limits.CurveScaleMax,
-                "Multiplier on the speed-sensitive steering curve (never exceeds the car's max steer angle).");
+            _steerUseVehicleCurve = _config.Bind("Steering.Custom", "UseVehicleCurve", true,
+                "Use each vehicle's own speed-sensitive steering curve instead of the custom LockCurve.");
+            _steerLockCurve = _config.Bind("Steering.Custom", "LockCurve", EditableCurve.DefaultLockCurveText,
+                "Lock-at-speed curve: \"x:y;x:y\" points (x = speed/50, y = fraction of max steer, 2-8 points).");
+            _steerReturnCurve = _config.Bind("Steering.Custom", "ReturnCurve", EditableCurve.DefaultReturnCurveText,
+                "Return-to-center curve: \"x:y;x:y\" points (y = fraction of the steer-in rate while unwinding; 0 at rest = holds the wheels).");
             _steerTraction = _config.Bind("Steering.Custom", "TractionClampEnabled", true,
                 "Clamp the steer angle so front tires stay near their peak-grip slip angle.");
             _steerSlip = BindRange("Steering.Custom", "SlipAngleDeg", 8.5f, Limits.SlipMin, Limits.SlipMax,
                 "Peak-grip tire slip angle in degrees.");
             _steerOppLock = BindRange("Steering.Custom", "OppositeLockBoost", 1.75f, Limits.OppLockMin, Limits.OppLockMax,
                 "Steering rate boost while applying opposite lock.");
-            _steerReturn = BindRange("Steering.Custom", "CenterReturnScale", 1f, Limits.ReturnScaleMin, Limits.ReturnScaleMax,
-                "Steering rate multiplier while the wheel unwinds toward center (below 1 = lazier return, holds the angle).");
             _steerLinearityOverride = _config.Bind("Steering.Custom", "LinearityOverride", false,
                 "Replace the vehicle's input linearity curve with pow(|input|, exponent).");
             _steerLinExp = BindRange("Steering.Custom", "LinearityExponent", 1f, Limits.LinExpMin, Limits.LinExpMax,
                 "Input linearity exponent (1 = linear, below 1 = sharper near center, above 1 = gentler).");
+
+            // Legacy v0.3.x keys — read once for migration, then removed.
+            _legacySteerCurveScale = BindRange("Steering.Custom", "SpeedCurveScale", 1f, Limits.CurveScaleMin, Limits.CurveScaleMax, "Legacy.");
+            _legacySteerReturn = BindRange("Steering.Custom", "CenterReturnScale", 1f, Limits.ReturnScaleMin, Limits.ReturnScaleMax, "Legacy.");
         }
 
         private static void BindSuspension()
@@ -256,8 +287,9 @@ namespace ApocalypterSteeringMod.Persistence
         private static void WireAll()
         {
             Wire(_steerEnabled); Wire(_steerPreset); Wire(_matchGameSteeringSpeed); Wire(_steerBasedOn);
-            Wire(_steerRate); Wire(_steerSmoothing); Wire(_steerCurveScale); Wire(_steerTraction);
-            Wire(_steerSlip); Wire(_steerOppLock); Wire(_steerReturn); Wire(_steerLinearityOverride); Wire(_steerLinExp);
+            Wire(_steerRate); Wire(_steerSmoothing); Wire(_steerUseVehicleCurve); Wire(_steerLockCurve);
+            Wire(_steerReturnCurve); Wire(_steerTraction);
+            Wire(_steerSlip); Wire(_steerOppLock); Wire(_steerLinearityOverride); Wire(_steerLinExp);
             Wire(_suspEnabled); Wire(_suspPreset); Wire(_suspSplit); Wire(_suspBasedOn);
             Wire(_suspSpringF); Wire(_suspSpringR); Wire(_suspHeightF); Wire(_suspHeightR);
             Wire(_suspBumpF); Wire(_suspBumpR); Wire(_suspReboundF); Wire(_suspReboundR);
@@ -304,6 +336,46 @@ namespace ApocalypterSteeringMod.Persistence
             {
                 _syncing = wasSyncing;
             }
+        }
+
+        /// <summary>
+        /// v0.4.0: the speed curve and center return are editable curves now.
+        /// One-time fold of the legacy knobs: SpeedCurveScale scales the
+        /// BasedOn preset's lock curve (exact old behaviour), CenterReturnScale
+        /// becomes a flat return curve. Triggered by legacy-key PRESENCE (see
+        /// Load) so a post-migration user's own curves are never clobbered.
+        /// Caveat: vehicle-curve users (BasedOn "") with a scale != 1 lose the
+        /// scale — the old knob has no equivalent in the new model.
+        /// </summary>
+        private static void MigrateLegacySteeringCurves(bool hadLegacyKeys)
+        {
+            if (hadLegacyKeys)
+            {
+                bool wasSyncing = _syncing;
+                _syncing = true;
+                try
+                {
+                    SteeringPreset b = SteeringPreset.FindBuiltIn(_steerBasedOn.Value);
+                    float oldScale = _legacySteerCurveScale.Value;
+                    float oldReturn = _legacySteerReturn.Value;
+                    _steerUseVehicleCurve.Value = b == null;
+                    if (b != null)
+                    {
+                        EditableCurve lockCurve = b.LockCurve.Clone();
+                        lockCurve.ScaleY(oldScale);
+                        _steerLockCurve.Value = lockCurve.Serialize();
+                    }
+                    // b == null: the old code used the vehicle's curve; LockCurve keeps its template.
+                    _steerReturnCurve.Value = EditableCurve.Flat(oldReturn).Serialize();
+                }
+                finally
+                {
+                    _syncing = wasSyncing;
+                }
+            }
+            // Always remove so the fold can never run twice.
+            _config.Remove(new ConfigDefinition("Steering.Custom", "SpeedCurveScale"));
+            _config.Remove(new ConfigDefinition("Steering.Custom", "CenterReturnScale"));
         }
 
         /// <summary>
@@ -412,11 +484,12 @@ namespace ApocalypterSteeringMod.Persistence
                 _steerBasedOn.Value = sc.BasedOn ?? "";
                 _steerRate.Value = sc.RateMultiplier;
                 _steerSmoothing.Value = sc.SmoothingScale;
-                _steerCurveScale.Value = sc.SpeedCurveScale;
+                _steerUseVehicleCurve.Value = sc.UseVehicleCurve;
+                _steerLockCurve.Value = sc.LockCurve != null ? sc.LockCurve.Serialize() : EditableCurve.DefaultLockCurveText;
+                _steerReturnCurve.Value = sc.ReturnCurve != null ? sc.ReturnCurve.Serialize() : EditableCurve.DefaultReturnCurveText;
                 _steerTraction.Value = sc.TractionClampEnabled;
                 _steerSlip.Value = sc.SlipAngleDeg;
                 _steerOppLock.Value = sc.OppositeLockBoost;
-                _steerReturn.Value = sc.CenterReturnScale;
                 _steerLinearityOverride.Value = sc.LinearityOverride;
                 _steerLinExp.Value = sc.LinearityExponent;
 
@@ -543,14 +616,25 @@ namespace ApocalypterSteeringMod.Persistence
             sc.BasedOn = _steerBasedOn.Value ?? "";
             sc.RateMultiplier = _steerRate.Value;
             sc.SmoothingScale = _steerSmoothing.Value;
-            sc.SpeedCurveScale = _steerCurveScale.Value;
             sc.TractionClampEnabled = _steerTraction.Value;
             sc.SlipAngleDeg = _steerSlip.Value;
             sc.OppositeLockBoost = _steerOppLock.Value;
-            sc.CenterReturnScale = _steerReturn.Value;
             sc.LinearityOverride = _steerLinearityOverride.Value;
             sc.LinearityExponent = _steerLinExp.Value;
+            // Restore the BasedOn preset's curves first (fallback for missing or
+            // garbage config strings), then override with parsed config values.
             sc.RestoreBaseCurve();
+            sc.UseVehicleCurve = _steerUseVehicleCurve.Value;
+            EditableCurve lockCurve;
+            if (EditableCurve.TryParse(_steerLockCurve.Value, out lockCurve))
+            {
+                sc.LockCurve = lockCurve;
+            }
+            EditableCurve returnCurve;
+            if (EditableCurve.TryParse(_steerReturnCurve.Value, out returnCurve))
+            {
+                sc.ReturnCurve = returnCurve;
+            }
 
             SuspensionSettings.Enabled = _suspEnabled.Value;
             SuspensionSettings.SetPresetByName(_suspPreset.Value);

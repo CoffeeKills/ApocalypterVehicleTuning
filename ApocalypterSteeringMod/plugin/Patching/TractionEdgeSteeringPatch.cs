@@ -49,21 +49,32 @@ namespace ApocalypterSteeringMod.Patching
             Rigidbody rb = vc.vehicleRigidbody;
             float steeringInput = vc.input.Steering;
 
-            // Mirror vanilla's guards so configured behavior is never overridden:
-            // raw-input vehicles steer directly, and with returnToCenter disabled
-            // the wheels hold their position when input is released.
-            if (rb == null
-                || __instance.useRawInput
-                || (!__instance.returnToCenter && steeringInput > -0.04f && steeringInput < 0.04f))
+            if (rb == null || __instance.useRawInput)
             {
                 return true;
             }
 
-            // Stationary and reverse: leave parking maneuvers to vanilla.
             Vector3 localVel = vc.transform.InverseTransformDirection(rb.velocity);
             float forwardVel = localVel.z;
-            if (forwardVel < MIN_TRACTION_SPEED)
+
+            // A return curve that holds at rest takes over low-speed steering; a
+            // symmetric one (flat 1) keeps vanilla's own guards untouched so every
+            // other configuration behaves exactly as before.
+            bool holdsAtRest = preset.ReturnCurve.Evaluate(0f) < 0.999f;
+            if (!holdsAtRest)
             {
+                // Mirror vanilla's guards: raw-input vehicles steer directly, and
+                // with returnToCenter disabled the wheels hold position on release.
+                if ((!__instance.returnToCenter && steeringInput > -0.04f && steeringInput < 0.04f)
+                    || forwardVel < MIN_TRACTION_SPEED)
+                {
+                    return true;
+                }
+            }
+            else if (forwardVel < -MIN_TRACTION_SPEED)
+            {
+                // True reverse stays vanilla even with a hold curve; a gentle
+                // backward roll is treated as stopped.
                 return true;
             }
 
@@ -71,11 +82,10 @@ namespace ApocalypterSteeringMod.Patching
             float maxSteer = __instance.maximumSteerAngle;
             float smoothTime = __instance.speedSensitiveSmoothingCurve.Evaluate(speedNorm) * preset.SmoothingScale;
 
-            // Speed curve: the preset's own, or the vehicle's. SpeedCurveScale applies to both
-            // so the "Steering at speed" slider behaves the same on every preset.
-            float curveValue = (preset.CurveOverride && preset.SpeedCurve != null
-                ? preset.SpeedCurve.Evaluate(speedNorm)
-                : __instance.speedSensitiveSteeringCurve.Evaluate(speedNorm)) * preset.SpeedCurveScale;
+            // Lock-at-speed: the vehicle's own curve, or the preset's editable one.
+            float curveValue = preset.UseVehicleCurve
+                ? __instance.speedSensitiveSteeringCurve.Evaluate(speedNorm)
+                : preset.LockCurve.Evaluate(speedNorm);
 
             float linearity = preset.LinearityOverride
                 ? Mathf.Pow(Mathf.Abs(steeringInput), preset.LinearityExponent)
@@ -83,18 +93,21 @@ namespace ApocalypterSteeringMod.Patching
 
             float target = curveValue * maxSteer * linearity * (steeringInput < 0f ? -1f : 1f);
 
-            // Never ask for more lock than the vehicle has (SpeedCurveScale can be > 1).
+            // Never ask for more lock than the vehicle has (vehicle curves may exceed 1).
             target = Mathf.Clamp(target, -maxSteer, maxSteer);
 
             // Sideslip angle beta: velocity direction relative to the nose.
-            // Positive = sliding right (rear stepped out to the left).
+            // Positive = sliding right (rear stepped out to the left). The traction
+            // model is only defined above MIN_TRACTION_SPEED, so it is skipped below
+            // (a hold-curve preset still steers there, without the clamp).
             float bodySlipDeg = 0f;
-            if (preset.TractionClampEnabled || preset.OppositeLockBoost > 1f)
+            if (forwardVel >= MIN_TRACTION_SPEED
+                && (preset.TractionClampEnabled || preset.OppositeLockBoost > 1f))
             {
                 bodySlipDeg = Mathf.Atan2(localVel.x, forwardVel) * Mathf.Rad2Deg;
             }
 
-            if (preset.TractionClampEnabled)
+            if (preset.TractionClampEnabled && forwardVel >= MIN_TRACTION_SPEED)
             {
                 // Yaw-rate lead: front-axle slip contribution of the chassis rotation,
                 // lead = (a / v) * yawRate with 'a' approximated from the wheelbase.
@@ -131,13 +144,13 @@ namespace ApocalypterSteeringMod.Patching
             SteerVelocityRef(__instance) = steerVelocity;
             TargetAngleRef(__instance) = smoothedTarget;
 
-            // ETS feel: unwinding toward center is slower than winding on — the
-            // wheel stays where it was put and eases back instead of snapping.
-            // Only when the target is smaller than the current angle; held input
-            // keeps the full wind rate.
-            if (preset.CenterReturnScale < 1f && Mathf.Abs(smoothedTarget) < Mathf.Abs(__instance.angle))
+            // Unwinding toward center runs at ReturnCurve(speed) of the steer-in
+            // rate. Flat 1 = symmetric (unchanged feel). A curve that starts at 0
+            // makes the wheels hold their angle when stopped; as speed builds the
+            // same line straightens them out. Winding on always uses the full rate.
+            if (Mathf.Abs(smoothedTarget) < Mathf.Abs(__instance.angle))
             {
-                rateLimit *= preset.CenterReturnScale;
+                rateLimit *= preset.ReturnCurve.Evaluate(speedNorm);
             }
 
             __instance.angle = Mathf.MoveTowards(__instance.angle, smoothedTarget, rateLimit * vc.fixedDeltaTime);

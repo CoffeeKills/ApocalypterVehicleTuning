@@ -69,7 +69,7 @@ public static class PrefixTests
     {
         SteeringSettings.Enabled = true;
         SteeringPreset.Custom.ResetToDefaults();
-        SteeringPreset.Custom.SpeedCurveScale = 2f;   // asks for more than full lock
+        SteeringPreset.Custom.UseVehicleCurve = true;
         SteeringSettings.Select(SteeringPreset.Custom);
         SteeringSettings.MatchGameSteeringSpeed = false;
 
@@ -80,21 +80,21 @@ public static class PrefixTests
             maximumSteerAngle = 30f,
             degreesPerSecondLimit = 100000f,   // let the angle reach its target in one tick
             linearity = new AnimationCurve(new Keyframe(0f, 0f), new Keyframe(1f, 1f)),
-            speedSensitiveSteeringCurve = new AnimationCurve(new Keyframe(0f, 1f), new Keyframe(1f, 1f)),
+            speedSensitiveSteeringCurve = new AnimationCurve(new Keyframe(0f, 2f), new Keyframe(1f, 2f)),   // exceeds 1 -> the max-lock cap is load-bearing
             speedSensitiveSmoothingCurve = new AnimationCurve(new Keyframe(0f, 0.05f), new Keyframe(1f, 0.05f))
         };
         vc.Speed = 20f;
 
         try
         {
-            // Full right input, curve scale 2 -> 60 deg requested on a 30 deg car.
+            // Full right input, vehicle curve 2 -> 60 deg requested on a 30 deg car.
             vc.input.Steering = 1f;
             vc.vehicleRigidbody.velocity = new Vector3(0f, 0f, 20f);
             vc.vehicleRigidbody.angularVelocity = new Vector3(0f, 0f, 0f);
             SteeringPreset.Custom.TractionClampEnabled = false;   // isolate the max-lock cap
             TractionEdgeSteeringPatch.Prefix(s);
             SteeringPreset.Custom.TractionClampEnabled = true;
-            Check(s.angle <= 30.001f && s.angle > 29f, "curve scale x2 still capped at max lock (angle " + s.angle.ToString("0.0") + ")");
+            Check(s.angle <= 30.001f && s.angle > 29f, "vehicle curve above 1 still capped at max lock (angle " + s.angle.ToString("0.0") + ")");
 
             // Huge slide: velocity points 60 deg to the right. Old code: lo = 60-8.5 = 51.5 > hi = 30 -> 51.5 deg.
             s.angle = 0f;
@@ -118,19 +118,61 @@ public static class PrefixTests
             TractionEdgeSteeringPatch.Prefix(s);
             Check(Math.Abs(s.angle) <= 30.001f, "large left slide stays within +/-30 (angle " + s.angle.ToString("0.0") + ")");
 
-            // ETS center return: unwinding toward center is scaled, winding on is not.
-            SteeringPreset.Custom.CenterReturnScale = 0.25f;
+            // Center return curve: unwinding toward center is scaled, winding on is not.
+            SteeringPreset.Custom.ReturnCurve = EditableCurve.Flat(0.25f);
             s.degreesPerSecondLimit = 100f;                 // 2 deg per tick at full rate
             s.angle = 10f;
             vc.input.Steering = 0f;                         // release: target -> 0
             vc.vehicleRigidbody.velocity = new Vector3(0f, 0f, 20f);
             TractionEdgeSteeringPatch.Prefix(s);
-            Check(s.angle > 9.49f && s.angle < 10f, "release unwinds at the scaled rate (angle " + s.angle.ToString("0.00") + ")");
+            Check(s.angle > 9.49f && s.angle < 10f, "release unwinds at the flat-0.25 rate (angle " + s.angle.ToString("0.00") + ")");
             s.angle = 0f;
             vc.input.Steering = 1f;
             TractionEdgeSteeringPatch.Prefix(s);
             Check(s.angle >= 1.9f, "winding on still uses the full rate (angle " + s.angle.ToString("0.00") + ")");
-            SteeringPreset.Custom.CenterReturnScale = 1f;
+            SteeringPreset.Custom.ReturnCurve = EditableCurve.Flat(1f);
+            s.degreesPerSecondLimit = 100000f;
+
+            // Unwind rate follows the return curve vs speed: ramp (0,0)(0.5,0.5)(1,1).
+            SteeringPreset.Custom.ReturnCurve = EditableCurve.FromPoints(0f, 0f, 0.5f, 0.5f, 1f, 1f);
+            s.degreesPerSecondLimit = 100f;
+            vc.Speed = 12.5f;                               // norm 0.25 -> curve 0.25 -> 0.5 deg/tick
+            s.angle = 10f;
+            vc.input.Steering = 0f;
+            vc.vehicleRigidbody.velocity = new Vector3(0f, 0f, 12.5f);
+            TractionEdgeSteeringPatch.Prefix(s);
+            Check(s.angle > 9.49f && s.angle < 9.51f, "unwind at norm 0.25 uses the curve's half rate (angle " + s.angle.ToString("0.00") + ")");
+            vc.Speed = 25f;                                 // norm 0.5 -> curve 0.5 -> 1 deg/tick
+            s.angle = 10f;
+            vc.vehicleRigidbody.velocity = new Vector3(0f, 0f, 25f);
+            TractionEdgeSteeringPatch.Prefix(s);
+            Check(s.angle > 8.99f && s.angle < 9.01f, "unwind at norm 0.5 uses the curve's rate (angle " + s.angle.ToString("0.00") + ")");
+
+            // Hold at rest: ramp curve + no speed -> the prefix runs and the angle holds.
+            s.angle = 10f;
+            vc.input.Steering = 0f;
+            vc.Speed = 0f;
+            vc.vehicleRigidbody.velocity = new Vector3(0f, 0f, 0f);
+            Check(!TractionEdgeSteeringPatch.Prefix(s) && s.angle > 9.999f,
+                "hold-at-rest: prefix runs and the wheels hold their angle (angle " + s.angle.ToString("0.00") + ")");
+
+            // Low-speed steering still works with a hold curve (no clamp, full wind rate).
+            vc.input.Steering = 1f;
+            vc.Speed = 0.5f;
+            vc.vehicleRigidbody.velocity = new Vector3(0f, 0f, 0.5f);
+            Check(!TractionEdgeSteeringPatch.Prefix(s) && s.angle > 10f,
+                "low-speed input steers with a hold curve (angle " + s.angle.ToString("0.00") + ")");
+
+            // True reverse still falls through to vanilla even with a hold curve.
+            vc.vehicleRigidbody.velocity = new Vector3(0f, 0f, -5f);
+            Check(TractionEdgeSteeringPatch.Prefix(s), "true reverse falls through with a hold curve");
+            SteeringPreset.Custom.ReturnCurve = EditableCurve.Flat(1f);
+
+            // Flat-1 return keeps the old low-speed guard: below 1.5 m/s -> vanilla.
+            vc.vehicleRigidbody.velocity = new Vector3(0f, 0f, 0.5f);
+            Check(TractionEdgeSteeringPatch.Prefix(s), "flat-1 return keeps the vanilla low-speed fall-through");
+            vc.vehicleRigidbody.velocity = new Vector3(0f, 0f, 20f);
+            vc.Speed = 20f;
             s.degreesPerSecondLimit = 100000f;
 
             // Vanilla preset falls through.

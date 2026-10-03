@@ -59,6 +59,20 @@ namespace UnityEngine
 
     public class MonoBehaviour : Behaviour { }
 
+    public class Camera : Behaviour
+    {
+        public static Camera main { get { return null; } }
+    }
+
+    public static class RectTransformUtility
+    {
+        public static bool ScreenPointToLocalPointInRectangle(RectTransform rect, Vector2 screenPoint, Camera cam, out Vector2 localPoint)
+        {
+            localPoint = default(Vector2);
+            return false;
+        }
+    }
+
     public sealed class GameObject : Object
     {
         public GameObject(string name) { }
@@ -97,6 +111,14 @@ namespace UnityEngine
     public struct Rect
     {
         public Vector2 size { get { return default(Vector2); } }
+        public float width { get { return 0f; } }
+        public float height { get { return 0f; } }
+        public float x { get { return 0f; } }
+        public float y { get { return 0f; } }
+        public float xMin { get { return 0f; } }
+        public float yMin { get { return 0f; } }
+        public float xMax { get { return 0f; } }
+        public float yMax { get { return 0f; } }
     }
 
     public sealed class RectTransform : Transform
@@ -117,6 +139,11 @@ namespace UnityEngine
         public Vector2(float x, float y) { this.x = x; this.y = y; }
         public static Vector2 zero { get { return default(Vector2); } }
         public static Vector2 one { get { return new Vector2(1, 1); } }
+        public static Vector2 operator +(Vector2 a, Vector2 b) { return new Vector2(a.x + b.x, a.y + b.y); }
+        public static Vector2 operator -(Vector2 a, Vector2 b) { return new Vector2(a.x - b.x, a.y - b.y); }
+        public static Vector2 operator -(Vector2 a) { return new Vector2(-a.x, -a.y); }
+        public static Vector2 operator *(Vector2 a, float d) { return new Vector2(a.x * d, a.y * d); }
+        public static Vector2 operator /(Vector2 a, float d) { return new Vector2(a.x / d, a.y / d); }
     }
 
     public struct Vector3
@@ -134,6 +161,16 @@ namespace UnityEngine
         public Color(float r, float g, float b, float a) { this.r = r; this.g = g; this.b = b; this.a = a; }
         public Color(float r, float g, float b) : this(r, g, b, 1f) { }
         public static Color white { get { return new Color(1, 1, 1, 1); } }
+    }
+
+    public struct Color32
+    {
+        public byte r, g, b, a;
+        public Color32(byte r, byte g, byte b, byte a) { this.r = r; this.g = g; this.b = b; this.a = a; }
+        public static implicit operator Color32(Color c)
+        {
+            return new Color32((byte)(c.r * 255f), (byte)(c.g * 255f), (byte)(c.b * 255f), (byte)(c.a * 255f));
+        }
     }
 
     public class RectOffset
@@ -178,7 +215,9 @@ namespace UnityEngine
         public static float Sin(float f) { return (float)Math.Sin(f); }
         public static float Cos(float f) { return (float)Math.Cos(f); }
         public static float Pow(float f, float p) { return (float)Math.Pow(f, p); }
+        public static float Sqrt(float f) { return (float)Math.Sqrt(f); }
         public static float Clamp(float v, float min, float max) { if (v < min) v = min; else if (v > max) v = max; return v; }
+        public static float Clamp01(float v) { return Clamp(v, 0f, 1f); }
         public static float Max(float a, float b) { return a > b ? a : b; }
         public static int Max(int a, int b) { return a > b ? a : b; }
         public static float Min(float a, float b) { return a < b ? a : b; }
@@ -312,6 +351,24 @@ namespace UnityEngine.EventSystems
 
     public abstract class BaseInputModule : UIBehaviour { }
     public class StandaloneInputModule : BaseInputModule { }
+
+    public class PointerEventData
+    {
+        public enum InputButton { Left, Right, Middle }
+        public Vector2 position { get; set; }
+        public int clickCount { get; set; }
+        private bool _used;
+        public bool used { get { return _used; } }
+        public void Use() { _used = true; }
+        public bool dragging { get; set; }
+        public Camera pressEventCamera { get; set; }
+        public InputButton button { get; set; }
+    }
+
+    public interface IBeginDragHandler { void OnBeginDrag(PointerEventData eventData); }
+    public interface IDragHandler { void OnDrag(PointerEventData eventData); }
+    public interface IEndDragHandler { void OnEndDrag(PointerEventData eventData); }
+    public interface IPointerClickHandler { void OnPointerClick(PointerEventData eventData); }
 }
 
 namespace UnityEngine.UI
@@ -323,6 +380,24 @@ namespace UnityEngine.UI
     {
         public virtual Color color { get; set; }
         public virtual bool raycastTarget { get; set; }
+        public RectTransform rectTransform { get { return null; } }
+        protected virtual void OnPopulateMesh(VertexHelper vh) { }
+        public void SetVerticesDirty() { }
+    }
+
+    public class VertexHelper
+    {
+        public int currentVertCount { get { return 0; } }
+        public void Clear() { }
+        public void AddVert(Vector3 position, Color32 color, Vector2 uv0) { }
+        public void AddTriangle(int idx0, int idx1, int idx2) { }
+    }
+
+    public struct UIVertex
+    {
+        public Vector3 position;
+        public Color32 color;
+        public Vector2 uv0;
     }
 
     public abstract class MaskableGraphic : Graphic { }

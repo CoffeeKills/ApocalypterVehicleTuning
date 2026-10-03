@@ -1,12 +1,11 @@
-using UnityEngine;
-
 namespace ApocalypterSteeringMod.Settings
 {
     /// <summary>
     /// One steering behavior preset. Non-Vanilla presets feed the traction-edge
     /// patch; Vanilla skips the patch body entirely and leaves stock NWH steering.
-    /// The Custom instance is what the settings panel edits: touching any slider
-    /// while a built-in preset is active copies that preset into Custom first.
+    /// The Custom instance is what the settings panel edits: touching any control
+    /// while a built-in preset is active copies that preset into Custom first
+    /// (curves are deep-copied — presets are never mutated).
     /// </summary>
     public sealed class SteeringPreset : ITunablePreset
     {
@@ -24,13 +23,18 @@ namespace ApocalypterSteeringMod.Settings
 
         // Multiplier on the vehicle's configured degreesPerSecondLimit.
         public float RateMultiplier = 1f;
-        // true = replace the vehicle's speedSensitiveSteeringCurve with SpeedCurve
-        // (evaluated at Speed/50f, same normalization as vanilla).
-        public bool CurveOverride;
-        public AnimationCurve SpeedCurve;
 
-        // Scales the speed curve (the vehicle's own, or SpeedCurve when overridden).
-        public float SpeedCurveScale = 1f;
+        // true = evaluate each vehicle's own speedSensitiveSteeringCurve;
+        // false = use LockCurve instead.
+        public bool UseVehicleCurve;
+
+        // Lock-at-speed curve (x = Speed/50, y = fraction of maximumSteerAngle).
+        public EditableCurve LockCurve;
+
+        // Return-to-center curve (x = Speed/50, y = fraction of the steer-in rate
+        // used while unwinding toward center). Flat 1 = symmetric return; a ramp
+        // from 0 = holds the angle when stopped, straightens out as speed builds.
+        public EditableCurve ReturnCurve;
 
         // Multiplier on the vehicle's speedSensitiveSmoothingCurve value.
         public float SmoothingScale = 1f;
@@ -42,17 +46,12 @@ namespace ApocalypterSteeringMod.Settings
         // Steering rate boost while applying opposite lock (1.0 = none).
         public float OppositeLockBoost = 1.75f;
 
-        // Multiplier on the steering rate while the wheel unwinds toward center
-        // (|target| < |angle|). Below 1 = the wheel stays where it was put and
-        // eases back instead of snapping — the ETS/truck feel. 1.0 = symmetric.
-        public float CenterReturnScale = 1f;
-
         // true = use pow(|input|, LinearityExponent) instead of the vehicle's linearity curve.
         public bool LinearityOverride;
         public float LinearityExponent = 1f;
 
         // Custom only: the built-in preset this was copied from ("" = none).
-        // Persisted so the preset's speed curve can be restored after a restart.
+        // Persisted so the preset's curves can be restored after a restart.
         public string BasedOn { get; set; } = "";
 
         public static readonly SteeringPreset[] Presets;
@@ -64,21 +63,37 @@ namespace ApocalypterSteeringMod.Settings
 
         static SteeringPreset()
         {
-            Defaults = new SteeringPreset { Name = "Defaults", Label = "Defaults" };
+            EditableCurve templateLock = TemplateLockCurve();
+            EditableCurve flatReturn = EditableCurve.Flat(1f);
+
+            Defaults = new SteeringPreset
+            {
+                Name = "Defaults",
+                Label = "Defaults",
+                UseVehicleCurve = true,
+                LockCurve = templateLock.Clone(),
+                ReturnCurve = flatReturn.Clone()
+            };
 
             Vanilla = new SteeringPreset
             {
                 Name = "Vanilla",
                 Label = "Vanilla",
                 IsVanilla = true,
-                Description = "The game's original steering. The mod changes nothing. Pick another preset to tune."
+                Description = "The game's original steering. The mod changes nothing. Pick another preset to tune.",
+                UseVehicleCurve = true,
+                LockCurve = templateLock.Clone(),   // editor display/reference only
+                ReturnCurve = flatReturn.Clone()
             };
 
             Custom = new SteeringPreset
             {
                 Name = "Custom",
                 Label = "Custom",
-                Description = "Your own tuning."
+                Description = "Your own tuning.",
+                UseVehicleCurve = true,
+                LockCurve = templateLock.Clone(),
+                ReturnCurve = flatReturn.Clone()
             };
 
             Presets = new SteeringPreset[]
@@ -90,11 +105,9 @@ namespace ApocalypterSteeringMod.Settings
                     Label = "GTA-style",
                     Description = "Quick, responsive arcade steering built for keyboards. Turns in fast and eases off at speed.",
                     RateMultiplier = 1.6f,
-                    CurveOverride = true,
-                    SpeedCurve = new AnimationCurve(
-                        new Keyframe(0f, 1f),
-                        new Keyframe(0.35f, 0.45f),
-                        new Keyframe(1f, 0.15f)),
+                    UseVehicleCurve = false,
+                    LockCurve = EditableCurve.FromPoints(0f, 1f, 0.35f, 0.45f, 1f, 0.15f),
+                    ReturnCurve = EditableCurve.Flat(1f),
                     SmoothingScale = 0.8f,
                     SlipAngleDeg = 8.5f,
                     OppositeLockBoost = 1.75f,
@@ -105,18 +118,14 @@ namespace ApocalypterSteeringMod.Settings
                 {
                     Name = "Euro Truck",
                     Label = "Euro Truck",
-                    Description = "Heavy highway-truck feel: slow steering, soft response and very little lock at speed.",
+                    Description = "Heavy highway-truck feel: slow steering, soft response and very little lock at speed. Holds the wheels where you leave them when stopped, then straightens out as you drive.",
                     RateMultiplier = 0.5f,
-                    CurveOverride = true,
-                    SpeedCurve = new AnimationCurve(
-                        new Keyframe(0f, 1f),
-                        new Keyframe(0.2f, 0.6f),
-                        new Keyframe(0.5f, 0.3f),
-                        new Keyframe(1f, 0.12f)),
+                    UseVehicleCurve = false,
+                    LockCurve = EditableCurve.FromPoints(0f, 1f, 0.2f, 0.6f, 0.5f, 0.3f, 1f, 0.12f),
+                    ReturnCurve = EditableCurve.FromPoints(0f, 0f, 0.3f, 0.4f, 1f, 0.7f),
                     SmoothingScale = 1.7f,
                     SlipAngleDeg = 6.5f,
                     OppositeLockBoost = 1f,
-                    CenterReturnScale = 0.25f,
                     LinearityOverride = true,
                     LinearityExponent = 1.35f
                 },
@@ -126,11 +135,9 @@ namespace ApocalypterSteeringMod.Settings
                     Label = "Sim / Race",
                     Description = "Balanced and precise. Smooth response and firm stability at high speed.",
                     RateMultiplier = 1f,
-                    CurveOverride = true,
-                    SpeedCurve = new AnimationCurve(
-                        new Keyframe(0f, 1f),
-                        new Keyframe(0.5f, 0.35f),
-                        new Keyframe(1f, 0.22f)),
+                    UseVehicleCurve = false,
+                    LockCurve = EditableCurve.FromPoints(0f, 1f, 0.5f, 0.35f, 1f, 0.22f),
+                    ReturnCurve = EditableCurve.Flat(1f),
                     SmoothingScale = 1f,
                     SlipAngleDeg = 8.5f,
                     OppositeLockBoost = 1.5f,
@@ -143,11 +150,9 @@ namespace ApocalypterSteeringMod.Settings
                     Label = "Drift",
                     Description = "Loose and playful. Fast counter-steer and a wide grip window make slides easy to hold.",
                     RateMultiplier = 1.4f,
-                    CurveOverride = true,
-                    SpeedCurve = new AnimationCurve(
-                        new Keyframe(0f, 1f),
-                        new Keyframe(0.4f, 0.55f),
-                        new Keyframe(1f, 0.3f)),
+                    UseVehicleCurve = false,
+                    LockCurve = EditableCurve.FromPoints(0f, 1f, 0.4f, 0.55f, 1f, 0.3f),
+                    ReturnCurve = EditableCurve.Flat(1f),
                     SmoothingScale = 0.6f,
                     SlipAngleDeg = 12f,
                     OppositeLockBoost = 2f,
@@ -158,20 +163,25 @@ namespace ApocalypterSteeringMod.Settings
             };
         }
 
+        /// <summary>The starter curve shown to users who turn "use the vehicle's own curve" off.</summary>
+        private static EditableCurve TemplateLockCurve()
+        {
+            return EditableCurve.FromPoints(0f, 1f, 0.5f, 0.35f, 1f, 0.22f);
+        }
+
         /// <summary>Copies the tuning values (not the identity) from another preset.</summary>
         public void CopyFrom(SteeringPreset src)
         {
             RateMultiplier = src.RateMultiplier;
-            CurveOverride = src.CurveOverride;
-            SpeedCurve = src.SpeedCurve;   // curves are never mutated, safe to share
-            SpeedCurveScale = src.SpeedCurveScale;
+            UseVehicleCurve = src.UseVehicleCurve;
+            LockCurve = src.LockCurve != null ? src.LockCurve.Clone() : null;   // curves are mutable: clone, never share
+            ReturnCurve = src.ReturnCurve != null ? src.ReturnCurve.Clone() : null;
             SmoothingScale = src.SmoothingScale;
             TractionClampEnabled = src.TractionClampEnabled;
             SlipAngleDeg = src.SlipAngleDeg;
             OppositeLockBoost = src.OppositeLockBoost;
             LinearityOverride = src.LinearityOverride;
             LinearityExponent = src.LinearityExponent;
-            CenterReturnScale = src.CenterReturnScale;
         }
 
         /// <summary>A real tunable preset by config name (never Custom / Vanilla), or null.</summary>
@@ -200,22 +210,18 @@ namespace ApocalypterSteeringMod.Settings
         }
 
         /// <summary>
-        /// Custom only: the config file stores BasedOn but not the speed curve itself,
-        /// so after loading, re-attach the curve of the preset Custom was copied from.
+        /// Custom only: restore UseVehicleCurve and both curves from the preset
+        /// Custom was copied from (BasedOn), or the defaults when that does not
+        /// resolve. Now a fallback for missing or garbage config strings — the
+        /// config itself stores the curves.
         /// </summary>
         public void RestoreBaseCurve()
         {
             SteeringPreset b = FindBuiltIn(BasedOn);
-            if (b != null && b.CurveOverride)
-            {
-                CurveOverride = true;
-                SpeedCurve = b.SpeedCurve;
-            }
-            else
-            {
-                CurveOverride = false;
-                SpeedCurve = null;
-            }
+            SteeringPreset src = b ?? Defaults;
+            UseVehicleCurve = src.UseVehicleCurve;
+            LockCurve = src.LockCurve.Clone();
+            ReturnCurve = src.ReturnCurve.Clone();
         }
     }
 }

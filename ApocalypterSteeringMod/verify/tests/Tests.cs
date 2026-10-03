@@ -108,8 +108,9 @@ public static class Tests
         Check(!AeroSettings.Enabled && !BrakesSettings.Enabled && !GripSettings.Enabled && !DrivetrainSettings.Enabled && !AssistsSettings.Enabled,
             "new categories all opt-in (off by default)");
         SteeringPreset c0 = SteeringPreset.Custom;
-        Check(Near(c0.RateMultiplier, 1f) && Near(c0.SlipAngleDeg, 8.5f) && Near(c0.OppositeLockBoost, 1.75f) && !c0.CurveOverride && !c0.LinearityOverride,
-            "steering Custom defaults == v2.0.0 behaviour");
+        Check(Near(c0.RateMultiplier, 1f) && Near(c0.SlipAngleDeg, 8.5f) && Near(c0.OppositeLockBoost, 1.75f) && c0.UseVehicleCurve && !c0.LinearityOverride
+              && c0.ReturnCurve.Serialize() == "0:1;1:1",
+            "steering Custom defaults == v2.0.0 behaviour (vehicle curve + symmetric return)");
 
         Console.WriteLine("Steering preset semantics (preset-book)");
         SteeringPreset drift = SteeringPreset.FindBuiltIn("Drift");
@@ -199,6 +200,10 @@ public static class Tests
         TestLegacySteeringMigration(dir);
         TestApocasetterKey(dir);
         TestUiStrings();
+
+        Console.WriteLine("0.4.0 (editable curves + steering curve migration)");
+        TestEditableCurve();
+        TestSteeringCurveMigration(dir);
 
         Console.WriteLine();
         Console.WriteLine(_pass + " passed, " + _fail + " failed");
@@ -729,52 +734,196 @@ public static class Tests
               && Near(euro.SlipAngleDeg, 6.5f) && Near(euro.OppositeLockBoost, 1f)
               && Near(euro.LinearityExponent, 1.35f),
             "Euro Truck values: rate 0.5, smoothing 1.7, slip 6.5, opp-lock 1.0, linearity 1.35");
-        Check(euro.TractionClampEnabled && euro.CurveOverride && euro.LinearityOverride,
-            "Euro Truck enables the traction clamp and both overrides");
-        Check(Near(euro.CenterReturnScale, 0.25f), "Euro Truck center return x0.25 (lazy unwind)");
-        Check(Near(SteeringPreset.FindBuiltIn("GTA-style Keyboard").CenterReturnScale, 1f)
-              && Near(SteeringPreset.FindBuiltIn("Sim/Race").CenterReturnScale, 1f)
-              && Near(SteeringPreset.FindBuiltIn("Drift").CenterReturnScale, 1f)
-              && Near(SteeringPreset.Custom.CenterReturnScale, 1f),
-            "other presets keep symmetric return (1.0)");
-        Check(euro.SpeedCurve != null && Near(euro.SpeedCurve.Evaluate(0f), 1f)
-              && Near(euro.SpeedCurve.Evaluate(0.5f), 0.3f) && Near(euro.SpeedCurve.Evaluate(1f), 0.12f),
-            "Euro Truck speed curve: 1 @ 0, 0.3 @ 0.5, 0.12 @ 1");
+        Check(euro.TractionClampEnabled && !euro.UseVehicleCurve && euro.LinearityOverride,
+            "Euro Truck enables the traction clamp, uses its own lock curve, and the linearity override");
+
+        // Exact preset curves (0.4.0 conversions).
+        Check(SteeringPreset.FindBuiltIn("GTA-style Keyboard").LockCurve.Serialize() == "0:1;0.35:0.45;1:0.15", "GTA lock curve exact");
+        Check(euro.LockCurve.Serialize() == "0:1;0.2:0.6;0.5:0.3;1:0.12", "Euro Truck lock curve exact");
+        Check(SteeringPreset.FindBuiltIn("Sim/Race").LockCurve.Serialize() == "0:1;0.5:0.35;1:0.22", "Sim/Race lock curve exact");
+        Check(SteeringPreset.FindBuiltIn("Drift").LockCurve.Serialize() == "0:1;0.4:0.55;1:0.3", "Drift lock curve exact");
+        Check(Near(euro.LockCurve.Evaluate(0f), 1f) && Near(euro.LockCurve.Evaluate(0.5f), 0.3f) && Near(euro.LockCurve.Evaluate(1f), 0.12f),
+            "Euro Truck lock curve: 1 @ 0, 0.3 @ 0.5, 0.12 @ 1");
+
+        // Return curves: flat 1 everywhere except Euro Truck's hold-then-straighten ramp.
+        Check(euro.ReturnCurve.Serialize() == "0:0;0.3:0.4;1:0.7", "Euro Truck return curve exact (hold at rest, straighten with speed)");
+        Check(Near(euro.ReturnCurve.Evaluate(0f), 0f) && Near(euro.ReturnCurve.Evaluate(0.3f), 0.4f) && Near(euro.ReturnCurve.Evaluate(1f), 0.7f),
+            "Euro Truck return curve: 0 @ rest, 0.4 @ mid, 0.7 @ top");
+        Check(SteeringPreset.FindBuiltIn("GTA-style Keyboard").ReturnCurve.Serialize() == "0:1;1:1"
+              && SteeringPreset.FindBuiltIn("Sim/Race").ReturnCurve.Serialize() == "0:1;1:1"
+              && SteeringPreset.FindBuiltIn("Drift").ReturnCurve.Serialize() == "0:1;1:1"
+              && SteeringPreset.Custom.ReturnCurve.Serialize() == "0:1;1:1",
+            "other presets keep symmetric return (flat 1)");
+
+        // Config defaults parse to the template curves.
+        EditableCurve parsedLock;
+        Check(EditableCurve.TryParse(EditableCurve.DefaultLockCurveText, out parsedLock)
+              && parsedLock.Serialize() == EditableCurve.DefaultLockCurveText, "DefaultLockCurveText round-trips");
+        EditableCurve parsedReturn;
+        Check(EditableCurve.TryParse(EditableCurve.DefaultReturnCurveText, out parsedReturn)
+              && parsedReturn.Serialize() == EditableCurve.DefaultReturnCurveText, "DefaultReturnCurveText round-trips");
+
         SteeringSettings.SetPresetByName("Truck-sim");
         Check(SteeringSettings.ActivePreset == euro, "runtime SetByName('Truck-sim') resolves to Euro Truck");
         SteeringSettings.SetPresetByName("Custom");
         SteeringSettings.ResetAll();
 
-        // CenterReturnScale persists through the config file (own file: _config
-        // points at whatever the previous test loaded).
+        // Forking a built-in preset clones its curves: Custom edits never touch the preset.
+        SteeringSettings.SetPresetByName("Drift");
+        SteeringPreset driftCopy = SteeringSettings.BeginEdit();
+        driftCopy.LockCurve.TryMovePoint(0, 0.5f, 0.5f);
+        Check(SteeringPreset.FindBuiltIn("Drift").LockCurve.Serialize() == "0:1;0.4:0.55;1:0.3",
+            "editing Custom's clone leaves the Drift preset curve pristine");
+        SteeringSettings.ResetAll();
+
+        // Custom curves persist through the config file (own file: _config points
+        // at whatever the previous test loaded).
         string rt = Path.Combine(dir, "return.cfg");
         File.WriteAllText(rt, "");
         ModConfig.Load(new ConfigFile(rt, true));
-        SteeringPreset.Custom.CenterReturnScale = 0.4f;
+        SteeringPreset.Custom.UseVehicleCurve = false;
+        SteeringPreset.Custom.LockCurve = EditableCurve.FromPoints(0f, 1f, 0.5f, 0.4f, 1f, 0.1f);
+        SteeringPreset.Custom.ReturnCurve = EditableCurve.FromPoints(0f, 0f, 1f, 0.6f);
         ModConfig.Save();
+        string txt2 = File.ReadAllText(rt);
+        Check(txt2.Contains("LockCurve = ") && txt2.Contains("ReturnCurve = ") && txt2.Contains("UseVehicleCurve = false"),
+            "curve keys written to the cfg");
         SteeringSettings.ResetAll();
         ModConfig.Load(new ConfigFile(rt, true));
-        Check(Near(SteeringPreset.Custom.CenterReturnScale, 0.4f), "CenterReturnScale config round-trip");
+        Check(!SteeringPreset.Custom.UseVehicleCurve
+              && SteeringPreset.Custom.LockCurve.Serialize() == "0:1;0.5:0.4;1:0.1"
+              && SteeringPreset.Custom.ReturnCurve.Serialize() == "0:0;1:0.6",
+            "curve config round-trip");
         SteeringSettings.ResetAll();
     }
 
     private static void TestLegacySteeringMigration(string dir)
     {
+        // A real 0.3.0 file: legacy preset name + the two legacy curve keys.
         string path = Path.Combine(dir, "steer-mig.cfg");
         File.WriteAllText(path,
-            "[Steering]\nEnabled = true\nPreset = Truck-sim\n\n[Steering.Custom]\nBasedOn = Truck-sim\nRateMultiplier = 1.2\n");
+            "[Steering]\nEnabled = true\nPreset = Truck-sim\n\n[Steering.Custom]\nBasedOn = Truck-sim\nRateMultiplier = 1.2\nSpeedCurveScale = 0.5\nCenterReturnScale = 0.4\n");
         ModConfig.Load(new ConfigFile(path, true));
         Check(SteeringSettings.ActivePreset == SteeringPreset.FindBuiltIn("Euro Truck"),
             "saved 'Truck-sim' preset loads as Euro Truck");
         Check(SteeringPreset.Custom.BasedOn == "Euro Truck",
             "saved Custom.BasedOn 'Truck-sim' rewritten to Euro Truck");
-        Check(SteeringPreset.Custom.CurveOverride && SteeringPreset.Custom.SpeedCurve == SteeringPreset.FindBuiltIn("Euro Truck").SpeedCurve,
-            "Custom keeps the Euro Truck speed curve (RestoreBaseCurve resolves)");
+        Check(!SteeringPreset.Custom.UseVehicleCurve
+              && Near(SteeringPreset.Custom.LockCurve.Evaluate(0.5f), 0.15f),
+            "legacy SpeedCurveScale x0.5 folded into the Euro Truck lock curve");
+        Check(Near(SteeringPreset.Custom.ReturnCurve.Evaluate(0f), 0.4f)
+              && SteeringPreset.Custom.ReturnCurve.Serialize() == "0:0.4;1:0.4",
+            "legacy CenterReturnScale 0.4 became a flat return curve");
         Check(Near(SteeringPreset.Custom.RateMultiplier, 1.2f), "Custom values survive the migration");
         string txt = File.ReadAllText(path);
         Check(txt.Contains("Preset = Euro Truck") && !txt.Contains("Truck-sim"),
             "cfg file rewritten to Euro Truck, no Truck-sim left");
+        Check(!txt.Contains("SpeedCurveScale") && !txt.Contains("CenterReturnScale"),
+            "legacy curve keys removed from the cfg");
+        // Reload: the fold must not run twice (values stay as-is).
+        ModConfig.Load(new ConfigFile(path, true));
+        Check(Near(SteeringPreset.Custom.LockCurve.Evaluate(0.5f), 0.15f)
+              && Near(SteeringPreset.Custom.ReturnCurve.Evaluate(0f), 0.4f),
+            "reload does not double-apply the fold");
         SteeringSettings.ResetAll();
+    }
+
+    private static void TestSteeringCurveMigration(string dir)
+    {
+        // (b) vehicle-curve user (BasedOn "") with legacy keys: scale is dropped (documented).
+        string path = Path.Combine(dir, "curve-mig-b.cfg");
+        File.WriteAllText(path, "[Steering.Custom]\nSpeedCurveScale = 2\nCenterReturnScale = 1\n");
+        ModConfig.Load(new ConfigFile(path, true));
+        Check(SteeringPreset.Custom.UseVehicleCurve, "BasedOn '' keeps the vehicle curve");
+        Check(SteeringPreset.Custom.LockCurve.Serialize() == EditableCurve.DefaultLockCurveText,
+            "template lock curve when no preset to fold into");
+        Check(SteeringPreset.Custom.ReturnCurve.Serialize() == "0:1;1:1", "legacy return 1 -> flat 1");
+        Check(!File.ReadAllText(path).Contains("SpeedCurveScale"), "legacy keys removed (b)");
+        SteeringSettings.ResetAll();
+
+        // (c) clobber regression: a 0.4.0-style file (no legacy keys) with edited curves
+        // must not be touched by the fold.
+        string pathC = Path.Combine(dir, "curve-mig-c.cfg");
+        File.WriteAllText(pathC,
+            "[Steering.Custom]\nBasedOn = Euro Truck\nUseVehicleCurve = false\n"
+            + "LockCurve = 0:1;0.5:0.2;1:0.05\nReturnCurve = 0:0;1:0.9\n");
+        ModConfig.Load(new ConfigFile(pathC, true));
+        Check(SteeringPreset.Custom.LockCurve.Serialize() == "0:1;0.5:0.2;1:0.05"
+              && SteeringPreset.Custom.ReturnCurve.Serialize() == "0:0;1:0.9",
+            "0.4.0-style curves are not clobbered by the legacy fold");
+        SteeringSettings.ResetAll();
+
+        // (d) garbage LockCurve falls back to the BasedOn preset's curve.
+        string pathD = Path.Combine(dir, "curve-mig-d.cfg");
+        File.WriteAllText(pathD, "[Steering.Custom]\nBasedOn = Euro Truck\nLockCurve = garbage\n");
+        ModConfig.Load(new ConfigFile(pathD, true));
+        Check(SteeringPreset.Custom.LockCurve.Serialize() == "0:1;0.2:0.6;0.5:0.3;1:0.12",
+            "garbage LockCurve falls back to the BasedOn preset's curve");
+        SteeringSettings.ResetAll();
+    }
+
+    private static void TestEditableCurve()
+    {
+        EditableCurve c = EditableCurve.FromPoints(0f, 1f, 0.5f, 0.35f, 1f, 0.22f);
+        Check(Near(c.Evaluate(0f), 1f) && Near(c.Evaluate(0.5f), 0.35f) && Near(c.Evaluate(1f), 0.22f),
+            "Evaluate at keyframes");
+        Check(Near(c.Evaluate(0.25f), 0.675f), "Evaluate lerps between points");
+        Check(Near(c.Evaluate(-1f), 1f) && Near(c.Evaluate(2f), 0.22f), "Evaluate clamps t to [0,1]");
+        Check(Near(EditableCurve.Flat(0.4f).Evaluate(0.7f), 0.4f), "Flat curve");
+
+        Check(c.TryAddPoint(0.25f, 0.9f) && c.Count == 4 && Near(c.X(1), 0.25f) && Near(c.Y(1), 0.9f),
+            "add inserts sorted");
+        Check(!c.TryAddPoint(0.25f, 0.5f), "add rejects duplicate x");
+        for (int i = 0; i < 6; i++)
+        {
+            c.TryAddPoint(0.02f + i * 0.02f, 0.5f);
+        }
+        Check(c.Count == EditableCurve.MaxPoints && !c.TryAddPoint(0.99f, 0.5f), "add rejects beyond MaxPoints");
+        Check(!c.TryRemovePoint(99), "remove rejects bad index");
+        c.TryRemovePoint(1);
+        Check(c.Count == EditableCurve.MaxPoints - 1, "remove works");
+
+        EditableCurve mv = EditableCurve.FromPoints(0f, 0f, 0.5f, 0.5f, 1f, 1f);
+        Check(mv.TryMovePoint(1, 2f, 5f) && Near(mv.X(1), 1f) && Near(mv.Y(1), 1f),
+            "move clamps x between neighbours and y to [0,1]");
+
+        string before = c.Serialize();
+        EditableCurve clone = c.Clone();
+        clone.TryMovePoint(0, 0f, 0f);
+        Check(clone.Serialize() != before, "clone is editable");
+        Check(c.Serialize() == before, "clone edit does not touch the original");
+
+        EditableCurve copy = EditableCurve.Flat(1f);
+        copy.CopyFrom(c);
+        copy.TryMovePoint(0, 0f, 0f);
+        Check(c.Serialize() == before, "CopyFrom copies arrays (no aliasing)");
+
+        EditableCurve scaled = EditableCurve.FromPoints(0f, 1f, 1f, 0.5f);
+        scaled.ScaleY(2f);
+        Check(Near(scaled.Y(0), 1f) && Near(scaled.Y(1), 1f), "ScaleY clamps to [0,1]");
+
+        // Serialize/parse round-trip with float precision.
+        EditableCurve precise = EditableCurve.FromPoints(0f, 0f, 1f / 3f, 0.33333334f, 1f, 1f);
+        EditableCurve back;
+        Check(EditableCurve.TryParse(precise.Serialize(), out back) && back.Serialize() == precise.Serialize(),
+            "serialize/parse round-trip preserves values");
+
+        EditableCurve bad;
+        Check(!EditableCurve.TryParse("", out bad) && bad == null, "parse rejects empty");
+        Check(!EditableCurve.TryParse("abc", out bad), "parse rejects garbage");
+        Check(!EditableCurve.TryParse("0:1", out bad), "parse rejects 1 point");
+        Check(!EditableCurve.TryParse("0:1;0.1:1;0.2:1;0.3:1;0.4:1;0.5:1;0.6:1;0.7:1;0.8:1", out bad), "parse rejects 9 points");
+        EditableCurve dup;
+        Check(EditableCurve.TryParse("0:1;0:1;1:0.5", out dup) && dup.Count == 2 && Near(dup.Y(0), 1f),
+            "parse dedupes near-equal x");
+        EditableCurve clamped;
+        Check(EditableCurve.TryParse("2:3;4:5;0.5:0.5", out clamped)
+              && Near(clamped.X(0), 0.5f) && Near(clamped.Y(0), 0.5f)
+              && Near(clamped.X(1), 1f) && Near(clamped.Y(1), 1f),
+            "parse clamps x/y to [0,1] and dedupes clamped-equal x");
+        EditableCurve commas;
+        Check(EditableCurve.TryParse("0,5:0,25;1:1", out commas) && Near(commas.X(0), 0.5f) && Near(commas.Y(0), 0.25f),
+            "parse accepts comma decimals");
     }
 
     private static void TestApocasetterKey(string dir)
