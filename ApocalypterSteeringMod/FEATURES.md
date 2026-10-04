@@ -76,3 +76,8 @@ Each slider (all categories) gains a small **pin toggle** (a 26×26 button next 
 ## 10. Crash report (investigate)
 
 `docs/crash-2026-10-04.md` documents a native crash the user hit while loading a save with 0.6.0 (all categories OFF, mod inert — see the report). Include its two hardening items in your work: (1) pause the tuner's 2 s scan during the post-scene-load spawn wave (~5 s after `sceneLoaded`, plus a one-tick defer when the tracked-vehicle count jumps), (2) keep every capture/apply path exception-guarded per category so a half-initialised mid-spawn vehicle can never take the tuner down. Note in your changelog that you reviewed the report.
+
+
+## 11. Known issue from the user (0.6.0, unresolved): telemetry display
+
+The user reports the telemetry strip still does not display properly in-game (after the visibility/picker/corner fixes). The strip code is `plugin/Runtime/TelemetryStrip.cs` (Build/Update/ApplyPlacement). Verify and fix as part of §4: check the canvas scale factor on the real screen (`PanelLayout.ScaleFactor(Screen.height, TelemetryScale)`, ConstantPixelSize), the corner anchoring (`CornerAnchor`/`CornerOffset`/pivot/sizeDelta), the cell insets, and the text sizes; the harness layout tests cannot see the real render, so add in-game checklist items (strip visible at every corner and scale, values legible, no overlap with the HUD). Ask the user for their exact symptom (position? size? garbled values?) before changing behavior.
