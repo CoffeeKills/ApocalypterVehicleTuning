@@ -4,3 +4,7 @@ ApocalypterSource/
 **/bin/
 **/obj/
 ApocalypterSteeringMod/verify/out/
+
+# Decompiled third-party excerpts (NWH Vehicle Physics 2) - audit reference only,
+# never published.
+ApocalypterSteeringMod/gamecode/
