@@ -1,4 +1,4 @@
-Apocalypter Vehicle Tuning 0.6.0-alpha
+Apocalypter Vehicle Tuning 0.6.2-alpha
 ======================================
 
 An in-game tuning panel for every vehicle in Apocalypter: steering,
@@ -41,7 +41,8 @@ NOTES
   right) - tune and drive at the same time. The telemetry strip shows
   speed/RPM/gear/slip. Prefer the old paused panel? Turn on
   "Freeze game while open" in the Settings tab.
-- New in 0.6.0: wheel alignment (camber, caster, toe, position),
+- New in 0.6.0-0.6.2: wheel alignment (camber, caster, toe, position),
+  custom drivetrain layouts (config-only: AWD, part-time 4x4, 6x6 wiring),
   panel width/size/transparency settings, a rebindable panel hotkey
   (Settings tab), an optional live telemetry strip (off by default),
   and copy/paste for presets. Gearbox tuning is coming soon - the
