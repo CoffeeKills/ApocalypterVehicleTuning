@@ -71,3 +71,8 @@ Each slider (all categories) gains a small **pin toggle** (a 26×26 button next 
 4. 12-gear auto shift feel → authored defaults in §3; expose ShiftUp/DownFactor so it is tunable live.
 5. Pin list growth → cap at 12 pins; unknown keys dropped; strip wraps to a second row.
 6. Tighter UI regressions → the harness layout tests at three widths are the gate.
+
+
+## 10. Crash report (investigate)
+
+`docs/crash-2026-10-04.md` documents a native crash the user hit while loading a save with 0.6.0 (all categories OFF, mod inert — see the report). Include its two hardening items in your work: (1) pause the tuner's 2 s scan during the post-scene-load spawn wave (~5 s after `sceneLoaded`, plus a one-tick defer when the tracked-vehicle count jumps), (2) keep every capture/apply path exception-guarded per category so a half-initialised mid-spawn vehicle can never take the tuner down. Note in your changelog that you reviewed the report.
