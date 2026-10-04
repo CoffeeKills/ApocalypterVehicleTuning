@@ -28,7 +28,7 @@ namespace ApocalypterSteeringMod.Runtime
         public const int TabCount = 10;
         public static readonly string[] TabNames =
         {
-            "Steering", "Suspension", "Aero", "Brakes", "Grip", "Drivetrain", "Assists", "Alignment", "Gearbox", "Panel"
+            "Steering", "Suspension", "Aero", "Brakes", "Grip", "Drivetrain", "Assists", "Alignment", "Gearbox", "Settings"
         };
         // Preset book behind each tab (the Panel tab has none).
         private static readonly PresetCategory?[] TabCategory =
@@ -1735,9 +1735,9 @@ namespace ApocalypterSteeringMod.Runtime
                 {
                     s += " Saving the game while tuned bakes the changed gears into that save (fixed automatically on load).";
                 }
-                if (_tuner.AnyResizeSkipped)
+                if (_tuner.AnyGearboxSkipped)
                 {
-                    s += " Gear count changes are skipped on automatic transmissions (the game's shift logic expects the stock gears).";
+                    s += " Gearbox tuning is skipped on automatic transmissions (the game's shift logic owns them) - set the transmission mode to Manual to tune.";
                 }
                 status.text = s;
             });
@@ -1802,7 +1802,7 @@ namespace ApocalypterSteeringMod.Runtime
                     : "";
             });
 
-            AddSectionTitle(content, "Panel");
+            AddSectionTitle(content, "Settings");
             AddOption(content, "Freeze game while open", "OFF = keep driving while the panel is open",
                 () => UiSettings.FreezeWhileOpen, v =>
                 {

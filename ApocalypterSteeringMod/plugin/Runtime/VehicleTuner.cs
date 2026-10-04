@@ -786,7 +786,7 @@ namespace ApocalypterSteeringMod.Runtime
         /// transmissions keep their stock count (the game's shift logic expects
         /// it — resizing makes the car undrivable). Panel shows a note.
         /// </summary>
-        public bool AnyResizeSkipped { get; private set; }
+        public bool AnyGearboxSkipped { get; private set; }
 
         // --------------------------------------------------------------- telemetry
 

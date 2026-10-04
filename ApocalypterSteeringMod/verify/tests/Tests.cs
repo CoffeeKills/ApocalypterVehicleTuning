@@ -1531,8 +1531,8 @@ public static class Tests
         GearboxPreset autoP = GearboxSettings.BeginEdit();
         autoP.GearCount = 6;
         tuner.ApplyLive();
-        Check(t.gears.Count == 7 && tuner.AnyResizeSkipped,
-            "automatic transmission: gear-count change skipped (stock count kept), flagged for the panel");
+        Check(t.gears.Count == 7 && tuner.AnyGearboxSkipped,
+            "automatic transmission: gearbox tuning skipped entirely (stock count kept), flagged for the panel");
         Check(Near(t.gears[2], 3.274f), "automatic skip still applies nothing else either (no ratio factors set)");
         GearboxSettings.Enabled = false;
         tuner.ApplyLive();
@@ -2001,7 +2001,7 @@ public static class Tests
 
         Check(PanelLayout.TabForDigit(1) == 0 && PanelLayout.TabForDigit(9) == 8 && PanelLayout.TabForDigit(0) == 9 && PanelLayout.TabForDigit(11) == -1,
             "digit hotkeys: 1..9 -> tabs 1..9, 0 -> tab 10");
-        Check(SettingsPanel.TabCount == 10 && SettingsPanel.TabNames.Length == 10 && SettingsPanel.TabNames[9] == "Panel", "ten tabs, Panel last");
+        Check(SettingsPanel.TabCount == 10 && SettingsPanel.TabNames.Length == 10 && SettingsPanel.TabNames[9] == "Settings", "ten tabs, Settings last");
 
         Check(GearGraph.RouteDrag(true, 3, true) == GearGraph.DragRoute.MoveBar && GearGraph.RouteDrag(true, -1, true) == GearGraph.DragRoute.ScrollList
               && GearGraph.RouteDrag(false, 3, true) == GearGraph.DragRoute.ScrollList && GearGraph.RouteDrag(true, -1, false) == GearGraph.DragRoute.None,

@@ -301,7 +301,7 @@ namespace ApocalypterSteeringMod.Runtime
         private void ApplyAllGearbox()
         {
             GearboxPreset p = GearboxSettings.ActivePreset ?? GearboxPreset.Stock;
-            AnyResizeSkipped = false;
+            AnyGearboxSkipped = false;
             TargetPass(AppliedCat.Gearbox, r => ApplyGearbox(r, p), RestoreGearbox);
         }
 
@@ -325,22 +325,33 @@ namespace ApocalypterSteeringMod.Runtime
             }
             TransmissionComponent t = r.Vc.powertrain.transmission;
 
-            // 1+2. Ratios, then the count (with the re-shift guard).
+            // 1. Transmission mode first (CVT / External: Stock only). Manual is the
+            // gate for everything else on this vehicle: the game's shift logic owns
+            // automatic transmissions, and ANY gearbox change there can leave the car
+            // stuck (engine revs, wheels don't turn). Only an explicit Manual mode
+            // opts the vehicle into tuning.
+            if (t != null && d.HasTransmission)
+            {
+                TransmissionComponent.TransmissionShiftType want = ModeFor(d, p.TransmissionMode);
+                if (t.transmissionType != want)
+                {
+                    t.transmissionType = want;
+                }
+            }
+
+            bool manual = t != null && t.transmissionType == TransmissionComponent.TransmissionShiftType.Manual;
+            bool tunable = d.IsCvt || manual;   // CVT keeps its clutch-only design
+            if (!tunable)
+            {
+                AnyGearboxSkipped = true;
+                return;
+            }
+
+            // 2. Ratios, then the count (manual only; CVT keeps its own list).
             if (t != null && t.gears != null && GearsEditable(d))
             {
                 int n = TargetForward(d, p);
                 int current = t.gears.Count - d.Reverse - 1;
-                // 0.6.1 safety: the game's shift logic expects the stock gear count on
-                // automatic transmissions — a resized list makes the car undrivable
-                // (engine revs, no drive). Resize only on manual transmissions, where
-                // the player has deliberately opted in; ratios and clutch still apply.
-                if (n != current
-                    && (t.transmissionType == TransmissionComponent.TransmissionShiftType.Automatic
-                        || t.transmissionType == TransmissionComponent.TransmissionShiftType.AutomaticSequential_Obsolete))
-                {
-                    AnyResizeSkipped = true;
-                    n = current;
-                }
                 if (!(n < current && t.isShifting))   // shrinking under an in-flight shift: retry next pass
                 {
                     WriteGears(t, d.Gears, d.Reverse, d.Extended, n, p);
@@ -357,16 +368,6 @@ namespace ApocalypterSteeringMod.Runtime
                 c.engagementRange = Mathf.Max(1f, d.EngagementRange * p.ClutchRangeScale);
                 float idle = r.Vc.powertrain.engine != null ? r.Vc.powertrain.engine.idleRPM : 0f;
                 c.engagementRPM = EngagementRpm(d.EngagementRpm, p.ClutchRpmOffset, idle);
-            }
-
-            // 4. Transmission mode (CVT / External: Stock only).
-            if (t != null && d.HasTransmission)
-            {
-                TransmissionComponent.TransmissionShiftType want = ModeFor(d, p.TransmissionMode);
-                if (t.transmissionType != want)
-                {
-                    t.transmissionType = want;
-                }
             }
         }
 
