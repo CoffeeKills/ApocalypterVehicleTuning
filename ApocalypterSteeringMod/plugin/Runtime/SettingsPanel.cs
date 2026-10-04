@@ -1735,6 +1735,10 @@ namespace ApocalypterSteeringMod.Runtime
                 {
                     s += " Saving the game while tuned bakes the changed gears into that save (fixed automatically on load).";
                 }
+                if (_tuner.AnyResizeSkipped)
+                {
+                    s += " Gear count changes are skipped on automatic transmissions (the game's shift logic expects the stock gears).";
+                }
                 status.text = s;
             });
         }

@@ -781,6 +781,13 @@ namespace ApocalypterSteeringMod.Runtime
             }
         }
 
+        /// <summary>
+        /// True when a gear-count change was skipped this pass: automatic
+        /// transmissions keep their stock count (the game's shift logic expects
+        /// it — resizing makes the car undrivable). Panel shows a note.
+        /// </summary>
+        public bool AnyResizeSkipped { get; private set; }
+
         // --------------------------------------------------------------- telemetry
 
         public struct TelemetrySample

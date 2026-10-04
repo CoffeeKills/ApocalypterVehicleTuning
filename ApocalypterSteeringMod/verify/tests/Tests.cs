@@ -1518,7 +1518,20 @@ public static class Tests
         tuner.ReapplyNow();
         Check(tuner.ReferenceGearCount == 5 && Near(tuner.ReferenceGearStock(6), ext[5]), "reference vehicle: 5 gears, continued 6th for the readouts");
 
-        // 5 -> 6 gears.
+        // Resize is a manual-transmission feature: an automatic keeps its stock count
+        // (the game's shift logic expects it — resizing makes the car undrivable).
+        GearboxSettings.Enabled = true;
+        GearboxPreset autoP = GearboxSettings.BeginEdit();
+        autoP.GearCount = 6;
+        tuner.ApplyLive();
+        Check(t.gears.Count == 7 && tuner.AnyResizeSkipped,
+            "automatic transmission: gear-count change skipped (stock count kept), flagged for the panel");
+        Check(Near(t.gears[2], 3.274f), "automatic skip still applies nothing else either (no ratio factors set)");
+        GearboxSettings.Enabled = false;
+        tuner.ApplyLive();
+
+        // 5 -> 6 gears (manual transmission opts in).
+        t.transmissionType = TransmissionComponent.TransmissionShiftType.Manual;
         GearboxSettings.Enabled = true;
         GearboxPreset p = GearboxSettings.BeginEdit();
         p.GearCount = 6;
@@ -1591,7 +1604,8 @@ public static class Tests
         GearboxSettings.Enabled = false;
         tuner.ApplyLive();
         Check(Near(cl.slipTorque, 500f) && Near(cl.engagementRange, 400f) && Near(cl.engagementRPM, 1200f)
-              && t.transmissionType == TransmissionComponent.TransmissionShiftType.Automatic, "OFF restores clutch and transmission type");
+              && t.transmissionType == TransmissionComponent.TransmissionShiftType.Manual,
+            "OFF restores clutch; the type stays Manual (the OFF->ON refresh captured it as the new stock)");
 
         // Clamp: slip torque >= 1, range >= 1 even from a zero stock value.
         cl.slipTorque = 0f;

@@ -301,6 +301,7 @@ namespace ApocalypterSteeringMod.Runtime
         private void ApplyAllGearbox()
         {
             GearboxPreset p = GearboxSettings.ActivePreset ?? GearboxPreset.Stock;
+            AnyResizeSkipped = false;
             TargetPass(AppliedCat.Gearbox, r => ApplyGearbox(r, p), RestoreGearbox);
         }
 
@@ -315,7 +316,7 @@ namespace ApocalypterSteeringMod.Runtime
                 && d.Type != TransmissionComponent.TransmissionShiftType.External;
         }
 
-        private static void ApplyGearbox(VehicleRecord r, GearboxPreset p)
+        private void ApplyGearbox(VehicleRecord r, GearboxPreset p)
         {
             GearboxData d = r.Gearbox;
             if (d == null || r.Vc.powertrain == null)
@@ -329,6 +330,17 @@ namespace ApocalypterSteeringMod.Runtime
             {
                 int n = TargetForward(d, p);
                 int current = t.gears.Count - d.Reverse - 1;
+                // 0.6.1 safety: the game's shift logic expects the stock gear count on
+                // automatic transmissions — a resized list makes the car undrivable
+                // (engine revs, no drive). Resize only on manual transmissions, where
+                // the player has deliberately opted in; ratios and clutch still apply.
+                if (n != current
+                    && (t.transmissionType == TransmissionComponent.TransmissionShiftType.Automatic
+                        || t.transmissionType == TransmissionComponent.TransmissionShiftType.AutomaticSequential_Obsolete))
+                {
+                    AnyResizeSkipped = true;
+                    n = current;
+                }
                 if (!(n < current && t.isShifting))   // shrinking under an in-flight shift: retry next pass
                 {
                     WriteGears(t, d.Gears, d.Reverse, d.Extended, n, p);
