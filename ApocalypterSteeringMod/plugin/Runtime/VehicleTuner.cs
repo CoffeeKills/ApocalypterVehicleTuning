@@ -116,6 +116,12 @@ namespace ApocalypterSteeringMod.Runtime
             public bool HasTyreWear;
             public bool AlignmentMoved;     // wheel positions currently offset (wheelbase/trackWidth stale)
             public AppliedCat Applied;      // categories THIS record currently has applied (targeting)
+            // Telemetry pick liveness (0.6.4): the input sum at the last sample and when it
+            // last changed. The game's FSM freezes a parked car's input at its exit values
+            // (handbrake held, brakes last pressed); only recently-changed input is "live".
+            public float InputPrev;
+            public bool InputSeen;
+            public float InputLastChange = -1f;
         }
 
         [Flags]
@@ -952,6 +958,7 @@ namespace ApocalypterSteeringMod.Runtime
         /// </summary>
         public bool TryGetTelemetry(out TelemetrySample s)
         {
+            DebugDumpPick();
             s = new TelemetrySample();
             VehicleController vc = FindDrivenVehicle();
             if (vc == null || vc.powertrain == null)
@@ -980,16 +987,45 @@ namespace ApocalypterSteeringMod.Runtime
         }
 
         /// <summary>
-        /// The vehicle the player is driving: most live FSM input, else the last
-        /// vehicle that had input (a stalled/off engine keeps the pick), else the
+        /// The vehicle the player is driving: most live input above the dead zone, else the
+        /// last vehicle that had input (a stalled/off engine keeps the pick), else the
         /// fastest, else the first tracked. Allocation-free.
+        ///
+        /// 0.6.4: "live" is input that changed recently. The game's FSM freezes a parked
+        /// car's input at its exit values (handbrake held, brakes last pressed, …), so raw
+        /// input alone lets a parked car steal the pick from a hands-off player — the strip
+        /// showed that car's zeros until the player steered. A frozen value stays "live"
+        /// only for the 2 s hold window after its last change, then falls silent.
         /// </summary>
         private VehicleController _lastDriven;
 
+        public const float InputDeadZone = 0.05f;    // input below this is noise / hands-off
+        public const float InputHoldSeconds = 2f;    // unchanged input counts as live this long after its last change
+        public const float InputChangeEpsilon = 0.02f;
+
+        /// <summary>
+        /// Samples one vehicle's input for the pick: records the value and reports whether
+        /// it counts as live driving right now. Pure (only the caller's state fields) so the
+        /// harness tests it without Unity time.
+        /// </summary>
+        public static bool UpdateInputLiveness(float input, float now, ref float prev, ref bool seen, ref float lastChange, out bool live)
+        {
+            bool changed = !seen || Mathf.Abs(input - prev) > InputChangeEpsilon;
+            seen = true;
+            prev = input;
+            if (changed && input > InputDeadZone)
+            {
+                lastChange = now;
+            }
+            live = input > InputDeadZone && (changed || now - lastChange <= InputHoldSeconds);
+            return changed;
+        }
+
         public VehicleController FindDrivenVehicle()
         {
+            float now = Time.unscaledTime;
             VehicleController driven = null;    // most live input above the dead zone
-            float bestInput = 0.0001f;
+            float bestInput = 0f;
             VehicleController running = null;   // first tracked vehicle with a running engine
             VehicleController fastest = null;
             float bestSpeed = 0f;
@@ -997,7 +1033,8 @@ namespace ApocalypterSteeringMod.Runtime
             foreach (KeyValuePair<VehicleController, VehicleRecord> kv in _records)
             {
                 VehicleController vc = kv.Key;
-                if (vc == null || kv.Value.Vc == null)
+                VehicleRecord r = kv.Value;
+                if (vc == null || r == null || r.Vc == null)
                 {
                     continue;
                 }
@@ -1006,17 +1043,15 @@ namespace ApocalypterSteeringMod.Runtime
                     first = vc;
                 }
                 float input = Mathf.Abs(vc.input.Steering) + vc.input.Throttle + vc.input.Brakes + vc.input.Handbrake;
-                if (input > bestInput)
+                bool live;
+                UpdateInputLiveness(input, now, ref r.InputPrev, ref r.InputSeen, ref r.InputLastChange, out live);
+                if (live && input > bestInput)
                 {
                     bestInput = input;
                     driven = vc;
                 }
-                // 0.6.3: a running engine is a FALLBACK below the last-driven memory, not
-                // input. 0.6.2 added it to the input score, so with hands off the keys (e.g.
-                // clicking a panel setting) every idling car tied, the first tracked one won,
-                // and it also overwrote the memory: the telemetry strip showed a parked car's
-                // zeros until the player steered/accelerated again, and "Apply to: Last
-                // driven" moved the tuning onto that parked car.
+                // A running engine is a FALLBACK below the last-driven memory, never input
+                // (0.6.2 added it to the input score, which let parked idlers steal the pick).
                 if (running == null && vc.powertrain != null && vc.powertrain.engine != null && vc.powertrain.engine.OutputRPM > 10f)
                 {
                     running = vc;
@@ -1032,7 +1067,7 @@ namespace ApocalypterSteeringMod.Runtime
                 _lastDriven = driven;
                 return driven;
             }
-            // No input anywhere: stay on the last car the player drove (its engine may
+            // No live input anywhere: stay on the last car the player drove (its engine may
             // have stalled, or the panel is open and hands are on the mouse).
             if (_lastDriven != null)
             {
@@ -1048,6 +1083,46 @@ namespace ApocalypterSteeringMod.Runtime
                 return running;
             }
             return bestSpeed > 0.01f ? fastest : first;
+        }
+
+        // ------------------------------------------------------ pick diagnostics (0.6.4)
+
+        private float _nextDebugDump = -1f;
+
+        /// <summary>
+        /// Once per second while [Telemetry] DebugPick is on, log one line per tracked
+        /// vehicle: name, input sum, liveness, speed, RPM — and the pick. The in-game
+        /// check for a wrong telemetry car reads this from BepInEx\LogOutput.log.
+        /// Allocates only while the diagnostic is enabled (it is off by default).
+        /// </summary>
+        private void DebugDumpPick()
+        {
+            float now = Time.unscaledTime;
+            if (!UiSettings.TelemetryDebugPick || now < _nextDebugDump)
+            {
+                return;
+            }
+            _nextDebugDump = now + 1f;
+            System.Text.StringBuilder sb = new System.Text.StringBuilder("Telemetry pick: ");
+            foreach (KeyValuePair<VehicleController, VehicleRecord> kv in _records)
+            {
+                VehicleController vc = kv.Key;
+                VehicleRecord r = kv.Value;
+                if (vc == null || r == null)
+                {
+                    continue;
+                }
+                float input = Mathf.Abs(vc.input.Steering) + vc.input.Throttle + vc.input.Brakes + vc.input.Handbrake;
+                bool live;
+                UpdateInputLiveness(input, now, ref r.InputPrev, ref r.InputSeen, ref r.InputLastChange, out live);
+                float rpm = vc.powertrain != null && vc.powertrain.engine != null ? vc.powertrain.engine.OutputRPM : 0f;
+                sb.Append('\'').Append(VehicleName(vc)).Append("' in=").Append(input.ToString("0.00"))
+                  .Append(live ? " LIVE" : " stale").Append(" v=").Append((vc.Speed * 3.6f).ToString("0"))
+                  .Append("km/h rpm=").Append(rpm.ToString("0")).Append(" | ");
+            }
+            VehicleController picked = FindDrivenVehicle();
+            sb.Append("-> ").Append(picked != null ? VehicleName(picked) : "(none)");
+            Plugin.Log.LogInfo(sb.ToString());
         }
 
         // ---------------------------------------------------------------- targeting (0.6.1)

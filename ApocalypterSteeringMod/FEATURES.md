@@ -1,12 +1,12 @@
 # FEATURES.md — Feature specification for v0.7.0-alpha
 
-**This file is the authoritative spec for the next version.** Implement everything below on top of the **0.6.3** code in this bundle. Where this file and PROMPT.md conflict, this file wins for *features*; PROMPT.md's hard constraints (no `ES3.Save`, no `vc.input.*` writes, allocation-free steering prefix, hidden-runner survival architecture, one Graphic per GameObject, mouse-only panel, BepInEx config the only persistence, unchanged GUID) always win.
+**This file is the authoritative spec for the next version.** Implement everything below on top of the **0.6.4** code in this bundle. Where this file and PROMPT.md conflict, this file wins for *features*; PROMPT.md's hard constraints (no `ES3.Save`, no `vc.input.*` writes, allocation-free steering prefix, hidden-runner survival architecture, one Graphic per GameObject, mouse-only panel, BepInEx config the only persistence, unchanged GUID) always win.
 
 You have no terminal. The user runs `bash verify/run.sh` (needs .NET SDK 8+; globs **all** `plugin/**/*.cs`, so every new file must compile against the stubs — extend them, §7). Reason through it carefully.
 
-Version: `plugin/PluginInfo.cs` → `"0.7.0"`. README title → "v0.7.0-alpha" + a new "## Changes in 0.7.0-alpha" section. Current suite: **490 tests (472 logic + 18 prefix)**, all passing. Keep them green, add the §7 tests, and remove `GearboxSettings.ComingSoon` (release gate from 0.6.0) only when the §1 shifting subsystem is done — until then the gate stays.
+Version: `plugin/PluginInfo.cs` → `"0.7.0"`. README title → "v0.7.0-alpha" + a new "## Changes in 0.7.0-alpha" section. Current suite: **504 tests (486 logic + 18 prefix)**, all passing. Keep them green, add the §7 tests, and remove `GearboxSettings.ComingSoon` (release gate from 0.6.0) only when the §1 shifting subsystem is done — until then the gate stays.
 
-## Status after 0.6.3-alpha (what is already done, what remains)
+## Status after 0.6.4-alpha (what is already done, what remains)
 
 | § | Item | State |
 |---|---|---|
@@ -14,6 +14,7 @@ Version: `plugin/PluginInfo.cs` → `"0.7.0"`. README title → "v0.7.0-alpha" +
 | — | Curve-editor / gear-graph grab fix (press-position picking), allocation-free apply path | ✅ done 0.6.2, harness-tested |
 | §10 | Crash hardening: post-load quiet window + spawn-jump deferral; per-category exception guards (capture with retries, apply, restore, baseline refresh) | ✅ done 0.6.3, harness-tested, negative controls |
 | §11 | Telemetry "zeros until I steer" — root cause was the driven-vehicle pick (idling engines counted as input, above the last-driven memory); also fixed "Apply to: Last driven" mis-targeting | ✅ done 0.6.3, harness-tested, negative controls; in-game check README §10 item 34 |
+| §11b | Telemetry follow-up (user report): parked cars freeze their FSM-written input at exit (handbrake/brakes left on) and stole the pick again — only fresh input is live now (2 s hold), `[Telemetry] DebugPick` diagnostic added | ✅ done 0.6.4, harness-tested, negative control; in-game check README §10 item 37 |
 | §1 | Mod-owned gearbox subsystem (shift-write suppression + `ShiftController`); remove `ComingSoon` only here | ⏳ open — needs PlayMaker `SetProperty`/`CallMethod`/`FsmProperty` sources and the vehicle FSM dump (not in `gamecode/`; §1 says "inspect before patching") |
 | §2 rest | Panel UI for the drivetrain layout | ⏳ open |
 | §3 | Truck 12-gear preset (inert until §1) | ⏳ open |
@@ -96,6 +97,6 @@ Each slider (all categories) gains a small **pin toggle** (a 26×26 button next 
 `docs/crash-2026-10-04.md` documents a native crash the user hit while loading a save with 0.6.0 (all categories OFF, mod inert — see the report). Include its two hardening items in your work: (1) pause the tuner's 2 s scan during the post-scene-load spawn wave (~5 s after `sceneLoaded`, plus a one-tick defer when the tracked-vehicle count jumps), (2) keep every capture/apply path exception-guarded per category so a half-initialised mid-spawn vehicle can never take the tuner down. Note in your changelog that you reviewed the report.
 
 
-## 11. Known issue from the user (0.6.0, unresolved): telemetry display
+## 11. Telemetry display (user-reported, resolved in 0.6.3 + 0.6.4)
 
-The user reports the telemetry strip still does not display properly in-game (after the visibility/picker/corner fixes). The strip code is `plugin/Runtime/TelemetryStrip.cs` (Build/Update/ApplyPlacement). Verify and fix as part of §4: check the canvas scale factor on the real screen (`PanelLayout.ScaleFactor(Screen.height, TelemetryScale)`, ConstantPixelSize), the corner anchoring (`CornerAnchor`/`CornerOffset`/pivot/sizeDelta), the cell insets, and the text sizes; the harness layout tests cannot see the real render, so add in-game checklist items (strip visible at every corner and scale, values legible, no overlap with the HUD). Ask the user for their exact symptom (position? size? garbled values?) before changing behavior.
+**Status:** resolved. 0.6.3 fixed the driven-vehicle pick (idling engines counted as input); the user's follow-up report ("still shows a parked car's zeros until I steer") traced to parked cars freezing their FSM-written input at exit values — fixed in 0.6.4 with the liveness gate (README "Changes in 0.6.4-alpha", §11b in the status table; harness negative control = 5 failures when reverted). The `[Telemetry] DebugPick` config key logs the pick for any future report. The strip's render math (scale factor `PanelLayout.ScaleFactor(Screen.height, TelemetryScale)`, ConstantPixelSize; corner anchoring `CornerAnchor`/`CornerOffset`/pivot/sizeDelta; cell insets; text sizes) was checked and left unchanged. Remaining for §4: in-game check README §10 item 37, plus the planned telemetry pins.

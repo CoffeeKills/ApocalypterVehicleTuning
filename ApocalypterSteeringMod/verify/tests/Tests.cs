@@ -300,6 +300,9 @@ public static class Tests
         Console.WriteLine("0.6.3 crash hardening: spawn-wave scan gate");
         TestSpawnGate();
 
+        Console.WriteLine("0.6.4 parked-car frozen input (telemetry pick)");
+        TestFrozenInputPick();
+
         Console.WriteLine();
         Console.WriteLine(_pass + " passed, " + _fail + " failed");
         return _fail == 0 ? 0 : 1;
@@ -2708,5 +2711,107 @@ public static class Tests
         VehicleTuner.NotifySceneLoaded();
         Time.unscaledTime = 0f;
         UnityEngine.Object.Registry.Clear();
+    }
+
+    // ================================================================ 0.6.4
+
+    /// <summary>
+    /// The game's FSM writes vc.input.* every frame only while a vehicle is driven; on exit
+    /// the values freeze (handbrake held, brakes last pressed, …). 0.6.3 scored raw input,
+    /// so a parked car with frozen input out-scored a hands-off player and stole the pick —
+    /// the strip showed that car's zeros until the player steered. 0.6.4: only input that
+    /// changed recently (2 s hold) is live.
+    /// </summary>
+    private static void TestFrozenInputPick()
+    {
+        UnityEngine.Object.Registry.Clear();
+        ResetAllCategories();
+        TargetSettings.Mode = TargetMode.All;
+        TargetSettings.SelectedName = "";
+
+        VehicleController parked = MakeCar(out FakeWheel[] _, 0f);
+        VehicleController player = MakeCar(out FakeWheel[] _, 0f);
+        parked.gameObject.name = "Parked HB";
+        player.gameObject.name = "Player";
+        parked.input.Handbrake = 1f;    // frozen at exit: the FSM stopped writing here
+        UnityEngine.Object.Registry.Add(parked);
+        UnityEngine.Object.Registry.Add(player);
+        var tuner = new VehicleTuner();
+        tuner.ReapplyNow();
+        Time.unscaledTime = 100f;
+
+        // First sample after capture: a frozen value gets a 2 s grace (the player is never
+        // driving at capture time — the post-load quiet window — so this self-corrects).
+        Check(tuner.FindDrivenVehicle() == parked, "captured frozen input gets the first-sample grace");
+        Time.unscaledTime = 104f;
+        player.input.Throttle = 1f;    // grace long expired: the frozen handbrake is stale now
+        Check(tuner.FindDrivenVehicle() == player, "live throttle beats a parked car's frozen handbrake");
+
+        player.input.Throttle = 0f;    // the player's own FSM keeps writing 0 — hands off
+        Time.unscaledTime = 105f;
+        Check(tuner.FindDrivenVehicle() == player,
+            "hands off: the parked car's frozen input no longer steals the pick (0.6.3: it did)");
+
+        player.Speed = 12f;
+        VehicleTuner.TelemetrySample sample;
+        Check(tuner.TryGetTelemetry(out sample) && Near(sample.SpeedKmh, 43.2f),
+            "the strip shows the player's car, not a parked car's zeros");
+        player.Speed = 0f;
+
+        // Switching cars still works: fresh input on the parked car takes the pick (release
+        // the handbrake and throttle as separate samples, as the 4 Hz strip would see them).
+        Time.unscaledTime = 106f;
+        parked.input.Handbrake = 0f;
+        tuner.FindDrivenVehicle();
+        parked.input.Throttle = 1f;
+        Time.unscaledTime = 107f;
+        Check(tuner.FindDrivenVehicle() == parked, "fresh input on another car takes the pick (car switch)");
+
+        // Once the hold window expires, an unchanged value is dead even above the dead zone.
+        Time.unscaledTime = 200f;
+        parked.input.Throttle = 1f;    // unchanged since 107 — frozen mid-drive
+        player.input.Throttle = 0f;
+        Check(tuner.FindDrivenVehicle() == parked,
+            "after the hold window the pick stays on the last-driven car (memory), not the frozen input");
+
+        // A parked car captured WITH frozen input gets the first-sample grace, then goes silent.
+        UnityEngine.Object.Registry.Clear();
+        VehicleController frozen = MakeCar(out FakeWheel[] _, 0f);
+        VehicleController other = MakeCar(out FakeWheel[] _, 0f);
+        frozen.gameObject.name = "Frozen Brakes";
+        other.gameObject.name = "Other";
+        frozen.input.Brakes = 0.5f;    // frozen mid-brake
+        UnityEngine.Object.Registry.Add(frozen);
+        UnityEngine.Object.Registry.Add(other);
+        var t2 = new VehicleTuner();
+        t2.ReapplyNow();
+        Time.unscaledTime = 500f;
+        Check(t2.FindDrivenVehicle() == frozen, "first sample after capture: a frozen value gets the 2 s grace");
+        Time.unscaledTime = 504f;
+        other.input.Throttle = 1f;     // fresh input on the other car
+        Check(t2.FindDrivenVehicle() == other, "after the grace: fresh input wins, the frozen value is silent");
+        Time.unscaledTime = 506f;
+        other.input.Throttle = 0f;
+        Check(t2.FindDrivenVehicle() == other, "and the memory keeps the last genuinely driven car");
+
+        // Liveness gate, pure.
+        float prev = 0f;
+        bool seen = false;
+        float lastChange = -1f;
+        bool live;
+        Check(VehicleTuner.UpdateInputLiveness(1f, 10f, ref prev, ref seen, ref lastChange, out live) && live,
+            "first sample above the dead zone is live");
+        Check(!VehicleTuner.UpdateInputLiveness(1f, 11f, ref prev, ref seen, ref lastChange, out live) && live,
+            "unchanged within the hold window is live");
+        Check(!VehicleTuner.UpdateInputLiveness(1f, 13f, ref prev, ref seen, ref lastChange, out live) && !live,
+            "unchanged past the hold window is stale");
+        Check(VehicleTuner.UpdateInputLiveness(0.6f, 14f, ref prev, ref seen, ref lastChange, out live) && live,
+            "a change above the dead zone is live again");
+        Check(VehicleTuner.UpdateInputLiveness(0.01f, 15f, ref prev, ref seen, ref lastChange, out live) && !live,
+            "input below the dead zone is never live");
+
+        ResetAllCategories();
+        UnityEngine.Object.Registry.Clear();
+        Time.unscaledTime = 0f;
     }
 }

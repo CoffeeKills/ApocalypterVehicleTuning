@@ -14,10 +14,10 @@
 
 ## Current state (2026-10-04)
 
-- **Shipped/installed: 0.6.3-alpha** (PluginInfo "0.6.3"). Harness: **490 tests (472 logic + 18 prefix)**, green (run on .NET SDK 8.0.131). Built against the game DLLs (0 warnings), installed to `BepInEx\plugins\`, release zip `ApocalypterVehicleTuning-0.6.3-alpha.zip` + refreshed audit zip at the repo root.
-- 0.6.3 closed FEATURES §10 (crash hardening) and §11 (telemetry: wrong driven-vehicle pick, which also mis-targeted "Apply to: Last driven"). See README "Changes in 0.6.3-alpha".
-- **Remaining for 0.7.0**: §1 mod-owned gearbox subsystem (shift-write suppression + `ShiftController`; `ComingSoon` gate stays until then), §2 remainder (layout panel UI), §3 Truck preset, §4 telemetry pins, §5 tighter UI.
-- In-game checks pending: README §10 items 29–36 (0.6.2 items 29–33 plus the three 0.6.3 items: telemetry with hands off, save-load quiet window, digit keys vs gears).
+- **Shipped/installed: 0.6.4-alpha** (PluginInfo "0.6.4"). Harness: **504 tests (486 logic + 18 prefix)**, green (run on .NET SDK 8.0.131). Built against the game DLLs (0 warnings), installed to `BepInEx\plugins\`, release zip `ApocalypterVehicleTuning-0.6.4-alpha.zip` + refreshed audit zip at the repo root.
+- 0.6.3 closed FEATURES §10 (crash hardening) and §11 (telemetry pick: idling engines). 0.6.4 closed the user's follow-up: parked cars freeze their FSM-written input at exit values (handbrake/brakes) and stole the pick again — the pick is now liveness-gated (`UpdateInputLiveness`: input counts only while it changes, 2 s hold, `InputDeadZone` 0.05; first-sample grace). `[Telemetry] DebugPick` logs the pick for diagnostics. See README "Changes in 0.6.4-alpha".
+- **Remaining for 0.7.0**: §1 mod-owned gearbox subsystem (shift-write suppression + `ShiftController`; `ComingSoon` gate stays until then), §2 remainder (layout panel UI), §3 Truck preset, §4 telemetry pins (+ the §4 remainder), §5 tighter UI.
+- In-game checks pending: README §10 items 29–37 (0.6.2 items 29–33, 0.6.3 items 34–36, 0.6.4 item 37).
 
 ### Inputs §1 needs (attached with this round's audit zip)
 - **Attached**: the PlayMaker action sources (`SetProperty.cs`, `GetProperty.cs`, `CallMethod.cs`, `FsmProperty.cs`, `FsmObject.cs`, `FsmStateAction.cs`) in `gamecode/`, plus `docs/fsm-shift-inputs.md` — a survey of all 6834 parsed FSMs: **no** FSM writes `Gear`/`GearShift` via SetProperty, no CallMethod touches shifting, no FSM reads a Shift* button. The shifting is compiled NWH input code + runtime FsmTemplates (the 1296 failed template parses; `RunFSM` instantiates them — likely where the live `INPUT_ShiftIntoN`/`Wrapper` FSMs come from).

@@ -32,6 +32,9 @@ namespace ApocalypterSteeringMod.Settings
         public static float TelemetryScale = 1f;
         public static TelemetryCorner TelemetryPosition = TelemetryCorner.TopLeft;
 
+        /// <summary>Default false: log the telemetry vehicle pick once per second (0.6.4 diagnostic).</summary>
+        public static bool TelemetryDebugPick = false;
+
         public static void ResetPanel()
         {
             FreezeWhileOpen = false;

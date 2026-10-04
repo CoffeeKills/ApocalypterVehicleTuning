@@ -95,6 +95,7 @@ namespace ApocalypterSteeringMod.Persistence
         private static ConfigEntry<float> _uiScale, _uiWidth, _uiAlpha;
         private static ConfigEntry<int> _uiLastTab;
         private static ConfigEntry<bool> _telEnabled;
+        private static ConfigEntry<bool> _telDebugPick;
         private static ConfigEntry<float> _telScale;
         private static ConfigEntry<string> _telPosition;
 
@@ -404,6 +405,8 @@ namespace ApocalypterSteeringMod.Persistence
                 "Show the small click-through telemetry strip (speed, RPM, gear, front slip) while driving.");
             _telScale = BindRange("Telemetry", "Scale", 1f, Limits.TelemetryScaleMin, Limits.TelemetryScaleMax, "Telemetry strip size.");
             _telPosition = _config.Bind("Telemetry", "Position", "TopLeft", "Screen corner: TopLeft, TopRight, BottomLeft, BottomRight.");
+            _telDebugPick = _config.Bind("Telemetry", "DebugPick", false,
+                "Diagnostic (0.6.4): log the telemetry vehicle pick once per second. Off unless you are chasing a wrong telemetry car.");
         }
 
         // ---------------------------------------------------------------- wiring
@@ -454,7 +457,7 @@ namespace ApocalypterSteeringMod.Persistence
             }
             Wire(_gearClutchGrip); Wire(_gearClutchRange); Wire(_gearClutchRpm);
             Wire(_uiFreeze); Wire(_uiScale); Wire(_uiWidth); Wire(_uiAlpha); Wire(_uiLastTab);
-            Wire(_telEnabled); Wire(_telScale); Wire(_telPosition);
+            Wire(_telEnabled); Wire(_telScale); Wire(_telPosition); Wire(_telDebugPick);
             Wire(_targetMode); Wire(_targetVehicle);
         }
 
@@ -770,6 +773,7 @@ namespace ApocalypterSteeringMod.Persistence
                 _telEnabled.Value = UiSettings.TelemetryEnabled;
                 _telScale.Value = UiSettings.TelemetryScale;
                 _telPosition.Value = UiSettings.TelemetryPosition.ToString();
+                _telDebugPick.Value = UiSettings.TelemetryDebugPick;
                 _targetMode.Value = TargetSettings.Mode.ToString();
                 _targetVehicle.Value = TargetSettings.SelectedName ?? "";
             }
@@ -982,6 +986,7 @@ namespace ApocalypterSteeringMod.Persistence
             UiSettings.TelemetryEnabled = _telEnabled.Value;
             UiSettings.TelemetryScale = _telScale.Value;
             UiSettings.TelemetryPosition = UiSettings.ParseCorner(_telPosition.Value);
+            UiSettings.TelemetryDebugPick = _telDebugPick.Value;
             TargetSettings.Mode = TargetSettings.Parse(_targetMode.Value);
             TargetSettings.SelectedName = _targetVehicle.Value ?? "";
 

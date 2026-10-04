@@ -1,8 +1,8 @@
-# Apocalypter Vehicle Tuning (v0.6.3-alpha)
+# Apocalypter Vehicle Tuning (v0.6.4-alpha)
 
 A BepInEx mod for **Apocalypter** (SawyerK Games, Unity 2020.3.49, BepInEx 5.4.23.5 + Harmony 2) that adds a full vehicle-tuning panel: steering, suspension, aero, brakes, tire grip, drivetrain, stability assists (ABS/TCS), wheel alignment and gearbox, all applied live to every vehicle in the game. Since 0.6.0 the panel docks to the right edge and you can keep driving while it is open.
 
-The repo contains the complete mod source (`plugin/`) plus a self-contained test harness (`verify/` — Unity/NWH compile stubs and a 490-test suite, needs only a .NET SDK 8+; `verify/refs/` carries the BepInEx 5 core DLLs it needs). The `gamecode/` excerpts used for audits are kept out of the public repo.
+The repo contains the complete mod source (`plugin/`) plus a self-contained test harness (`verify/` — Unity/NWH compile stubs and a 504-test suite, needs only a .NET SDK 8+; `verify/refs/` carries the BepInEx 5 core DLLs it needs). The `gamecode/` excerpts used for audits are kept out of the public repo.
 
 ## Changes in 0.2.0-alpha
 
@@ -216,6 +216,22 @@ All §2 facts are preserved. The hidden-runner survival architecture is unchange
 - **Negative control** (against the untouched 0.5.0 plugin, compiled against the new stubs): the 9 new checks that compile against 0.5.0 give 5 failures (the four audit bugs: destroyed-vehicle writes ×2, latched-handbrake ABS, TCS mid-shift, external edit reverting panel edits) and 4 passes (their positive controls). The other 126 new checks exercise 0.6.0 API and do not compile against 0.5.0. `run.sh` is unchanged.
 - **gamecode/ gap:** `PowertrainComponent` (base of Engine/Clutch/Transmission/Wheel/Differential, declares `OutputRPM`) is referenced through `ClutchComponent.cs:10/95/108` but its file is not in the bundle. Please copy `PowertrainComponent.cs` from the decompiled tree into `gamecode/`. The stub mirrors only the members the mod uses.
 
+## Changes in 0.6.4-alpha
+
+Scope: the user's in-game report that the telemetry strip still showed a parked car's zeros until they steered ("only when you turn does it show"). Root cause found in the pick: **a parked car's input is frozen at its exit values.** The game's FSM writes `vc.input.*` every frame only while a vehicle is driven (README §2.2); on exit the writes stop, so the parked car keeps whatever it froze with — handbrake held, brakes last pressed, last steering angle. 0.6.3 scored raw input, so that frozen value out-scored a hands-off player's zeros and stole the pick (and "Apply to: Last driven" with it). Steering raised the player's input above the frozen residual, which is why the strip "worked" only while turning. Suite: **504 tests (486 logic + 18 prefix), all passing**; negative control below.
+
+**Not changed** (all §2 facts preserved): the pick order (live input → last-driven memory → running engine → fastest → first), the strip, the crash hardening, the input blocker, persistence. **Config: one key added** — `[Telemetry] DebugPick` (false). A 0.6.3 cfg loads as is.
+
+### Liveness-gated input pick
+
+1. **Only input that changed recently counts as driving.** Each record now tracks its input sum (`InputPrev`, `InputSeen`, `InputLastChange`). A sample marks the input live when it changed by more than `InputChangeEpsilon` = 0.02 (or is the first sample) and it is above `InputDeadZone` = 0.05; an unchanged value stays live for `InputHoldSeconds` = 2 s after its last change, then falls silent. A parked car's frozen handbrake/brakes/steering therefore never beats a hands-off player; fresh input (driving, or a car switch) still takes the pick immediately. The gate is the pure `UpdateInputLiveness` (harness-tested), allocation-free (three floats on the existing record).
+2. **First-sample grace:** a vehicle captured with frozen input gets one 2 s grace window (it is sampled before its story is known); captures happen during the post-load quiet window when nobody is driving, so this self-corrects.
+3. **Diagnostic:** `[Telemetry] DebugPick = true` logs once per second, per tracked vehicle: name, input sum, LIVE/stale, speed, RPM — and the pick. The in-game check for a wrong telemetry car reads this from `BepInEx\LogOutput.log` (allocates only while on).
+
+### Verification harness
+- New tests (14): frozen handbrake on a parked car (live throttle beats it, hands-off keeps the player's car, the strip shows the player's car, car switch still works, the hold window expires), the first-sample grace, and the pure liveness gate (first sample, hold window, stale, re-change, dead zone).
+- **Negative control** (the liveness gate reverted alone): 5 failures — exactly the user's symptom (the parked car's frozen input steals the pick).
+
 ## Changes in 0.6.3-alpha
 
 Scope (agreed with the user for this round): the two open user-reported issues — the telemetry strip (FEATURES §11) and the save-load crash hardening (FEATURES §10, `docs/crash-2026-10-04.md`) — plus an audit pass. FEATURES §1 (shift controller), §2 remainder, §3–§5 are **not** in this round; `GearboxSettings.ComingSoon` stays. Suite: **490 tests (472 logic + 18 prefix), all passing — run** on .NET SDK 8.0.131; every new fix has a negative control (counts below).
@@ -410,7 +426,7 @@ Sections: `Steering` (Enabled **false** by default, Preset, MatchGameSteeringSpe
 
 ```
 cd plugin && dotnet build -c Release          # real DLL, references game DLLs at D:\SteamLibrary\...\Apocalypter_Data\Managed (adjust paths in the csproj; 0.6.0 adds UnityEngine.IMGUIModule for the clipboard)
-cd verify && bash run.sh                      # stubs compile + 490 tests (472 logic + 18 prefix); .NET SDK 8+; refs/ already populated
+cd verify && bash run.sh                      # stubs compile + 504 tests (486 logic + 18 prefix); .NET SDK 8+; refs/ already populated
 ```
 Install: copy the DLL to `BepInEx\plugins\` and `icon.png` next to it as `ApocalypterSteeringMod.png` (the Apocasetter Mods-window icon). Rebuild the install zip with both files at the zip root. **Never run it alongside an old `SteeringFix.dll`** (earlier assembly name) — both prefixes would double-process steering. The GUID is deliberately unchanged, so the existing config file migrates in place.
 
@@ -507,6 +523,7 @@ powershell Compress-Archive README.md,PROMPT.md,FEATURES.md,CONTEXT.md,plugin,ve
 34. **0.6.3 — telemetry with hands off:** drive a car, stop, click a setting in the panel (hands off the keys): the strip keeps showing YOUR car (speed/RPM/gear), not zeros. With "Apply to: Last driven", that edit tunes your car, not a parked one.
 35. **0.6.3 — save load:** load a save with several vehicles: the log shows no tuner activity for ~5 s, then the captures; no "failed and was skipped" warnings on a healthy save (if any appear, send the log — they name the category and vehicle).
 36. **0.6.3 — digit keys vs gears:** with the panel open in live mode, shift with the number keys (if the game binds ShiftInto1..8 to them): note whether the panel tab also switches.
+37. **0.6.4 — telemetry with a parked fleet:** park your car (handbrake on) next to other parked cars, hands off: the strip keeps YOUR car (speed/RPM/gear), not a parked car's zeros; driving straight shows values, not only while steering. If it ever picks the wrong car, set `[Telemetry] DebugPick = true`, wait ~2 s, reproduce, and send the `Telemetry pick:` lines from `BepInEx\LogOutput.log`.
 
 ## 11. Translation (ApocaLanguage)
 
