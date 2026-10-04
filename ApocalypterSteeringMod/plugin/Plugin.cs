@@ -42,6 +42,7 @@ namespace ApocalypterSteeringMod
                 + (GameSettingsReader.Loaded ? " (from " + GameSettingsReader.SaveFilePath + ")" : " (defaults — no save file yet)"));
             Log.LogInfo("Steering: " + (SteeringSettings.Enabled ? SteeringSettings.ActivePreset.Name : "off")
                 + " | suspension: " + (SuspensionSettings.Enabled ? SuspensionSettings.ActivePreset.Name : "off")
+                + " | panel opens " + (UiSettings.FreezeWhileOpen ? "frozen" : "live")
                 + " | panel: " + ModConfig.ToggleKeyString + " or the 'Vehicle Tuning' button in the game menu");
         }
 
@@ -73,6 +74,7 @@ namespace ApocalypterSteeringMod
             DontDestroyOnLoad(_runner);
             _runner.AddComponent<VehicleTuner>();
             _runner.AddComponent<SettingsPanelManager>();
+            _runner.AddComponent<TelemetryStrip>();
             Log.LogDebug("Runtime runner created (" + why + ").");
         }
 

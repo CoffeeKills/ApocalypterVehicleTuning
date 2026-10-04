@@ -8,11 +8,12 @@ formatting rules dynamic strings follow.
 
 ## Reproducing the inventory
 
-Every display string lives in `SettingsPanel.cs`, `SettingsPanelManager.cs` and the
-`Settings/*Preset.cs` files, plus the templates in `Runtime/UiStrings.cs`:
+Every display string lives in `SettingsPanel.cs`, `SettingsPanelManager.cs`, `GearGraph.cs`
+and the `Settings/*Preset.cs` files (0.6.0 adds `AlignmentPreset.cs` and `GearboxPreset.cs`,
+already covered by the glob), plus the templates in `Runtime/UiStrings.cs`:
 
 ```bash
-grep -o '"[^"]\{3,\}"' plugin/Runtime/SettingsPanel.cs plugin/Runtime/SettingsPanelManager.cs plugin/Settings/*Preset.cs | sed 's/^[^:]*://' | sort -u
+grep -o '"[^"]\{3,\}"' plugin/Runtime/SettingsPanel.cs plugin/Runtime/SettingsPanelManager.cs plugin/Runtime/GearGraph.cs plugin/Settings/*Preset.cs | sed 's/^[^:]*://' | sort -u
 ```
 
 Not every hit is a display string: internal object names (`AeroPage`, `ApocalypterSettingsCanvas`,
@@ -20,7 +21,10 @@ Not every hit is a display string: internal object names (`AeroPage`, `Apocalypt
 specifiers (`"0.00"`) appear in the sweep but are never shown. Display strings break down as:
 
 1. **UI chrome** — tab names (`Steering`, `Suspension`, `Aero`, `Brakes`, `Grip`, `Drivetrain`,
-   `Assists`), `ON`, `OFF`, `Reset`, `Done`, `Close`, `X`, `Click again to confirm`,
+   `Assists`, and since 0.6.0 `Alignment`, `Gearbox`, `Panel`), footer buttons (`Copy preset`,
+   `Paste preset`, `Turn everything off`, `Click again`), the transmission-mode labels
+   (`Stock`, `Manual`, `Automatic`), the clutch-type labels (`Stock`, `Street`, `Sport`, `Race`,
+   `Custom`), the telemetry corner labels (`Top left` …), the gear-count value `Own`, `ON`, `OFF`, `Reset`, `Done`, `Close`, `X`, `Click again to confirm`,
    the diff-mode labels (`Stock`, `Open`, `Locked`, `LSD`), footer hints, preset-button rows.
 2. **Per-tab titles, hints, notes** — the static labels passed to `AddSectionTitle` /
    `AddOption` / `AddSlider` / `AddNote` in each `Build*` method (e.g. `"Steering speed"`,
@@ -38,6 +42,15 @@ specifiers (`"0.00"`) appear in the sweep but are never shown. Display strings b
    point-count readout are built by concatenation in `CurveEditor.cs` and contain no
    templates; only the fixed `km/h`, `%`, `points` and `·` fragments are translatable
    via exact-match entries.
+7. **Gear graph and telemetry (0.6.0)** — the gear-graph row title/hint are static literals
+   from `SettingsPanel.cs`. Its readout ("Gear 3 · ratio 1.439") concatenates two templates
+   (`GearTitleFmt`, `RatioFmt`) with a fixed ` · `; each part translates on its own. The
+   engagement-point value ("-200 rpm") is built as number + the fixed ` rpm` fragment. The
+   telemetry strip uses only the four `Telemetry*Fmt` templates. The paste status may append
+   `PresetPasteSkippedFmt` after `PresetPastedFmt` with a space.
+8. **Alignment slider titles (0.6.0)** are concatenated from fixed parts: `Camber` / `Track
+   (outward)` / `Height` / `Fore/aft` + ` front` / ` rear` or ` front left` … ` rear right`.
+   Translate the parts as exact-match entries or the whole titles as collected.
 
 ## Dynamic templates (UiStrings.cs)
 
@@ -66,6 +79,22 @@ Every dynamic string is a `string.Format` template using only `{0}` (repeated `{
 | `AppliedOneDtFmt` / `AppliedManyDtFmt` | vehicle count | drivetrain status |
 | `ActiveOnOneFmt` / `ActiveOnManyFmt` | vehicle count | assists status |
 | `FrontAxleFmt` / `RearAxleFmt` | a diff-mode label | drivetrain axle notes |
+| `TorqueFmt` `"{0} N·m"` | newton-metres, grouped | brake-torque readout (0.6.0) |
+| `DegSignedFmt` `"{0}°"` | signed degrees, 1 or 2 decimals | alignment values (0.6.0) |
+| `CmSignedFmt` `"{0} cm"` | signed centimetres, integer | alignment position (0.6.0) |
+| `PxFmt` `"{0} px"` | pixels, integer | panel width (0.6.0) |
+| `RatioFmt` `"ratio {0}"` | a gear ratio, 3 decimals | gear readouts (0.6.0) |
+| `AlignmentStockFmt` `"stock {0}"` | a formatted stock value with its unit | alignment second line (0.6.0) |
+| `AppliedOneAlignFmt` / `AppliedManyAlignFmt` | vehicle count | alignment status (0.6.0) |
+| `GearTitleFmt` `"Gear {0}"` | gear number | gear slider titles, graph readout (0.6.0) |
+| `GearCountFmt` `"{0} gears"` | a gear count | gear-count slider (0.6.0) |
+| `AppliedOneGearFmt` / `AppliedManyGearFmt` | vehicle count | gearbox status (0.6.0) |
+| `TelemetrySpeedFmt` / `TelemetryRpmFmt` / `TelemetryGearFmt` / `TelemetrySlipFmt` | km/h integer / rpm integer / gear name (`N`, `R1`, `3`) / approximate degrees, 1 decimal | telemetry strip (0.6.0) |
+| `PresetCopiedFmt` | the copied preset's label | footer status (0.6.0) |
+| `PresetPastedFmt` | number of values applied | footer status (0.6.0) |
+| `PresetPasteSkippedFmt` | number of skipped values | appended to the pasted status (0.6.0) |
+| `PresetPasteFailedFmt` | one of the `PasteReason*` strings | footer status (0.6.0) |
+| `PasteReasonEmpty` / `PasteReasonWrongTag` / `PasteReasonWrongCategory` / `PasteReasonMalformed` / `PasteReasonNoClipboard` | — | no placeholder (0.6.0) |
 
 **Conventions**
 

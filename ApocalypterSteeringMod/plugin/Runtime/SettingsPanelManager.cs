@@ -35,6 +35,24 @@ namespace ApocalypterSteeringMod.Runtime
         private bool _eventSystemWasEnabled;
         private bool _createdEventSystem;
 
+        /// <summary>True while the panel is open (the telemetry strip hides itself then).</summary>
+        public bool Visible
+        {
+            get { return _visible; }
+        }
+
+        // Digit hotkeys (1..9, 0) jump to tabs while the panel is open.
+        private static readonly KeyCode[] DigitKeys =
+        {
+            KeyCode.Alpha0, KeyCode.Alpha1, KeyCode.Alpha2, KeyCode.Alpha3, KeyCode.Alpha4,
+            KeyCode.Alpha5, KeyCode.Alpha6, KeyCode.Alpha7, KeyCode.Alpha8, KeyCode.Alpha9
+        };
+        private static readonly Key[] DigitInputKeys =
+        {
+            Key.Digit0, Key.Digit1, Key.Digit2, Key.Digit3, Key.Digit4,
+            Key.Digit5, Key.Digit6, Key.Digit7, Key.Digit8, Key.Digit9
+        };
+
         // ------------------------------------------------------------- menu button
         private sealed class Slot
         {
@@ -84,16 +102,13 @@ namespace ApocalypterSteeringMod.Runtime
             ModConfig.SettingsChanged -= OnSettingsChanged;
             if (_visible)
             {
-                // Runner going away while open: never leave the game frozen or the cursor stuck.
+                // Runner going away while open: never leave the game frozen, blocked or the cursor stuck.
                 SetVisible(false);
-                InputBlocker.Set(false);
             }
-            else if (_unblockNextFrame)
-            {
-                // Closed this frame and disabled before the deferred unblock ran.
-                _unblockNextFrame = false;
-                InputBlocker.Set(false);
-            }
+            // Closed this frame (or just now) and disabled before the deferred unblock ran.
+            _unblockNextFrame = false;
+            InputBlocker.SetInputBlocked(false);
+            InputBlocker.SetFreeze(false);
         }
 
         private void OnDestroy()
@@ -120,7 +135,8 @@ namespace ApocalypterSteeringMod.Runtime
                 _unblockNextFrame = false;
                 if (!_visible)
                 {
-                    InputBlocker.Set(false);
+                    InputBlocker.SetInputBlocked(false);
+                    InputBlocker.SetFreeze(false);   // restores the saved timeScale (a pause-menu 0 included)
                 }
             }
 
@@ -131,6 +147,21 @@ namespace ApocalypterSteeringMod.Runtime
             else if (_visible && IsKeyPressed(KeyCode.Escape, Key.Escape))
             {
                 SetVisible(false);
+            }
+            else if (_visible && _panel != null)
+            {
+                for (int d = 0; d < DigitKeys.Length; d++)
+                {
+                    if (IsKeyPressed(DigitKeys[d], DigitInputKeys[d]))
+                    {
+                        int tab = PanelLayout.TabForDigit(d);
+                        if (tab >= 0)
+                        {
+                            _panel.ShowTab(tab);
+                        }
+                        break;
+                    }
+                }
             }
 
             if (_visible && _panel != null)
@@ -149,6 +180,27 @@ namespace ApocalypterSteeringMod.Runtime
             {
                 Cursor.lockState = CursorLockMode.None;
                 Cursor.visible = true;
+                // Live mode: a clicked button stays EventSystem-selected, and the input module
+                // then fires it again on Submit (Enter/Space) — i.e. while the player drives
+                // (Space is a handbrake key). Navigation is off, so selection has no other use.
+                if (_eventSystem != null && _eventSystem.currentSelectedGameObject != null)
+                {
+                    _eventSystem.SetSelectedGameObject(null);
+                }
+            }
+        }
+
+        /// <summary>Freeze toggled while the panel is open: apply or release the freeze now.</summary>
+        private void ApplyOpenMode()
+        {
+            if (!_visible)
+            {
+                return;
+            }
+            InputBlocker.SetFreeze(Settings.UiSettings.FreezeWhileOpen);
+            if (_panel != null)
+            {
+                _panel.ApplyDisplaySettings();
             }
         }
 
@@ -157,6 +209,7 @@ namespace ApocalypterSteeringMod.Runtime
             // Config edited externally (e.g. a config manager) while the panel exists.
             if (_panel != null)
             {
+                ApplyOpenMode();
                 _panel.Refresh();
             }
         }
@@ -490,7 +543,7 @@ namespace ApocalypterSteeringMod.Runtime
                 }
                 try
                 {
-                    _panel = SettingsPanel.Create(GetComponent<VehicleTuner>(), () => SetVisible(false));
+                    _panel = SettingsPanel.Create(GetComponent<VehicleTuner>(), () => SetVisible(false), ApplyOpenMode);
                 }
                 catch (Exception ex)
                 {
@@ -529,7 +582,11 @@ namespace ApocalypterSteeringMod.Runtime
             _prevCursorVisible = Cursor.visible;
             Cursor.lockState = CursorLockMode.None;
             Cursor.visible = true;
-            InputBlocker.Set(true);
+            // Live mode (default): driving input keeps working, everything else is blocked,
+            // timeScale is never touched (opened from the pause menu, the game simply stays
+            // paused). Freeze ON: also the exact 0.5.0 timeScale save/restore.
+            InputBlocker.SetInputBlocked(true);
+            InputBlocker.SetFreeze(Settings.UiSettings.FreezeWhileOpen);
             _unblockNextFrame = false;
 
             _eventSystem = EventSystem.current != null ? EventSystem.current : UnityEngine.Object.FindObjectOfType<EventSystem>();
@@ -572,6 +629,8 @@ namespace ApocalypterSteeringMod.Runtime
 
             Cursor.lockState = _prevLockState;
             Cursor.visible = _prevCursorVisible;
+            // Input stays blocked (and a freeze held) one more frame, exactly like 0.5.0:
+            // the closing key never reaches the game.
             _unblockNextFrame = true;
 
             if (_eventSystem != null)

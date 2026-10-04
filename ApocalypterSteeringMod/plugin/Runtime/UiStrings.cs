@@ -28,6 +28,20 @@ namespace ApocalypterSteeringMod.Runtime
         public static string Deg(float v) { return string.Format(DegFmt, v.ToString("0.0")); }
         public static string SpeedMps(float v) { return string.Format(SpeedFmt, v.ToString("0.0")); }
 
+        // 0.6.0 value formatters.
+        public static readonly string TorqueFmt = "{0} N·m";
+        public static readonly string DegSignedFmt = "{0}°";
+        public static readonly string CmSignedFmt = "{0} cm";
+        public static readonly string PxFmt = "{0} px";
+        public static readonly string RatioFmt = "ratio {0}";
+
+        public static string Torque(float nm) { return string.Format(TorqueFmt, nm.ToString("N0")); }
+        public static string DegSigned(float v) { return string.Format(DegSignedFmt, v.ToString("+0.0;-0.0;0.0")); }
+        public static string DegSigned2(float v) { return string.Format(DegSignedFmt, v.ToString("+0.00;-0.00;0.00")); }
+        public static string CmSigned(float v) { return string.Format(CmSignedFmt, v.ToString("+0;-0;0")); }
+        public static string Px(float v) { return string.Format(PxFmt, UnityEngine.Mathf.RoundToInt(v)); }
+        public static string Ratio(float r) { return string.Format(RatioFmt, r.ToString("0.000")); }
+
         // ---- preset semantics -------------------------------------------------
 
         // {0} = the built-in preset's Label the Custom slot was copied from.
@@ -83,5 +97,53 @@ namespace ApocalypterSteeringMod.Runtime
             "Front axle: {0}. Axles are found from the wheels each diff drives; an axle without a diff keeps its stock setup.";
         public static readonly string RearAxleFmt =
             "Rear axle: {0}. Centre (AWD) diffs always keep their stock type.";
+
+        // ---- alignment tab (0.6.0) ------------------------------------------------
+
+        // {0} = the reference vehicle's stock value, formatted with its unit ("-1.2°", "+0 cm").
+        public static readonly string AlignmentStockFmt = "stock {0}";
+        public static readonly string AppliedOneAlignFmt =
+            "Applied to {0} vehicle. Moved wheels: the vehicle keeps its original wheelbase and track width for steering geometry.";
+        public static readonly string AppliedManyAlignFmt =
+            "Applied to {0} vehicles. Moved wheels: the vehicles keep their original wheelbase and track width for steering geometry.";
+
+        // ---- gearbox tab (0.6.0) ---------------------------------------------------
+
+        // {0} = gear number.
+        public static readonly string GearTitleFmt = "Gear {0}";
+        // {0} = a gear count.
+        public static readonly string GearCountFmt = "{0} gears";
+        public static readonly string AppliedOneGearFmt = "Applied to {0} vehicle.";
+        public static readonly string AppliedManyGearFmt = "Applied to {0} vehicles.";
+
+        // ---- telemetry strip (0.6.0) ------------------------------------------------
+
+        public static readonly string TelemetrySpeedFmt = "{0} km/h";
+        public static readonly string TelemetryRpmFmt = "{0} rpm";
+        public static readonly string TelemetryGearFmt = "Gear {0}";
+        public static readonly string TelemetrySlipFmt = "Slip {0}°";
+
+        public static string TelemetrySpeed(float kmh) { return string.Format(TelemetrySpeedFmt, UnityEngine.Mathf.RoundToInt(kmh < 0f ? -kmh : kmh)); }
+        public static string TelemetryRpm(float rpm) { return string.Format(TelemetryRpmFmt, UnityEngine.Mathf.RoundToInt(rpm < 0f ? 0f : rpm)); }
+        public static string TelemetryGear(string gear) { return string.Format(TelemetryGearFmt, string.IsNullOrEmpty(gear) ? "-" : gear); }
+        /// <summary>NWH's LateralSlip is degrees x 0.01111 (WheelController.cs:1010) scaled by the
+        /// friction stiffness; x90 brings it back to approximate degrees (exact at stiffness 1).</summary>
+        public static string TelemetrySlip(float normalisedSlip) { return string.Format(TelemetrySlipFmt, (normalisedSlip * 90f).ToString("0.0")); }
+
+        // ---- preset copy / paste (0.6.0) ---------------------------------------------
+
+        // {0} = the copied preset's label.
+        public static readonly string PresetCopiedFmt = "Copied the {0} preset. Paste it on this tab, here or on another PC.";
+        // {0} = number of values applied.
+        public static readonly string PresetPastedFmt = "Pasted into Custom: {0} values applied.";
+        // {0} = number of unknown/unreadable values skipped.
+        public static readonly string PresetPasteSkippedFmt = "{0} unknown values were skipped.";
+        // {0} = one of the reasons below.
+        public static readonly string PresetPasteFailedFmt = "Paste failed: {0}.";
+        public static readonly string PasteReasonEmpty = "the clipboard is empty";
+        public static readonly string PasteReasonWrongTag = "the clipboard does not hold a Vehicle Tuning preset";
+        public static readonly string PasteReasonWrongCategory = "that preset belongs to another tab";
+        public static readonly string PasteReasonMalformed = "the preset text is damaged";
+        public static readonly string PasteReasonNoClipboard = "no clipboard access";
     }
 }

@@ -74,6 +74,28 @@ namespace ApocalypterSteeringMod.Persistence
         private static ConfigEntry<float> _assistsAbsThr, _assistsAbsCut, _assistsAbsMult,
             _assistsTcsThr, _assistsTcsCut, _assistsTcsMult;
 
+        // Alignment (0.6.0)
+        private static ConfigEntry<bool> _alignEnabled, _alignPerWheel;
+        private static ConfigEntry<string> _alignPreset, _alignBasedOn;
+        private static ConfigEntry<float> _alignCasterF, _alignCasterR, _alignToeF, _alignToeR;
+        private static readonly ConfigEntry<float>[] _alignCamber = new ConfigEntry<float>[4];        // by WheelRole
+        private static readonly ConfigEntry<float>[,] _alignPos = new ConfigEntry<float>[4, 3];       // [WheelRole, axis]
+
+        // Gearbox (0.6.0)
+        private static ConfigEntry<bool> _gearEnabled;
+        private static ConfigEntry<string> _gearPreset, _gearBasedOn, _gearMode;
+        private static ConfigEntry<int> _gearCount;
+        private static readonly ConfigEntry<float>[] _gearScale = new ConfigEntry<float>[GearboxPreset.MaxGears];
+        private static ConfigEntry<float> _gearClutchGrip, _gearClutchRange, _gearClutchRpm;
+
+        // UI + telemetry (0.6.0)
+        private static ConfigEntry<bool> _uiFreeze;
+        private static ConfigEntry<float> _uiScale, _uiWidth, _uiAlpha;
+        private static ConfigEntry<int> _uiLastTab;
+        private static ConfigEntry<bool> _telEnabled;
+        private static ConfigEntry<float> _telScale;
+        private static ConfigEntry<string> _telPosition;
+
         private static ConfigEntry<string> _toggleKey;
         // Read by Apocasetter via Chainloader (not wired to OnSettingChanged — we never read it).
         private static ConfigEntry<bool> _apocasetter;
@@ -87,6 +109,12 @@ namespace ApocalypterSteeringMod.Persistence
         {
             return _config.Bind(section, key, def,
                 new ConfigDescription(description, new AcceptableValueRange<float>(min, max)));
+        }
+
+        private static ConfigEntry<int> BindIntRange(string section, string key, int def, int min, int max, string description)
+        {
+            return _config.Bind(section, key, def,
+                new ConfigDescription(description, new AcceptableValueRange<int>(min, max)));
         }
 
         public static void Load(ConfigFile config)
@@ -123,10 +151,13 @@ namespace ApocalypterSteeringMod.Persistence
             BindGrip();
             BindDrivetrain();
             BindAssists();
-            WireAll();
+            BindAlignment();
+            BindGearbox();
 
             _toggleKey = config.Bind("UI", "ToggleKey", "F7",
                 "Hotkey that opens/closes the tuning panel (a Unity KeyCode name, e.g. F7, F8, Home). Restart the game after changing.");
+            BindUi();
+            WireAll();
             _apocasetter = config.Bind("General", "Apocasetter", true,
                 "Show this mod in the Apocasetter Mods menu (requires Apocasetter installed).");
 
@@ -187,16 +218,16 @@ namespace ApocalypterSteeringMod.Persistence
                 "Show separate front/rear sliders in the panel.");
             _suspBasedOn = _config.Bind("Suspension.Custom", "BasedOn", "",
                 "Built-in preset the Custom tuning was copied from. Leave empty for none.");
-            _suspSpringF = BindRange("Suspension.Custom", "SpringFront", 1f, Limits.FactorMin, Limits.FactorMax, "Front spring stiffness factor.");
-            _suspSpringR = BindRange("Suspension.Custom", "SpringRear", 1f, Limits.FactorMin, Limits.FactorMax, "Rear spring stiffness factor.");
-            _suspHeightF = BindRange("Suspension.Custom", "RideHeightFront", 1f, Limits.FactorMin, Limits.FactorMax, "Front ride height factor.");
-            _suspHeightR = BindRange("Suspension.Custom", "RideHeightRear", 1f, Limits.FactorMin, Limits.FactorMax, "Rear ride height factor.");
-            _suspBumpF = BindRange("Suspension.Custom", "BumpFront", 1f, Limits.FactorMin, Limits.FactorMax, "Front bump damping factor.");
-            _suspBumpR = BindRange("Suspension.Custom", "BumpRear", 1f, Limits.FactorMin, Limits.FactorMax, "Rear bump damping factor.");
-            _suspReboundF = BindRange("Suspension.Custom", "ReboundFront", 1f, Limits.FactorMin, Limits.FactorMax, "Front rebound damping factor.");
-            _suspReboundR = BindRange("Suspension.Custom", "ReboundRear", 1f, Limits.FactorMin, Limits.FactorMax, "Rear rebound damping factor.");
-            _suspArbF = BindRange("Suspension.Custom", "ArbFront", 1f, Limits.FactorMin, Limits.FactorMax, "Front anti-roll bar factor.");
-            _suspArbR = BindRange("Suspension.Custom", "ArbRear", 1f, Limits.FactorMin, Limits.FactorMax, "Rear anti-roll bar factor.");
+            _suspSpringF = BindRange("Suspension.Custom", "SpringFront", 1f, Limits.SuspFactorMin, Limits.SuspFactorMax, "Front spring stiffness factor.");
+            _suspSpringR = BindRange("Suspension.Custom", "SpringRear", 1f, Limits.SuspFactorMin, Limits.SuspFactorMax, "Rear spring stiffness factor.");
+            _suspHeightF = BindRange("Suspension.Custom", "RideHeightFront", 1f, Limits.SuspFactorMin, Limits.SuspFactorMax, "Front ride height factor.");
+            _suspHeightR = BindRange("Suspension.Custom", "RideHeightRear", 1f, Limits.SuspFactorMin, Limits.SuspFactorMax, "Rear ride height factor.");
+            _suspBumpF = BindRange("Suspension.Custom", "BumpFront", 1f, Limits.SuspFactorMin, Limits.SuspFactorMax, "Front bump damping factor.");
+            _suspBumpR = BindRange("Suspension.Custom", "BumpRear", 1f, Limits.SuspFactorMin, Limits.SuspFactorMax, "Rear bump damping factor.");
+            _suspReboundF = BindRange("Suspension.Custom", "ReboundFront", 1f, Limits.SuspFactorMin, Limits.SuspFactorMax, "Front rebound damping factor.");
+            _suspReboundR = BindRange("Suspension.Custom", "ReboundRear", 1f, Limits.SuspFactorMin, Limits.SuspFactorMax, "Rear rebound damping factor.");
+            _suspArbF = BindRange("Suspension.Custom", "ArbFront", 1f, Limits.SuspFactorMin, Limits.SuspFactorMax, "Front anti-roll bar factor.");
+            _suspArbR = BindRange("Suspension.Custom", "ArbRear", 1f, Limits.SuspFactorMin, Limits.SuspFactorMax, "Rear anti-roll bar factor.");
 
             // Legacy v3.1 fine-tune multipliers — read once for migration, then removed.
             _legacyUSpringF = BindRange("Suspension.User", "SpringFront", 1f, Limits.UserMin, Limits.UserMax, "Legacy.");
@@ -230,7 +261,7 @@ namespace ApocalypterSteeringMod.Persistence
             _brakesFront = BindRange("Brakes.Custom", "FrontBrakeScale", 1f, Limits.BrakeAxleMin, Limits.BrakeAxleMax, "Front axle brake factor.");
             _brakesRear = BindRange("Brakes.Custom", "RearBrakeScale", 1f, Limits.BrakeAxleMin, Limits.BrakeAxleMax, "Rear axle brake factor.");
             _brakesHandbrake = BindRange("Brakes.Custom", "HandbrakeScale", 1f, Limits.BrakeAxleMin, Limits.BrakeAxleMax, "Handbrake factor.");
-            _brakesActuation = BindRange("Brakes.Custom", "ActuationScale", 1f, Limits.BrakeTorqueMin, Limits.BrakeTorqueMax, "Brake apply time factor.");
+            _brakesActuation = BindRange("Brakes.Custom", "ActuationScale", 1f, Limits.ActuationMin, Limits.ActuationMax, "Brake apply time factor.");
         }
 
         private static void BindGrip()
@@ -250,8 +281,8 @@ namespace ApocalypterSteeringMod.Persistence
             _drivetrainBasedOn = _config.Bind("Drivetrain.Custom", "BasedOn", "", "Built-in preset the Custom tuning was copied from.");
             _dtPower = BindRange("Drivetrain.Custom", "PowerScale", 1f, Limits.PowerMin, Limits.PowerMax, "Engine power factor.");
             _dtRevLimit = BindRange("Drivetrain.Custom", "RevLimiterScale", 1f, Limits.RevLimitMin, Limits.RevLimitMax, "Rev limiter factor.");
-            _dtLoss = BindRange("Drivetrain.Custom", "LossScale", 1f, Limits.FactorMin, Limits.FactorMax, "Engine loss (engine braking) factor.");
-            _dtBoost = BindRange("Drivetrain.Custom", "BoostScale", 1f, Limits.FactorMin, Limits.FactorMax, "Turbo/boost gain factor.");
+            _dtLoss = BindRange("Drivetrain.Custom", "LossScale", 1f, Limits.LossMin, Limits.LossMax, "Engine loss (engine braking) factor.");
+            _dtBoost = BindRange("Drivetrain.Custom", "BoostScale", 1f, Limits.BoostMin, Limits.BoostMax, "Turbo/boost gain factor.");
             _dtFinalDrive = BindRange("Drivetrain.Custom", "FinalDriveScale", 1f, Limits.FinalDriveMin, Limits.FinalDriveMax, "Final drive ratio factor.");
             _dtUpshift = BindRange("Drivetrain.Custom", "UpshiftScale", 1f, Limits.ShiftRpmMin, Limits.ShiftRpmMax, "Upshift RPM factor.");
             _dtDownshift = BindRange("Drivetrain.Custom", "DownshiftScale", 1f, Limits.ShiftRpmMin, Limits.ShiftRpmMax, "Downshift RPM factor.");
@@ -277,11 +308,76 @@ namespace ApocalypterSteeringMod.Persistence
             _assistsTcsMult = BindRange("Assists.Custom", "TcsCutMultiplier", 0.01f, Limits.CutMultMin, Limits.CutMultMax, "Power modifier while TCS cuts.");
         }
 
+        private static void BindAlignment()
+        {
+            _alignEnabled = _config.Bind("Alignment", "Enabled", false, "Master switch for wheel alignment/geometry (opt-in).");
+            _alignPreset = _config.Bind("Alignment", "Preset", "Stock", "Active alignment preset: Stock, Street, Sport, Race, Off-road, Stance, Custom.");
+            _alignPerWheel = _config.Bind("Alignment", "PerWheel", false, "Show per-wheel camber/position sliders in the panel (advanced).");
+            _alignBasedOn = _config.Bind("Alignment.Custom", "BasedOn", "", "Built-in preset the Custom geometry was copied from.");
+            for (int r = 0; r < 4; r++)
+            {
+                WheelRole role = (WheelRole)r;
+                _alignCamber[r] = BindRange("Alignment.Custom", "Camber" + role, 0f, Limits.AlignmentCamberMin, Limits.AlignmentCamberMax,
+                    "Camber offset of the " + role + " wheel in degrees (added to the vehicle's own; negative = top leans in).");
+            }
+            _alignCasterF = BindRange("Alignment.Custom", "CasterFront", 0f, Limits.AlignmentCasterMin, Limits.AlignmentCasterMax, "Front axle caster offset in degrees.");
+            _alignCasterR = BindRange("Alignment.Custom", "CasterRear", 0f, Limits.AlignmentCasterMin, Limits.AlignmentCasterMax, "Rear axle caster offset in degrees.");
+            _alignToeF = BindRange("Alignment.Custom", "ToeFront", 0f, Limits.AlignmentToeMin, Limits.AlignmentToeMax, "Front axle toe offset in degrees (positive = toe-in).");
+            _alignToeR = BindRange("Alignment.Custom", "ToeRear", 0f, Limits.AlignmentToeMin, Limits.AlignmentToeMax, "Rear axle toe offset in degrees (positive = toe-in).");
+            string[] axisText = { "outward (wider track)", "up", "forward" };
+            for (int r = 0; r < 4; r++)
+            {
+                for (int axis = 0; axis < 3; axis++)
+                {
+                    WheelRole role = (WheelRole)r;
+                    _alignPos[r, axis] = BindRange("Alignment.Custom", PresetCodec.AlignmentPosKey(role, axis), 0f,
+                        Limits.AlignmentPosMin, Limits.AlignmentPosMax,
+                        "Position offset of the " + role + " wheel in cm, " + axisText[axis] + ".");
+                }
+            }
+        }
+
+        private static void BindGearbox()
+        {
+            _gearEnabled = _config.Bind("Gearbox", "Enabled", false, "Master switch for gearbox customisation (opt-in).");
+            _gearPreset = _config.Bind("Gearbox", "Preset", "Stock", "Active gearbox preset: Stock, Comfort, Sport, Race, Custom.");
+            _gearBasedOn = _config.Bind("Gearbox.Custom", "BasedOn", "", "Built-in preset the Custom gearbox was copied from.");
+            _gearCount = BindIntRange("Gearbox.Custom", "GearCount", 0, Limits.GearCountMin, Limits.GearCountMax,
+                "Forward gear count; 0 = keep each vehicle's own. Added gears continue the vehicle's own ratio progression.");
+            for (int g = 1; g <= GearboxPreset.MaxGears; g++)
+            {
+                _gearScale[g - 1] = BindRange("Gearbox.Custom", PresetCodec.GearKey(g), 1f, Limits.GearRatioMin, Limits.GearRatioMax,
+                    "Ratio factor of forward gear " + g + " (x the vehicle's own ratio for that gear).");
+            }
+            _gearClutchGrip = BindRange("Gearbox.Custom", "ClutchGripScale", 1f, Limits.ClutchGripMin, Limits.ClutchGripMax,
+                "Clutch capacity factor (x slip torque). NWH2 has no clutch-type model; types are emulated.");
+            _gearClutchRange = BindRange("Gearbox.Custom", "ClutchRangeScale", 1f, Limits.ClutchRangeMin, Limits.ClutchRangeMax,
+                "Clutch engagement range factor (lower = engages faster).");
+            _gearClutchRpm = BindRange("Gearbox.Custom", "ClutchRpmOffset", 0f, Limits.ClutchRpmMin, Limits.ClutchRpmMax,
+                "Clutch engagement RPM offset (never below the engine's idle).");
+            _gearMode = _config.Bind("Gearbox.Custom", "TransmissionMode", "Stock",
+                "Transmission mode: Stock, Manual, Automatic (CVT vehicles always keep Stock).");
+        }
+
+        private static void BindUi()
+        {
+            _uiFreeze = _config.Bind("UI", "FreezeWhileOpen", false,
+                "Freeze the game while the panel is open (the 0.5.0 behaviour). Off = keep driving with the panel open.");
+            _uiScale = BindRange("UI", "PanelScale", 1f, Limits.PanelScaleMin, Limits.PanelScaleMax, "Panel interface size.");
+            _uiWidth = BindRange("UI", "PanelWidth", Limits.PanelWidthDefault, Limits.PanelWidthMin, Limits.PanelWidthMax, "Panel width in reference pixels.");
+            _uiAlpha = BindRange("UI", "PanelAlpha", 1f, Limits.PanelAlphaMin, Limits.PanelAlphaMax, "Panel opacity (1 = opaque).");
+            _uiLastTab = BindIntRange("UI", "LastTab", 0, Limits.LastTabMin, Limits.LastTabMax, "Tab the panel opens on (remembered).");
+            _telEnabled = _config.Bind("Telemetry", "Enabled", true,
+                "Show the small click-through telemetry strip (speed, RPM, gear, front slip) while driving.");
+            _telScale = BindRange("Telemetry", "Scale", 1f, Limits.TelemetryScaleMin, Limits.TelemetryScaleMax, "Telemetry strip size.");
+            _telPosition = _config.Bind("Telemetry", "Position", "BottomLeft", "Screen corner: TopLeft, TopRight, BottomLeft, BottomRight.");
+        }
+
         // ---------------------------------------------------------------- wiring
 
         private static void Wire<T>(ConfigEntry<T> entry)
         {
-            entry.SettingChanged += OnSettingChanged;
+            entry.SettingChanged += (sender, e) => OnEntryChanged(entry);
         }
 
         private static void WireAll()
@@ -307,6 +403,24 @@ namespace ApocalypterSteeringMod.Persistence
             Wire(_assistsEnabled); Wire(_assistsPreset); Wire(_assistsBasedOn);
             Wire(_assistsAbsEnabled); Wire(_assistsAbsThr); Wire(_assistsAbsCut); Wire(_assistsAbsMult);
             Wire(_assistsTcsEnabled); Wire(_assistsTcsThr); Wire(_assistsTcsCut); Wire(_assistsTcsMult);
+            Wire(_alignEnabled); Wire(_alignPreset); Wire(_alignPerWheel); Wire(_alignBasedOn);
+            Wire(_alignCasterF); Wire(_alignCasterR); Wire(_alignToeF); Wire(_alignToeR);
+            for (int r = 0; r < 4; r++)
+            {
+                Wire(_alignCamber[r]);
+                for (int axis = 0; axis < 3; axis++)
+                {
+                    Wire(_alignPos[r, axis]);
+                }
+            }
+            Wire(_gearEnabled); Wire(_gearPreset); Wire(_gearBasedOn); Wire(_gearCount); Wire(_gearMode);
+            for (int g = 0; g < GearboxPreset.MaxGears; g++)
+            {
+                Wire(_gearScale[g]);
+            }
+            Wire(_gearClutchGrip); Wire(_gearClutchRange); Wire(_gearClutchRpm);
+            Wire(_uiFreeze); Wire(_uiScale); Wire(_uiWidth); Wire(_uiAlpha); Wire(_uiLastTab);
+            Wire(_telEnabled); Wire(_telScale); Wire(_telPosition);
         }
 
         // ---------------------------------------------------------------- migration
@@ -477,6 +591,20 @@ namespace ApocalypterSteeringMod.Persistence
             _syncing = true;
             try
             {
+                MirrorRuntimeToEntries();
+            }
+            finally
+            {
+                _syncing = false;
+                _config.SaveOnConfigSet = autoSave;
+            }
+            _config.Save();
+        }
+
+        /// <summary>Runtime holders -> ConfigEntries (no file write). Caller sets _syncing.</summary>
+        private static void MirrorRuntimeToEntries()
+        {
+            {
                 _steerEnabled.Value = SteeringSettings.Enabled;
                 _steerPreset.Value = SteeringSettings.ActivePreset != null ? SteeringSettings.ActivePreset.Name : "Custom";
                 _matchGameSteeringSpeed.Value = SteeringSettings.MatchGameSteeringSpeed;
@@ -564,24 +692,82 @@ namespace ApocalypterSteeringMod.Persistence
                 _assistsTcsThr.Value = tc.TcsSlipThreshold;
                 _assistsTcsCut.Value = tc.TcsCutoffSpeed;
                 _assistsTcsMult.Value = tc.TcsCutMultiplier;
+
+                _alignEnabled.Value = AlignmentSettings.Enabled;
+                _alignPreset.Value = AlignmentSettings.ActivePreset != null ? AlignmentSettings.ActivePreset.Name : "Stock";
+                _alignPerWheel.Value = AlignmentSettings.PerWheel;
+                AlignmentPreset al = AlignmentPreset.Custom;
+                _alignBasedOn.Value = al.BasedOn ?? "";
+                _alignCasterF.Value = al.CasterF;
+                _alignCasterR.Value = al.CasterR;
+                _alignToeF.Value = al.ToeF;
+                _alignToeR.Value = al.ToeR;
+                for (int r = 0; r < 4; r++)
+                {
+                    _alignCamber[r].Value = al.Camber((WheelRole)r);
+                    for (int axis = 0; axis < 3; axis++)
+                    {
+                        _alignPos[r, axis].Value = al.Pos((WheelRole)r, axis);
+                    }
+                }
+
+                _gearEnabled.Value = GearboxSettings.Enabled;
+                _gearPreset.Value = GearboxSettings.ActivePreset != null ? GearboxSettings.ActivePreset.Name : "Stock";
+                GearboxPreset gb = GearboxPreset.Custom;
+                _gearBasedOn.Value = gb.BasedOn ?? "";
+                _gearCount.Value = gb.GearCount;
+                for (int g = 0; g < GearboxPreset.MaxGears; g++)
+                {
+                    _gearScale[g].Value = gb.GearScale[g];
+                }
+                _gearClutchGrip.Value = gb.ClutchGripScale;
+                _gearClutchRange.Value = gb.ClutchRangeScale;
+                _gearClutchRpm.Value = gb.ClutchRpmOffset;
+                _gearMode.Value = gb.TransmissionMode.ToString();
+
+                _uiFreeze.Value = UiSettings.FreezeWhileOpen;
+                _uiScale.Value = UiSettings.PanelScale;
+                _uiWidth.Value = UiSettings.PanelWidth;
+                _uiAlpha.Value = UiSettings.PanelAlpha;
+                _uiLastTab.Value = UiSettings.ClampTab(UiSettings.LastTab);
+                _telEnabled.Value = UiSettings.TelemetryEnabled;
+                _telScale.Value = UiSettings.TelemetryScale;
+                _telPosition.Value = UiSettings.TelemetryPosition.ToString();
+            }
+        }
+
+        /// <summary>
+        /// An entry changed from outside (a config manager such as Apocasetter's Mods window).
+        /// 0.6.0: the runtime may hold panel edits that are not saved yet (Save runs when the
+        /// panel closes) and, with the live panel, both UIs can be open at once. 0.5.0 pushed
+        /// ALL entries to the runtime here, silently reverting every unsaved panel edit to its
+        /// last-saved value. Now the runtime is mirrored into the entries first (no file write),
+        /// the externally changed value is re-applied on top, and only then pushed.
+        /// </summary>
+        private static void OnEntryChanged(ConfigEntryBase changed)
+        {
+            if (_syncing)
+            {
+                return;
+            }
+            object incoming = changed.BoxedValue;
+            bool autoSave = _config.SaveOnConfigSet;
+            _config.SaveOnConfigSet = false;
+            _syncing = true;
+            try
+            {
+                MirrorRuntimeToEntries();
+                changed.BoxedValue = incoming;
             }
             finally
             {
                 _syncing = false;
                 _config.SaveOnConfigSet = autoSave;
             }
-            _config.Save();
-        }
-
-        private static void OnSettingChanged(object sender, EventArgs e)
-        {
-            if (_syncing)
-            {
-                return;
-            }
             PushAllToRuntime();
             SettingsChanged?.Invoke();
         }
+
 
         /// <summary>
         /// Names only (case-insensitive), plus the panel's "LSD" label. Enum.TryParse alone
@@ -605,6 +791,13 @@ namespace ApocalypterSteeringMod.Persistence
                 return mode;
             }
             return DiffMode.Stock;
+        }
+
+        /// <summary>Names only (case-insensitive); numbers and unknown names fall back to Stock.</summary>
+        public static GearboxMode ParseGearboxMode(string value)
+        {
+            GearboxMode m;
+            return PresetCodec.TryParseName(value, out m) ? m : GearboxMode.Stock;
         }
 
         private static void PushAllToRuntime()
@@ -707,6 +900,47 @@ namespace ApocalypterSteeringMod.Persistence
             tc.TcsSlipThreshold = _assistsTcsThr.Value;
             tc.TcsCutoffSpeed = _assistsTcsCut.Value;
             tc.TcsCutMultiplier = _assistsTcsMult.Value;
+
+            AlignmentSettings.Enabled = _alignEnabled.Value;
+            AlignmentSettings.SetPresetByName(_alignPreset.Value);
+            AlignmentSettings.PerWheel = _alignPerWheel.Value;
+            AlignmentPreset al = AlignmentPreset.Custom;
+            al.BasedOn = _alignBasedOn.Value ?? "";
+            al.CasterF = _alignCasterF.Value;
+            al.CasterR = _alignCasterR.Value;
+            al.ToeF = _alignToeF.Value;
+            al.ToeR = _alignToeR.Value;
+            for (int r = 0; r < 4; r++)
+            {
+                al.SetCamber((WheelRole)r, _alignCamber[r].Value);
+                for (int axis = 0; axis < 3; axis++)
+                {
+                    al.SetPos((WheelRole)r, axis, _alignPos[r, axis].Value);
+                }
+            }
+
+            GearboxSettings.Enabled = _gearEnabled.Value;
+            GearboxSettings.SetPresetByName(_gearPreset.Value);
+            GearboxPreset gb = GearboxPreset.Custom;
+            gb.BasedOn = _gearBasedOn.Value ?? "";
+            gb.GearCount = _gearCount.Value;
+            for (int g = 0; g < GearboxPreset.MaxGears; g++)
+            {
+                gb.GearScale[g] = _gearScale[g].Value;
+            }
+            gb.ClutchGripScale = _gearClutchGrip.Value;
+            gb.ClutchRangeScale = _gearClutchRange.Value;
+            gb.ClutchRpmOffset = _gearClutchRpm.Value;
+            gb.TransmissionMode = ParseGearboxMode(_gearMode.Value);
+
+            UiSettings.FreezeWhileOpen = _uiFreeze.Value;
+            UiSettings.PanelScale = _uiScale.Value;
+            UiSettings.PanelWidth = _uiWidth.Value;
+            UiSettings.PanelAlpha = _uiAlpha.Value;
+            UiSettings.LastTab = UiSettings.ClampTab(_uiLastTab.Value);
+            UiSettings.TelemetryEnabled = _telEnabled.Value;
+            UiSettings.TelemetryScale = _telScale.Value;
+            UiSettings.TelemetryPosition = UiSettings.ParseCorner(_telPosition.Value);
 
             SteeringSettings.UpdateGameSteeringSpeedFactor();
         }

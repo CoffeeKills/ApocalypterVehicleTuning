@@ -43,7 +43,11 @@ namespace ApocalypterSteeringMod.Runtime
                 // multiplies this modifier into the HANDBRAKE torque too, so without the
                 // guard a handbrake-locked rear wheel trips ABS and the handbrake is
                 // cut to 1% — no handbrake turns with assists on. Read-only input access.
-                if (vc.input != null && vc.input.Handbrake >= 0.1f)
+                // 0.6.0: also the handbrake VALUE — with HandbrakeType.Latching the handbrake
+                // stays applied after the input is released (Brakes.cs:113-136), and the
+                // input-only guard (NWH's own) cut the latched handbrake to 1%.
+                if ((vc.input != null && vc.input.Handbrake >= 0.1f)
+                    || (vc.brakes != null && vc.brakes.handbrakeValue >= 0.1f))
                 {
                     return 1f;
                 }
@@ -71,6 +75,14 @@ namespace ApocalypterSteeringMod.Runtime
                 }
                 AssistsPreset p = AssistsSettings.ActivePreset;
                 if (p == null || !p.TcsEnabled || vc.Speed < p.TcsCutoffSpeed)
+                {
+                    return 1f;
+                }
+                // 0.6.0: like NWH's TCSModule, never cut while a shift is in progress: the
+                // clutch is open, wheel slip is not engine-driven, and a cut there only
+                // leaves 1% power when the clutch re-engages (a stumble on every upshift).
+                TransmissionComponent tr = vc.powertrain.transmission;
+                if (tr != null && tr.isShifting)
                 {
                     return 1f;
                 }

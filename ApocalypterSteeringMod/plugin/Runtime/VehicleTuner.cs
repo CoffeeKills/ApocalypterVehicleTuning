@@ -12,10 +12,11 @@ namespace ApocalypterSteeringMod.Runtime
 {
     /// <summary>
     /// Applies every tuning category to all live vehicles:
-    ///   effective = the vehicle's captured stock value x the active preset factor.
+    ///   effective = the vehicle's captured stock value x the active preset factor
+    ///   (Alignment: stock geometry + offset).
     /// Stock values are captured the first time a vehicle is seen and restored when
-    /// a category is switched off. Per-system logic lives in VehicleTuner.Systems.cs
-    /// and VehicleTuner.Assists.cs.
+    /// a category is switched off. Per-system logic lives in VehicleTuner.Systems.cs,
+    /// VehicleTuner.Assists.cs, VehicleTuner.Alignment.cs and VehicleTuner.Gearbox.cs.
     ///
     /// Cost model: a scene scan (FindObjectsOfType) runs every few seconds and on
     /// explicit request; dragging a slider only re-applies to already-known vehicles.
@@ -27,15 +28,24 @@ namespace ApocalypterSteeringMod.Runtime
         internal sealed class WheelData
         {
             public bool IsFront;
+            public bool IsLeft;                                              // transform.localPosition.x < 0 at capture
+            public WheelRole Role;
             public float SpringForce, SpringLength, BumpRate, ReboundRate;   // suspension
             public float LngGrip, LatGrip, LngStiff, LatStiff;               // grip
+            public float Camber;                                             // alignment
+            public Vector3 LocalPos, LocalEuler;                             // alignment
+            public bool CamberLocked;                                        // CamberController or solid axle: never write camber
+            public bool HasCamberController;
         }
 
         internal sealed class GroupData
         {
             public bool IsFront;
-            public float ArbForce;               // suspension
+            public float ArbForce;                    // suspension
             public float BrakeCoeff, HandbrakeCoeff;  // brakes
+            public float Caster, Toe;                 // alignment
+            public bool ApplyCaster, ApplyToe;        // alignment gates (restored on OFF)
+            public bool SolidCamber;                  // isSolid && 2 wheels && trackWidth != 0 (WheelGroup.Update overwrites camber)
         }
 
         internal sealed class BrakesData
@@ -70,6 +80,20 @@ namespace ApocalypterSteeringMod.Runtime
             public DownforcePoint[] Points;      // deep copy of baseline maxForce/position
         }
 
+        internal sealed class GearboxData
+        {
+            public bool HasTransmission, HasClutch;
+            public bool Standard;              // NWH layout (negatives, one 0, positives): else gears are never touched
+            public float[] Gears;             // deep copy of the stock list (reverse..., 0, forward...)
+            public int Reverse;                // entries before the neutral 0
+            public int Forward;                // stock forward gear count
+            public float[] Extended;           // stock forward ratios continued to 12 (index 0 = 1st gear)
+            public bool IsCvt;
+            public TransmissionComponent.TransmissionShiftType Type;
+            public float SlipTorque, EngagementRange, EngagementRpm;
+            public bool PendingTrim;           // restore left placeholder gears behind an in-flight shift
+        }
+
         internal sealed class AssistHandles
         {
             public Brakes.BrakeTorqueModifier Abs;
@@ -85,14 +109,19 @@ namespace ApocalypterSteeringMod.Runtime
             public BrakesData Brakes;
             public DrivetrainData Drivetrain;
             public AeroData Aero;
+            public GearboxData Gearbox;
             public AssistHandles Assists;
             public bool HasTyreWear;
+            public bool AlignmentMoved;     // wheel positions currently offset (wheelbase/trackWidth stale)
         }
 
         private readonly Dictionary<VehicleController, VehicleRecord> _records = new Dictionary<VehicleController, VehicleRecord>();
+        // Insertion order of the records: the "reference vehicle" for per-wheel UI is the first one.
+        private readonly List<VehicleRecord> _order = new List<VehicleRecord>();
         private readonly List<VehicleController> _dead = new List<VehicleController>();
         private float _nextScan;
-        private bool _suspApplied, _aeroApplied, _brakesApplied, _gripApplied, _drivetrainApplied, _assistsApplied;
+        private bool _suspApplied, _aeroApplied, _brakesApplied, _gripApplied, _drivetrainApplied, _assistsApplied,
+            _alignmentApplied, _gearboxApplied;
 
         /// <summary>Number of vehicles currently tracked (shown in the panel).</summary>
         public int TrackedVehicles
@@ -164,6 +193,11 @@ namespace ApocalypterSteeringMod.Runtime
         /// </summary>
         public void ApplyLive()
         {
+            // 0.6.0: drop destroyed vehicles first. ApplyLive runs on every slider tick, i.e.
+            // between scans; 0.5.0 then wrote into a destroyed vehicle (and could onboard an
+            // aero module into it, which throws inside NWH and aborted every later category).
+            PurgeDead();
+
             if (SuspensionSettings.Enabled) { if (!_suspApplied) RefreshBaselines(Category.Suspension); ApplyAllSuspension(); _suspApplied = true; }
             else if (_suspApplied) { RestoreAllSuspension(); _suspApplied = false; }
 
@@ -181,12 +215,21 @@ namespace ApocalypterSteeringMod.Runtime
 
             if (AssistsSettings.Enabled) { ApplyAllAssists(); _assistsApplied = true; }
             else if (_assistsApplied) { RestoreAllAssists(); _assistsApplied = false; }
+
+            if (AlignmentSettings.Enabled) { if (!_alignmentApplied) RefreshBaselines(Category.Alignment); ApplyAllAlignment(); _alignmentApplied = true; }
+            else if (_alignmentApplied) { RestoreAllAlignment(); _alignmentApplied = false; }
+
+            if (GearboxSettings.Enabled) { if (!_gearboxApplied) RefreshBaselines(Category.Gearbox); ApplyAllGearbox(); _gearboxApplied = true; }
+            else
+            {
+                if (_gearboxApplied) { RestoreAllGearbox(); _gearboxApplied = false; }
+                TrimPendingGearbox();
+            }
         }
 
-        private void ScanVehicles()
+        /// <summary>Forget destroyed vehicles (allocation-free: reuses _dead).</summary>
+        private void PurgeDead()
         {
-            // Forget destroyed vehicles only. Vehicles that are merely inactive keep their
-            // record: re-capturing one later would read our own tuned values as "stock".
             _dead.Clear();
             foreach (KeyValuePair<VehicleController, VehicleRecord> kv in _records)
             {
@@ -197,8 +240,21 @@ namespace ApocalypterSteeringMod.Runtime
             }
             for (int i = 0; i < _dead.Count; i++)
             {
+                VehicleRecord r;
+                if (_records.TryGetValue(_dead[i], out r))
+                {
+                    _order.Remove(r);
+                }
                 _records.Remove(_dead[i]);
             }
+            _dead.Clear();
+        }
+
+        private void ScanVehicles()
+        {
+            // Forget destroyed vehicles only. Vehicles that are merely inactive keep their
+            // record: re-capturing one later would read our own tuned values as "stock".
+            PurgeDead();
 
             VehicleController[] vehicles = Object.FindObjectsOfType<VehicleController>();
             for (int i = 0; i < vehicles.Length; i++)
@@ -212,6 +268,7 @@ namespace ApocalypterSteeringMod.Runtime
                 if (record != null)
                 {
                     _records[vc] = record;
+                    _order.Add(record);
                 }
             }
         }
@@ -261,6 +318,7 @@ namespace ApocalypterSteeringMod.Runtime
                 }
                 bool groupFront = false;
                 bool groupFrontKnown = false;
+                bool solid = group.isSolid && group.Wheels.Count == 2 && group.trackWidth != 0f;
                 foreach (WheelComponent wc in group.Wheels)
                 {
                     WheelUAPI uapi = wc != null ? wc.wheelUAPI : null;
@@ -274,9 +332,13 @@ namespace ApocalypterSteeringMod.Runtime
                         groupFront = front;
                         groupFrontKnown = true;
                     }
+                    bool left = uapi.transform.localPosition.x < 0f;
+                    bool camberController = uapi.GetComponent<NWH.WheelController3D.CamberController>() != null;
                     record.Wheels[uapi] = new WheelData
                     {
                         IsFront = front,
+                        IsLeft = left,
+                        Role = RoleOf(front, left),
                         SpringForce = uapi.SpringMaxForce,
                         SpringLength = uapi.SpringMaxLength,
                         BumpRate = uapi.DamperBumpRate,
@@ -284,7 +346,12 @@ namespace ApocalypterSteeringMod.Runtime
                         LngGrip = uapi.LongitudinalFrictionGrip,
                         LatGrip = uapi.LateralFrictionGrip,
                         LngStiff = uapi.LongitudinalFrictionStiffness,
-                        LatStiff = uapi.LateralFrictionStiffness
+                        LatStiff = uapi.LateralFrictionStiffness,
+                        Camber = uapi.Camber,
+                        LocalPos = uapi.transform.localPosition,
+                        LocalEuler = uapi.transform.localEulerAngles,
+                        HasCamberController = camberController,
+                        CamberLocked = camberController || solid
                     };
                 }
                 record.Groups[group] = new GroupData
@@ -292,7 +359,12 @@ namespace ApocalypterSteeringMod.Runtime
                     IsFront = groupFront,
                     ArbForce = group.antiRollBarForce,
                     BrakeCoeff = group.brakeCoefficient,
-                    HandbrakeCoeff = group.handbrakeCoefficient
+                    HandbrakeCoeff = group.handbrakeCoefficient,
+                    Caster = group.CasterAngle,
+                    Toe = group.ToeAngle,
+                    ApplyCaster = group.applyCasterAngle,
+                    ApplyToe = group.applyToeAngle,
+                    SolidCamber = solid
                 };
             }
 
@@ -307,9 +379,15 @@ namespace ApocalypterSteeringMod.Runtime
 
             record.Drivetrain = CaptureDrivetrain(vc);
             record.Aero = CaptureAero(vc);
+            record.Gearbox = CaptureGearbox(vc);
             record.Assists = CreateAssistHandles(vc);
             record.HasTyreWear = HasTyreWearComponent(vc);
             return record;
+        }
+
+        internal static WheelRole RoleOf(bool front, bool left)
+        {
+            return front ? (left ? WheelRole.FL : WheelRole.FR) : (left ? WheelRole.RL : WheelRole.RR);
         }
 
         private static DrivetrainData CaptureDrivetrain(VehicleController vc)
@@ -363,7 +441,9 @@ namespace ApocalypterSteeringMod.Runtime
             Aero,
             Brakes,
             Grip,
-            Drivetrain
+            Drivetrain,
+            Alignment,
+            Gearbox
         }
 
         /// <summary>
@@ -373,7 +453,7 @@ namespace ApocalypterSteeringMod.Runtime
         /// sight: a value the game changed later (while the category was off) was scaled from
         /// the stale number on enable and overwritten with it on disable. The category's own
         /// fields only: categories never share a field, so another category's applied state
-        /// cannot leak in. Runs on a toggle, not per tick (drivetrain/aero re-capture allocates).
+        /// cannot leak in. Runs on a toggle, not per tick (drivetrain/aero/gearbox re-capture allocates).
         /// </summary>
         private void RefreshBaselines(Category category)
         {
@@ -458,6 +538,17 @@ namespace ApocalypterSteeringMod.Runtime
                             r.Aero = CaptureAero(r.Vc);
                         }
                         break;
+
+                    case Category.Alignment:
+                        RefreshAlignmentBaseline(r);
+                        break;
+
+                    case Category.Gearbox:
+                        if (r.Vc.powertrain != null && (r.Gearbox == null || !r.Gearbox.PendingTrim))
+                        {
+                            r.Gearbox = CaptureGearbox(r.Vc);
+                        }
+                        break;
                 }
             }
         }
@@ -479,7 +570,8 @@ namespace ApocalypterSteeringMod.Runtime
             RideHeight,
             BumpRate,
             ReboundRate,
-            ArbForce
+            ArbForce,
+            BrakeTorque   // 0.6.0: brakes.maxTorque (axle-independent; 'front' is ignored)
         }
 
         /// <summary>Mean stock baseline over tracked vehicles for one axle (0 when none tracked).</summary>
@@ -490,6 +582,15 @@ namespace ApocalypterSteeringMod.Runtime
             foreach (KeyValuePair<VehicleController, VehicleRecord> kv in _records)
             {
                 VehicleRecord r = kv.Value;
+                if (kind == Readout.BrakeTorque)
+                {
+                    if (r.Brakes != null)
+                    {
+                        sum += r.Brakes.MaxTorque;
+                        count++;
+                    }
+                    continue;
+                }
                 if (kind == Readout.ArbForce)
                 {
                     foreach (KeyValuePair<WheelGroup, GroupData> gk in r.Groups)
@@ -521,6 +622,192 @@ namespace ApocalypterSteeringMod.Runtime
             return count == 0 ? 0f : sum / count;
         }
 
+        // ------------------------------------------------- reference vehicle (per-wheel UI)
+
+        /// <summary>Stock geometry of one wheel of the reference (first tracked) vehicle.</summary>
+        public struct WheelStock
+        {
+            public bool Valid;
+            public float Camber;
+            public Vector3 LocalPos;
+            public Vector3 LocalEuler;
+            public bool CamberLocked;
+            public bool HasCamberController;
+        }
+
+        /// <summary>Stock geometry of one axle of the reference vehicle.</summary>
+        public struct GroupStock
+        {
+            public bool Valid;
+            public float Caster, Toe;
+            public bool Solid;
+        }
+
+        private VehicleRecord ReferenceRecord()
+        {
+            for (int i = 0; i < _order.Count; i++)
+            {
+                VehicleRecord r = _order[i];
+                if (r != null && r.Vc != null)
+                {
+                    return r;
+                }
+            }
+            return null;
+        }
+
+        public bool HasReferenceVehicle
+        {
+            get { return ReferenceRecord() != null; }
+        }
+
+        public WheelStock ReferenceWheelStock(WheelRole role)
+        {
+            VehicleRecord r = ReferenceRecord();
+            if (r != null)
+            {
+                foreach (KeyValuePair<WheelUAPI, WheelData> wk in r.Wheels)
+                {
+                    if (wk.Key != null && wk.Value.Role == role)
+                    {
+                        return new WheelStock
+                        {
+                            Valid = true,
+                            Camber = wk.Value.Camber,
+                            LocalPos = wk.Value.LocalPos,
+                            LocalEuler = wk.Value.LocalEuler,
+                            CamberLocked = wk.Value.CamberLocked,
+                            HasCamberController = wk.Value.HasCamberController
+                        };
+                    }
+                }
+            }
+            return new WheelStock();
+        }
+
+        public GroupStock ReferenceGroupStock(bool front)
+        {
+            VehicleRecord r = ReferenceRecord();
+            if (r != null)
+            {
+                foreach (KeyValuePair<WheelGroup, GroupData> gk in r.Groups)
+                {
+                    if (gk.Key != null && gk.Value.IsFront == front)
+                    {
+                        return new GroupStock { Valid = true, Caster = gk.Value.Caster, Toe = gk.Value.Toe, Solid = gk.Value.SolidCamber };
+                    }
+                }
+            }
+            return new GroupStock();
+        }
+
+        /// <summary>Stock forward gear count of the reference vehicle (0 = none / no transmission).</summary>
+        public int ReferenceGearCount
+        {
+            get
+            {
+                VehicleRecord r = ReferenceRecord();
+                return r != null && r.Gearbox != null && r.Gearbox.HasTransmission ? r.Gearbox.Forward : 0;
+            }
+        }
+
+        public bool ReferenceIsCvt
+        {
+            get
+            {
+                VehicleRecord r = ReferenceRecord();
+                return r != null && r.Gearbox != null && r.Gearbox.IsCvt;
+            }
+        }
+
+        /// <summary>Stock ratio of forward gear <paramref name="gear"/> (1..12) of the reference vehicle, continued past its own count; 0 when unknown.</summary>
+        public float ReferenceGearStock(int gear)
+        {
+            VehicleRecord r = ReferenceRecord();
+            if (r == null || r.Gearbox == null || r.Gearbox.Extended == null || gear < 1 || gear > r.Gearbox.Extended.Length)
+            {
+                return 0f;
+            }
+            return r.Gearbox.Extended[gear - 1];
+        }
+
+        /// <summary>Any tracked vehicle with a camber the mod must not write (CamberController / solid axle).</summary>
+        public bool AnyCamberLocked
+        {
+            get
+            {
+                foreach (KeyValuePair<VehicleController, VehicleRecord> kv in _records)
+                {
+                    foreach (KeyValuePair<WheelUAPI, WheelData> wk in kv.Value.Wheels)
+                    {
+                        if (wk.Value.CamberLocked)
+                        {
+                            return true;
+                        }
+                    }
+                }
+                return false;
+            }
+        }
+
+        public bool AnyCvt
+        {
+            get
+            {
+                foreach (KeyValuePair<VehicleController, VehicleRecord> kv in _records)
+                {
+                    if (kv.Value.Gearbox != null && kv.Value.Gearbox.IsCvt)
+                    {
+                        return true;
+                    }
+                }
+                return false;
+            }
+        }
+
+        // --------------------------------------------------------------- telemetry
+
+        public struct TelemetrySample
+        {
+            public float SpeedKmh;
+            public float Rpm;
+            public string Gear;
+            public float FrontSlip;   // mean |LateralSlip| of the front wheels (NWH's normalised slip)
+        }
+
+        /// <summary>
+        /// The active (player) vehicle's live numbers. False when there is no active vehicle.
+        /// Read-only; called at 4 Hz by the telemetry strip (allocation there is fine).
+        /// </summary>
+        public bool TryGetTelemetry(out TelemetrySample s)
+        {
+            s = new TelemetrySample();
+            VehicleController vc = Vehicle.ActiveVehicle as VehicleController;
+            if (vc == null || vc.powertrain == null)
+            {
+                return false;
+            }
+            s.SpeedKmh = vc.Speed * 3.6f;
+            s.Rpm = vc.powertrain.engine != null ? vc.powertrain.engine.OutputRPM : 0f;
+            s.Gear = vc.powertrain.transmission != null ? vc.powertrain.transmission.GearName : "-";
+            float sum = 0f;
+            int n = 0;
+            VehicleRecord r;
+            if (_records.TryGetValue(vc, out r))
+            {
+                foreach (KeyValuePair<WheelUAPI, WheelData> wk in r.Wheels)
+                {
+                    if (wk.Key != null && wk.Value.IsFront)
+                    {
+                        sum += Mathf.Abs(wk.Key.LateralSlip);
+                        n++;
+                    }
+                }
+            }
+            s.FrontSlip = n > 0 ? sum / n : 0f;
+            return true;
+        }
+
         /// <summary>
         /// Restore only the categories this tuner actually applied. Writing captured
         /// values for a category that was never on would clobber anything the game
@@ -528,13 +815,17 @@ namespace ApocalypterSteeringMod.Runtime
         /// </summary>
         private void RestoreAll()
         {
+            PurgeDead();
             if (_assistsApplied) { RestoreAllAssists(); }
             if (_aeroApplied) { RestoreAllAero(); }
             if (_suspApplied) { RestoreAllSuspension(); }
             if (_gripApplied) { RestoreAllGrip(); }
             if (_brakesApplied) { RestoreAllBrakes(); }
             if (_drivetrainApplied) { RestoreAllDrivetrain(); }
+            if (_alignmentApplied) { RestoreAllAlignment(); }
+            if (_gearboxApplied) { RestoreAllGearbox(); }
             _suspApplied = _aeroApplied = _brakesApplied = _gripApplied = _drivetrainApplied = _assistsApplied = false;
+            _alignmentApplied = _gearboxApplied = false;
         }
     }
 }

@@ -58,6 +58,11 @@
       <HintPath>D:\SteamLibrary\steamapps\common\Apocalypter\Apocalypter_Data\Managed\UnityEngine.UI.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <!-- GUIUtility.systemCopyBuffer (preset copy/paste, 0.6.0) -->
+    <Reference Include="UnityEngine.IMGUIModule">
+      <HintPath>D:\SteamLibrary\steamapps\common\Apocalypter\Apocalypter_Data\Managed\UnityEngine.IMGUIModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="UnityEngine.InputLegacyModule">
       <HintPath>D:\SteamLibrary\steamapps\common\Apocalypter\Apocalypter_Data\Managed\UnityEngine.InputLegacyModule.dll</HintPath>
       <Private>false</Private>

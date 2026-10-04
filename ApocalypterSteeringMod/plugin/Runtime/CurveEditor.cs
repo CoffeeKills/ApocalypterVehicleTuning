@@ -36,9 +36,37 @@ namespace ApocalypterSteeringMod.Runtime
         public const float HintTop = 38f, HintHeight = 56f;   // 3 wrapped lines at 13 px (the longest English hint)
         public const float GraphTop = 100f, GraphBottom = 10f;
 
+        // 0.6.0 width-adaptive bands (the constants above are the 0.5.0 values and the maxima).
+        public const float TitleMinWidth = 150f, ReadoutMinWidth = 80f, GraphHeight = 190f, HintGap = 6f;
+
+        public struct Bands
+        {
+            public float RowHeight, ReadoutWidth, HintHeight, GraphTop;
+        }
+
+        /// <summary>
+        /// Header bands for a given row width and hint length. At the 0.5.0 width (748 px content,
+        /// ~330-char hint) this gives back the 0.5.0 constants' geometry or taller; narrower rows
+        /// shrink the readout (never below 80 px) and grow the hint band so the wrapped hint
+        /// never runs under the graph.
+        /// </summary>
+        public static Bands ComputeBands(float contentWidth, int hintChars)
+        {
+            var b = new Bands();
+            float free = contentWidth - Side - ReadoutRight - TitleMinWidth;
+            b.ReadoutWidth = Mathf.Clamp(free, ReadoutMinWidth, ReadoutWidth);
+            b.HintHeight = Mathf.Max(HintHeight, PanelLayout.WrappedHintHeight(hintChars, contentWidth - 2f * Side));
+            b.GraphTop = Mathf.Max(GraphTop, HintTop + b.HintHeight + HintGap);
+            b.RowHeight = b.GraphTop + GraphHeight + GraphBottom;
+            return b;
+        }
+
         private CurveGraphic _graphic;
         private Button _reset;
         private Text _readout;
+        private LayoutElement _rowLayout;
+        private RectTransform _titleRt, _readoutRt, _hintRt, _graphRt;
+        private int _hintChars;
         private Func<EditableCurve> _get;
         private Func<EditableCurve> _reference;
         private Func<bool> _canEdit;
@@ -66,12 +94,16 @@ namespace ApocalypterSteeringMod.Runtime
             le.minHeight = RowHeight;
             UiKit.Paint(row, UiKit.RowNormal, false);
             editor.Row = row.gameObject;
+            editor._rowLayout = le;
+            editor._hintChars = hint != null ? hint.Length : 0;
 
             RectTransform t = UiKit.Top(UiKit.Make("Title", row), TitleTop, TitleHeight, Side, ReadoutRight + ReadoutWidth);
             UiKit.Label(t, title, 17, UiKit.TextMain, TextAnchor.MiddleLeft, FontStyle.Bold);
+            editor._titleRt = t;
 
             RectTransform ro = TopRightBox(UiKit.Make("Readout", row), ReadoutWidth, TitleHeight, ReadoutRight, TitleTop);
             editor._readout = UiKit.Label(ro, "", 13, UiKit.TextMuted, TextAnchor.MiddleRight);
+            editor._readoutRt = ro;
 
             Button reset = UiKit.MakeButton(row, "Reset", "Reset", UiKit.ChipBase, 14, () =>
             {
@@ -87,8 +119,10 @@ namespace ApocalypterSteeringMod.Runtime
 
             RectTransform h = UiKit.Top(UiKit.Make("Hint", row), HintTop, HintHeight, Side, Side);
             UiKit.Label(h, hint, 13, UiKit.TextMuted, TextAnchor.UpperLeft, FontStyle.Normal, true);
+            editor._hintRt = h;
 
             RectTransform graph = UiKit.Make("Graph", row);
+            editor._graphRt = graph;
             // Full-area anchors with insets (NOT a zero-height band): UiKit.Place keeps a
             // centred pivot, which inverts the rect on degenerate bands — the graph would
             // spill over neighbouring rows and eat their clicks. The top inset leaves the
@@ -102,6 +136,37 @@ namespace ApocalypterSteeringMod.Runtime
 
             editor.Refresh();
             return editor;
+        }
+
+        /// <summary>Re-apply the header bands for a new row width (live panel-width changes).</summary>
+        public void Relayout(float contentWidth)
+        {
+            Bands b = ComputeBands(contentWidth, _hintChars);
+            if (_rowLayout != null)
+            {
+                _rowLayout.preferredHeight = b.RowHeight;
+                _rowLayout.minHeight = b.RowHeight;
+            }
+            if (_titleRt != null)
+            {
+                UiKit.Top(_titleRt, TitleTop, TitleHeight, Side, ReadoutRight + b.ReadoutWidth);
+            }
+            if (_readoutRt != null)
+            {
+                TopRightBox(_readoutRt, b.ReadoutWidth, TitleHeight, ReadoutRight, TitleTop);
+            }
+            if (_hintRt != null)
+            {
+                UiKit.Top(_hintRt, HintTop, b.HintHeight, Side, Side);
+            }
+            if (_graphRt != null)
+            {
+                UiKit.Place(_graphRt, 0f, 0f, 1f, 1f, Side, GraphBottom, Side, b.GraphTop);
+            }
+            if (_graphic != null)
+            {
+                _graphic.SetVerticesDirty();
+            }
         }
 
         /// <summary>Fixed-size box hanging from the top-right corner.</summary>

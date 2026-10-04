@@ -74,3 +74,15 @@ TyreWear grip fight (detect + dim/note); GroundDetection overwrites only Frictio
 - `Persistence/ModConfig.cs`, `Runtime/SettingsPanel.cs`, `Runtime/SettingsPanelManager.cs`, `Plugin.cs`, `PluginInfo.cs` (3.2.0)
 - `verify/stubs/*.cs`, `verify/tests/Tests.cs`, `verify/run.sh`
 - csproj: no reference changes (all new types in already-referenced NWH DLLs)
+
+---
+
+# 0.6.0-alpha (FEATURES.md implementation + audit of 0.5.0)
+
+Implemented FEATURES.md on top of 0.5.0; see README "Changes in 0.6.0-alpha" for the full list,
+the four spec recipes that were changed because they would crash or break the game (gear
+re-shift via `ShiftInto`, class-blocking the name-routed input forks, blind `OnEnter` skipping,
+per-wheel caster/toe without storage), and the audit fixes (dead-vehicle writes, latched-handbrake
+ABS, TCS mid-shift, external config edits reverting panel edits, live-mode Submit re-fire).
+New files: Settings/{AlignmentPreset,AlignmentSettings,GearboxPreset,GearboxSettings,UiSettings,PresetCodec}.cs,
+Runtime/{VehicleTuner.Alignment,VehicleTuner.Gearbox,PanelLayout,GearGraph,TelemetryStrip}.cs.

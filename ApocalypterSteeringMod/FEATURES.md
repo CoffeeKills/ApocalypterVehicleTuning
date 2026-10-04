@@ -1,5 +1,83 @@
 # FEATURES.md — Feature specification for v0.6.0-alpha
 
+## Implementation status (0.6.0-alpha) — checklist
+
+Legend: **[x] done** · **H** = covered by `verify/` (harness-tested) · **G** = needs the in-game check (README §10 item) · **Δ** = implemented differently from the spec text below, reason in README "Changes in 0.6.0-alpha → Deviations".
+
+**§0 Scope**
+- [x] `PluginInfo` "0.6.0", README title / Changes section / §6b tag — H (compile)
+- [x] gamecode gap listed: `PowertrainComponent.cs` should be copied into `gamecode/` (stub mirrors only `OutputRPM`)
+
+**§1 Alignment** — `AlignmentPreset.cs`, `AlignmentSettings.cs`, `VehicleTuner.Alignment.cs`, tab 8
+- [x] Presets Stock/Street/Sport/Race/Off-road/Stance/Custom; per-axle + "Per-wheel (advanced)" — H
+- [x] Camber via `WheelUAPI.Camber` (stock + offset) — H, G item 24
+- [x] CamberController + solid-axle detect / skip / warn (never disables game components) — H
+- [x] Caster/toe per axle via `WheelGroup.CasterAngle/ToeAngle`; gates opened only while needed, restored on OFF; L/R toe mirroring; euler Z preserved — H
+- [x] Position via the wheel transform (never `Wheel.localPosition`); |x| ≥ 1 cm, side kept — H
+- [x] Stale wheelbase/trackWidth warned, not recomputed — H (flag), G
+- [x] Exact restore (camber, caster/toe, gates, localPosition, localEulerAngles); OFF→ON baseline refresh; rescan re-apply — H
+- [x] Reference-vehicle stock readouts (`ReferenceWheelStock` / `ReferenceGroupStock`); rows disabled without a vehicle — H (accessors), G
+- [x] Δ values are offsets on each vehicle's geometry (Stock = as shipped); PosX is outward
+- [x] Δ per-wheel caster/toe dropped (no fields/keys for it in this spec)
+- [ ] G sign directions (camber, PosX, toe) — README §10 item 24
+
+**§2 Gearbox** — `GearboxPreset.cs`, `GearboxSettings.cs`, `VehicleTuner.Gearbox.cs`, `GearGraph.cs`, tab 9
+- [x] Gear count 0..12 (0 = own); continuation `r[n] = r[n-1]²/r[n-2]`; truncation; reverse + neutral untouched — H
+- [x] Δ re-shift guard writes `Gear` (ShiftInto refuses during ban/in-flight shift); shrink deferred while `isShifting`; mid-shift restore keeps placeholders, then trims — H
+- [x] CVT (and External / non-standard lists) refused for count/ratios; clutch still applies; mode Stock only — H
+- [x] Per-gear factors 0.5..1.5 with absolute ratio readouts — H (math), G
+- [x] Clutch types Stock/Street/Sport/Race/Custom over slipTorque (≥1) / engagementRange (≥1) / engagementRPM; honest panel note — H
+- [x] Δ engagementRPM never pushed below min(stock, 1.1 × idle) — H
+- [x] Transmission mode Stock/Manual/Automatic (live-safe) — H
+- [x] No field shared with Drivetrain — H
+- [x] GearGraph: bars vs stock outline, header band + public constants, pure `RouteDrag`/`RouteClick`, scroll forwarding, `canEdit` — H (routing, bands), G item 23/25
+- [ ] G 6-gear add, 4-gear cut, Race clutch feel, CVT untouched — README §10 item 25
+
+**§3 Live panel + selective input blocking** — `InputBlocker.cs`, `SettingsPanelManager.cs`
+- [x] Layer A: InputController name whitelist (6 statics patched), fail-closed, once-per-name log (max 64) — H (routing)
+- [x] Layer B: class patch set incl. OnEnter — Δ forks routed by name, OnEnter gated by `everyFrame` (skip + Finish for one-shots) — H
+- [x] `SetInputBlocked` / `SetFreeze` split; live never touches timeScale; Freeze = 0.5.0 incl. one-frame-late restore of a pause-menu 0 — H (state), G item 22
+- [x] Swallow-nothing click model in live mode; dim + click-outside only with Freeze — G
+- [x] Selection cleared every frame (Submit re-fire hazard) — G item 21
+- [ ] G whitelist names verified in game; no unknown-action log lines for driving controls — README §10 item 21
+
+**§4 Docking / width / scale / transparency** — `PanelLayout.cs`, Panel tab
+- [x] Docked right, full height, `PanelWidth` 400..800 (default 460), capped to the canvas — H (EffectiveWidth)
+- [x] Full fixed-px inventory width-adaptive via `Relayout(width)` (no rebuild) — H (bands at 400/460/800)
+- [x] `ConstantPixelSize`, scaleFactor = Screen.height/1080 × PanelScale — H
+- [x] CanvasGroup transparency — G
+- [x] 10 tabs, two-row 5+5 strip — H (sizes)
+- [ ] G every tab at 400/460/800 × 0.5/1/2 — README §10 item 23
+
+**§5 Expert values + wider ranges**
+- [x] Brake-torque N·m readout (`MeanBaseline(Readout.BrakeTorque)`), blank readouts at baseline 0 — H (baseline)
+- [x] Smart toggles: Per-wheel, Keep vehicle's gear count, Transmission mode, Freeze — G
+- [x] Widened Limits drive sliders and `AcceptableValueRange`; shift RPMs / diff stiffness not widened; out-of-range values clamp on load — H
+
+**§6 Telemetry strip** — `TelemetryStrip.cs`
+- [x] Own canvas (31000), click-through, hidden with panel / no vehicle / disabled, 4 Hz — G item 26
+- [x] `TryGetTelemetry`, UiStrings templates, corner parse — H
+- [x] Δ slip shown as |LateralSlip| × 90 (approximate degrees)
+
+**§7 Preset export/import** — `PresetCodec.cs`
+- [x] Format, sorted keys, invariant floats; import into Custom only; BasedOn resolution — H
+- [x] Byte-identical round trip for all nine books (Δ nine, not ten — Panel has no book), garbage rejected, clamping, unknown-key skip — H
+- [x] Footer Copy/Paste + status line, clipboard in try/catch — H (status strings), G item 27
+
+**§8 Small extras**
+- [x] Digit hotkeys 1..0 (open panel only) — H (mapping), G
+- [x] "Turn everything off" two-click — H
+- [x] Alignment stock readouts — H (accessors)
+- [x] LastTab remembered — H (parse/persist)
+
+**§9 Config** — additions only, no migrations, 0.5.0 cfg loads as is, `Save()` covers all books, `WireAll` extended — H
+
+**§10 Harness** — stubs extended (see README), 135 new logic tests, prefix suite unchanged, negative control documented — H
+
+**§11 Acceptance** — run.sh green (355 + 18); README Changes / §10 items 21–28; strings.md updated — H
+
+---
+
 **This file is the authoritative spec for the next version.** Implement everything below on top of the 0.5.0 code in this bundle. Where this file and PROMPT.md conflict, this file wins for *features*; PROMPT.md's hard constraints (no `ES3.Save`, no `vc.input.*` writes, allocation-free steering prefix, hidden-runner survival architecture, one Graphic per GameObject, mouse-only panel, BepInEx config the only persistence, unchanged GUID) always win.
 
 You have no terminal. The user runs `bash verify/run.sh` (needs .NET SDK 8+; globs **all** `plugin/**/*.cs`, so every new file must compile against the stubs — extend them, §10). Reason through it carefully.

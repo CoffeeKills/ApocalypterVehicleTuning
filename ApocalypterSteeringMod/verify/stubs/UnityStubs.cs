@@ -14,7 +14,7 @@ namespace UnityEngine
     public enum HorizontalWrapMode { Wrap, Overflow }
     public enum VerticalWrapMode { Truncate, Overflow }
     public enum RenderMode { ScreenSpaceOverlay, ScreenSpaceCamera, WorldSpace }
-    public enum KeyCode { None = 0, Backspace = 8, Return = 13, Escape = 27, Space = 32, A = 97, D = 100, S = 115, W = 119, Home = 278, End = 279, Insert = 277, F1 = 282, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, F12 }
+    public enum KeyCode { None = 0, Backspace = 8, Return = 13, Escape = 27, Space = 32, Alpha0 = 48, Alpha1, Alpha2, Alpha3, Alpha4, Alpha5, Alpha6, Alpha7, Alpha8, Alpha9, A = 97, D = 100, S = 115, W = 119, Home = 278, End = 279, Insert = 277, F1 = 282, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, F12 }
 
     public class SerializeField : Attribute { }
 
@@ -30,13 +30,22 @@ namespace UnityEngine
         public static T[] FindObjectsOfType<T>() where T : Object
         {
             var r = new List<T>();
-            foreach (Object o in Registry) { if (o is T t) r.Add(t); }
+            foreach (Object o in Registry) { if (o is T t && !o.TestDestroyed) r.Add(t); }
             return r.ToArray();
         }
         public static T FindObjectOfType<T>() where T : Object { T[] a = FindObjectsOfType<T>(); return a.Length > 0 ? a[0] : null; }
-        public static bool operator ==(Object a, Object b) { return ReferenceEquals(a, b); }
-        public static bool operator !=(Object a, Object b) { return !ReferenceEquals(a, b); }
-        public static implicit operator bool(Object o) { return !ReferenceEquals(o, null); }
+        // Test hook: Unity's "fake null" — a destroyed object compares equal to null while the
+        // C# reference (and dictionary keys) stay alive.
+        public bool TestDestroyed;
+        private static bool IsNull(Object o) { return ReferenceEquals(o, null) || o.TestDestroyed; }
+        public static bool operator ==(Object a, Object b)
+        {
+            bool an = IsNull(a), bn = IsNull(b);
+            if (an || bn) return an && bn;
+            return ReferenceEquals(a, b);
+        }
+        public static bool operator !=(Object a, Object b) { return !(a == b); }
+        public static implicit operator bool(Object o) { return !IsNull(o); }
     }
 
     public class Component : Object
@@ -44,7 +53,14 @@ namespace UnityEngine
         public GameObject gameObject { get { return null; } }
         private Transform _t;
         public Transform transform { get { if (this is Transform self) return self; return _t ?? (_t = new Transform()); } }
-        public T GetComponent<T>() { return default(T); }
+        // Test hook: components "attached" to the same GameObject (GetComponent<T> finds them).
+        private List<object> _attached;
+        public void TestAttach(object component) { (_attached ?? (_attached = new List<object>())).Add(component); }
+        public T GetComponent<T>()
+        {
+            if (_attached != null) { foreach (object o in _attached) { if (o is T t) return t; } }
+            return default(T);
+        }
         public T GetComponentInChildren<T>(bool includeInactive) { return default(T); }
         public T GetComponentInChildren<T>() { return default(T); }
         public T GetComponentInParent<T>() { return default(T); }
@@ -154,6 +170,8 @@ namespace UnityEngine
         public static Vector3 one { get { return new Vector3(1, 1, 1); } }
         public static Vector3 forward { get { return new Vector3(0, 0, 1); } }
         public static Vector3 zero { get { return default(Vector3); } }
+        public static Vector3 operator +(Vector3 a, Vector3 b) { return new Vector3(a.x + b.x, a.y + b.y, a.z + b.z); }
+        public static Vector3 operator -(Vector3 a, Vector3 b) { return new Vector3(a.x - b.x, a.y - b.y, a.z - b.z); }
     }
 
     public struct Color
@@ -222,6 +240,7 @@ namespace UnityEngine
         public static float Max(float a, float b) { return a > b ? a : b; }
         public static int Max(int a, int b) { return a > b ? a : b; }
         public static float Min(float a, float b) { return a < b ? a : b; }
+        public static int Min(int a, int b) { return a < b ? a : b; }
         public static float Lerp(float a, float b, float t) { return a + (b - a) * Clamp(t, 0f, 1f); }
         public static float MoveTowards(float current, float target, float maxDelta)
         {
@@ -235,6 +254,9 @@ namespace UnityEngine
             return target;
         }
         public static int RoundToInt(float f) { return (int)Math.Round(f); }
+        public static int CeilToInt(float f) { return (int)Math.Ceiling(f); }
+        public static int FloorToInt(float f) { return (int)Math.Floor(f); }
+        public static float Round(float f) { return (float)Math.Round(f); }
         public static float Sign(float f) { return f < 0f ? -1f : f > 0f ? 1f : 0f; }
         public static bool Approximately(float a, float b) { return Math.Abs(a - b) < 1e-5f; }
     }
@@ -246,6 +268,23 @@ namespace UnityEngine
         public static float timeScale { get; set; }
         public static float deltaTime { get { return 0f; } }
         public static float fixedDeltaTime { get; set; }
+    }
+
+    public static class Screen
+    {
+        public static int width { get; set; } = 1920;
+        public static int height { get; set; } = 1080;
+    }
+
+    public class GUIUtility
+    {
+        // Test hook: a null buffer simulates "no clipboard" (the getter throws).
+        public static string TestBuffer = "";
+        public static string systemCopyBuffer
+        {
+            get { if (TestBuffer == null) throw new InvalidOperationException("no clipboard"); return TestBuffer; }
+            set { if (TestBuffer == null) throw new InvalidOperationException("no clipboard"); TestBuffer = value; }
+        }
     }
 
     public static class Cursor
@@ -460,6 +499,7 @@ namespace UnityEngine.UI
         public float minValue { get; set; }
         public float maxValue { get; set; }
         public virtual float value { get; set; }
+        public bool wholeNumbers { get; set; }
         public SliderEvent onValueChanged { get; set; }
     }
 
@@ -499,6 +539,7 @@ namespace UnityEngine.UI
         public Vector2 referenceResolution { get; set; }
         public ScreenMatchMode screenMatchMode { get; set; }
         public float matchWidthOrHeight { get; set; }
+        public float scaleFactor { get; set; }
     }
 
     public class GraphicRaycaster : MonoBehaviour { }
@@ -551,7 +592,7 @@ namespace TMPro
 
 namespace UnityEngine.InputSystem
 {
-    public enum Key { None = 0, Space = 1, Enter = 2, Escape = 60, Home = 72, End = 73, Insert = 74, F1 = 94, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, F12 }
+    public enum Key { None = 0, Space = 1, Enter = 2, Digit1 = 41, Digit2, Digit3, Digit4, Digit5, Digit6, Digit7, Digit8, Digit9, Digit0, Escape = 60, Home = 72, End = 73, Insert = 74, F1 = 94, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, F12 }
 
     public class KeyControl
     {
