@@ -248,7 +248,7 @@ Git is currently local-only, so the index submission stays deferred until the us
 The audit bundle (what the third-party rework pass receives) is separate from the install zip and is regenerated from the tree — everything it needs now lives here:
 
 ```
-powershell Compress-Archive README.md,PROMPT.md,plugin,verify,gamecode,docs ..\ApocalypterVehicleTuning-Audit.zip
+powershell Compress-Archive README.md,PROMPT.md,FEATURES.md,plugin,verify,gamecode,docs ..\ApocalypterVehicleTuning-Audit.zip
 ```
 
 ## 7. Audit checklist (suggested focus)

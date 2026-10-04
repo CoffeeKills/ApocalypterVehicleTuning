@@ -6,6 +6,7 @@ Playtest note: the user reported the 0.4.0 settings UI having oversized rows and
 
 ## Your job
 
+0. **Implement FEATURES.md.** It is the authoritative feature spec for 0.6.0-alpha — the new Alignment and Gearbox categories, the live-driving panel with selective input blocking, panel docking/scale/transparency, expert values, the telemetry strip, and preset export/import, with the NWH/game API constraints, hazards, config keys, harness expectations and acceptance criteria. Read it after this README. Where PROMPT.md and FEATURES.md conflict, FEATURES.md wins for features; PROMPT.md's hard constraints always win.
 1. **Audit** `plugin/` against the game code and the README. Find real bugs — correctness, restore-completeness, config-migration edge cases, UI problems, allocation hazards — not style nits.
 2. **Rework** what you find, and improve the design where you can justify it in the README. Follow the existing patterns: `PresetBook` preset semantics (copy-to-Custom with BasedOn), allocation-free hot paths, the `VehicleTuner` capture/apply/restore model, the anchored uGUI kit. Do **not** change the hidden-runner survival architecture, the PlayMaker input-blocking recipe, the one-Graphic-per-GameObject rule, or the mouse-only panel without calling it out explicitly in your changelog.
 3. **Test everything you change.** `verify/` is a self-contained harness: `bash verify/run.sh` compiles the plugin against stubs and runs the logic + steering-prefix tests (needs a .NET SDK 8+; `verify/refs/` is already populated). Extend `verify/stubs/` to mirror real signatures from `gamecode/` whenever you add new API usage. All tests must pass.
@@ -20,4 +21,4 @@ Playtest note: the user reported the 0.4.0 settings UI having oversized rows and
 
 ## Deliver
 
-The reworked `plugin/`, `verify/`, and the updated `README.md` in the same bundle layout, with a short list of what you changed and why. Reason through `run.sh` carefully — the target machine cannot run it for you.
+The reworked `plugin/`, `verify/`, and the updated `README.md` in the same bundle layout, with a short list of what you changed and why, plus the updated `FEATURES.md` with each feature marked done / harness-tested (a checklist). Reason through `run.sh` carefully — the target machine cannot run it for you.
