@@ -375,7 +375,7 @@ namespace ApocalypterSteeringMod.Persistence
             _telEnabled = _config.Bind("Telemetry", "Enabled", true,
                 "Show the small click-through telemetry strip (speed, RPM, gear, front slip) while driving.");
             _telScale = BindRange("Telemetry", "Scale", 1f, Limits.TelemetryScaleMin, Limits.TelemetryScaleMax, "Telemetry strip size.");
-            _telPosition = _config.Bind("Telemetry", "Position", "BottomLeft", "Screen corner: TopLeft, TopRight, BottomLeft, BottomRight.");
+            _telPosition = _config.Bind("Telemetry", "Position", "TopLeft", "Screen corner: TopLeft, TopRight, BottomLeft, BottomRight.");
         }
 
         // ---------------------------------------------------------------- wiring

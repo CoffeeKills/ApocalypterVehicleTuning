@@ -835,8 +835,8 @@ namespace ApocalypterSteeringMod.Runtime
         /// </summary>
         public VehicleController FindDrivenVehicle()
         {
-            VehicleController driven = null;    // most live input above the dead zone
-            float bestInput = 0.001f;
+            VehicleController driven = null;    // most live activity above the dead zone
+            float bestActivity = 0.0001f;
             VehicleController fastest = null;
             float bestSpeed = 0f;
             VehicleController first = null;
@@ -852,9 +852,15 @@ namespace ApocalypterSteeringMod.Runtime
                     first = vc;
                 }
                 float input = Mathf.Abs(vc.input.Steering) + vc.input.Throttle + vc.input.Brakes + vc.input.Handbrake;
-                if (input > bestInput)
+                // A running engine (idle or better) counts as a whisper of activity so a
+                // parked player car beats parked NPCs with dead engines when no input
+                // is held anywhere — otherwise the pick fell to the first tracked
+                // vehicle and the strip showed a random parked car's zeros.
+                bool running = vc.powertrain != null && vc.powertrain.engine != null && vc.powertrain.engine.OutputRPM > 10f;
+                float activity = input + (running ? 0.0004f : 0f);
+                if (activity > bestActivity)
                 {
-                    bestInput = input;
+                    bestActivity = activity;
                     driven = vc;
                 }
                 if (vc.Speed > bestSpeed)

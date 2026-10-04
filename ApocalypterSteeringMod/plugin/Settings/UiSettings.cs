@@ -30,7 +30,7 @@ namespace ApocalypterSteeringMod.Settings
         /// <summary>Default true: passive, click-through UI (see README §8).</summary>
         public static bool TelemetryEnabled = true;
         public static float TelemetryScale = 1f;
-        public static TelemetryCorner TelemetryPosition = TelemetryCorner.BottomLeft;
+        public static TelemetryCorner TelemetryPosition = TelemetryCorner.TopLeft;
 
         public static void ResetPanel()
         {
@@ -40,12 +40,12 @@ namespace ApocalypterSteeringMod.Settings
             PanelAlpha = DefaultAlpha;
         }
 
-        /// <summary>Names only (case/space-tolerant); anything else is BottomLeft.</summary>
+        /// <summary>Names only (case/space-tolerant); anything else falls back to the default corner.</summary>
         public static TelemetryCorner ParseCorner(string value)
         {
             if (string.IsNullOrEmpty(value))
             {
-                return TelemetryCorner.BottomLeft;
+                return TelemetryCorner.TopLeft;
             }
             string v = value.Trim();
             for (int i = 0; i < 4; i++)
@@ -56,7 +56,7 @@ namespace ApocalypterSteeringMod.Settings
                     return c;
                 }
             }
-            return TelemetryCorner.BottomLeft;
+            return TelemetryCorner.TopLeft;
         }
 
         /// <summary>A stored tab index, clamped into 0..9 (garbage = 0).</summary>

@@ -1397,6 +1397,17 @@ public static class Tests
         UnityEngine.Object.Registry.Add(idle);
         t4.ReapplyNow();
         Check(t4.TryGetTelemetry(out ts) && Near(ts.SpeedKmh, 10.8f), "no input anywhere: fastest car wins");
+        // Parked, no input: the running engine beats a dead one (the player's car idles).
+        VehicleController parked = MakeCar(out FakeWheel[] _, 0f);
+        parked.powertrain.engine.OutputRPM = 800f;
+        parked.Speed = 0f;
+        idle.Speed = 0f;
+        UnityEngine.Object.Registry.Clear();
+        UnityEngine.Object.Registry.Add(idle);
+        UnityEngine.Object.Registry.Add(parked);
+        var t5 = new VehicleTuner();
+        t5.ReapplyNow();
+        Check(t5.TryGetTelemetry(out ts) && Near(ts.Rpm, 800f), "parked with a running engine beats a parked dead engine");
         ResetAllCategories();
     }
 
@@ -1826,8 +1837,8 @@ public static class Tests
         ModConfig.Load(cfg);
         Check(!UiSettings.FreezeWhileOpen && Near(UiSettings.PanelWidth, 460f) && Near(UiSettings.PanelScale, 1f)
               && Near(UiSettings.PanelAlpha, 1f) && UiSettings.LastTab == 0, "UI defaults: live panel, 460 px, scale 1, opaque, first tab");
-        Check(UiSettings.TelemetryEnabled && Near(UiSettings.TelemetryScale, 1f) && UiSettings.TelemetryPosition == TelemetryCorner.BottomLeft,
-            "telemetry defaults: on, x1, bottom left");
+        Check(UiSettings.TelemetryEnabled && Near(UiSettings.TelemetryScale, 1f) && UiSettings.TelemetryPosition == TelemetryCorner.TopLeft,
+            "telemetry defaults: on, x1, top left");
         Check(!AlignmentSettings.Enabled && !GearboxSettings.Enabled && AlignmentSettings.ActivePreset == AlignmentPreset.Stock
               && GearboxSettings.ActivePreset == GearboxPreset.Stock, "Alignment and Gearbox are opt-in (off, Stock)");
 
@@ -1882,8 +1893,8 @@ public static class Tests
         ModConfig.Load(new ConfigFile(bad, true));
         Check(Near(AlignmentPreset.Custom.CamberFL, 45f) && Near(AlignmentPreset.Custom.PosXRR, -100f), "alignment values clamped to +-45 deg / +-100 cm");
         Check(GearboxPreset.Custom.GearCount == 12 && Near(GearboxPreset.Custom.Scale(3), 0.25f), "gear count clamped to 12, gear factor to 0.25");
-        Check(GearboxPreset.Custom.TransmissionMode == GearboxMode.Stock && UiSettings.TelemetryPosition == TelemetryCorner.BottomLeft,
-            "numeric / unknown enum names fall back (Stock, BottomLeft)");
+        Check(GearboxPreset.Custom.TransmissionMode == GearboxMode.Stock && UiSettings.TelemetryPosition == TelemetryCorner.TopLeft,
+            "numeric / unknown enum names fall back (Stock, TopLeft)");
         Check(Near(UiSettings.PanelWidth, 1000f) && Near(UiSettings.PanelScale, 0.3f) && UiSettings.LastTab == 9, "panel width/scale/last tab clamped");
         Check(ModConfig.ParseGearboxMode(" manual ") == GearboxMode.Manual && UiSettings.ParseCorner("topright") == TelemetryCorner.TopRight,
             "names parse case/space-tolerant");
