@@ -1,13 +1,8 @@
-# Apocalypter Vehicle Tuning — Audit Bundle (v0.5.0)
+# Apocalypter Vehicle Tuning (v0.5.0-alpha)
 
 A BepInEx mod for **Apocalypter** (SawyerK Games, Unity 2020.3.49, BepInEx 5.4.23.5 + Harmony 2) that adds a full vehicle-tuning panel: steering, suspension, aero, brakes, tire grip, drivetrain and stability assists (ABS/TCS), all applied live to every vehicle in the game.
 
-This bundle is assembled so a third-party AI (or human) can audit and rework the mod **without terminal access**. It contains:
-
-- `plugin/` — the complete mod source (no build artifacts; build with `dotnet build -c Release`, see §6)
-- `verify/` — the self-contained test harness: Unity/NWH compile stubs, a 238-test suite (220 logic + 18 steering-prefix), `run.sh` (bash, needs a .NET SDK 8+), **plus `verify/refs/` with the BepInEx 5 core DLLs it needs**
-- `gamecode/` — the relevant portions of the game's decompiled assemblies (ILSpy output): every game type the mod touches
-- `docs/plan.md` — the approved v3.2 implementation plan incl. exploration findings; `docs/decomSource.ps1` — the script that produced the decompiled source
+The repo contains the complete mod source (`plugin/`) plus a self-contained test harness (`verify/` — Unity/NWH compile stubs and a 238-test suite, needs only a .NET SDK 8+; `verify/refs/` carries the BepInEx 5 core DLLs it needs). The `gamecode/` excerpts used for audits are kept out of the public repo.
 
 ## Changes in 0.2.0-alpha
 
