@@ -86,3 +86,20 @@ per-wheel caster/toe without storage), and the audit fixes (dead-vehicle writes,
 ABS, TCS mid-shift, external config edits reverting panel edits, live-mode Submit re-fire).
 New files: Settings/{AlignmentPreset,AlignmentSettings,GearboxPreset,GearboxSettings,UiSettings,PresetCodec}.cs,
 Runtime/{VehicleTuner.Alignment,VehicleTuner.Gearbox,PanelLayout,GearGraph,TelemetryStrip}.cs.
+
+---
+
+# 0.6.2-alpha (custom drivetrain layout + curve-editor check)
+
+Config-only drivetrain topology (`[Drivetrain.Layout]`), curve-editor/gear-graph press-position picking,
+allocation-free apply passes. See README "Changes in 0.6.2-alpha".
+
+---
+
+# 0.6.3-alpha (telemetry pick + crash hardening)
+
+Scope agreed with the user: FEATURES §10 and §11 plus an audit; §1–§5 deferred. Telemetry: the
+driven-vehicle pick counted idling engines as input (wrong car with hands off; also mis-targeted
+"Last driven"). Hardening: post-load quiet window + spawn-jump deferral; per-category try/catch in
+capture (with retries), apply, restore and baseline refresh. See README "Changes in 0.6.3-alpha".
+

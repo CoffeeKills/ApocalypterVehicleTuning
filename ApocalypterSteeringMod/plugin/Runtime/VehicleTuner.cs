@@ -265,6 +265,52 @@ namespace ApocalypterSteeringMod.Runtime
                 _records.Remove(_dead[i]);
             }
             _dead.Clear();
+            if (_captureFailures.Count > 0)
+            {
+                foreach (KeyValuePair<VehicleController, int> kv in _captureFailures)
+                {
+                    if (kv.Key == null)
+                    {
+                        _dead.Add(kv.Key);
+                    }
+                }
+                for (int i = 0; i < _dead.Count; i++)
+                {
+                    _captureFailures.Remove(_dead[i]);
+                }
+                _dead.Clear();
+            }
+        }
+
+        // ---- spawn-wave hardening (0.6.3, docs/crash-2026-10-04.md) -------------------
+        // The game loads a save by spawning hundreds of objects right after sceneLoaded. The
+        // tuner's scan is read-only, but staying out of that wave entirely is cheap insurance.
+        public const float SpawnQuietSeconds = 5f;   // no scans this long after a scene load
+        public const int SpawnJump = 2;              // more new vehicles than this in one scan = still spawning
+        public const int MaxSpawnDeferrals = 3;      // never defer capture for more than this many scans in a row
+        private static float _quietUntil;            // static: a runner recreated on scene load sees it too
+        private int _lastScanCount = -1;             // -1 = no scan yet: nothing to compare a jump against
+        private int _spawnDeferrals;
+
+        /// <summary>Called from Plugin.OnSceneLoaded: start the post-load quiet window.</summary>
+        public static void NotifySceneLoaded()
+        {
+            _quietUntil = Time.unscaledTime + SpawnQuietSeconds;
+        }
+
+        /// <summary>
+        /// Pure scan gate. Skip while inside the post-load quiet window; defer capture for one
+        /// scan when the vehicle count jumped by more than SpawnJump since the last scan (the
+        /// spawn wave is still running), but never more than MaxSpawnDeferrals scans in a row.
+        /// </summary>
+        public static bool ShouldSkipScan(float now, float quietUntil)
+        {
+            return now < quietUntil;
+        }
+
+        public static bool ShouldDeferCapture(int count, int lastCount, int deferralsSoFar)
+        {
+            return lastCount >= 0 && count > lastCount + SpawnJump && deferralsSoFar < MaxSpawnDeferrals;
         }
 
         private void ScanVehicles()
@@ -272,8 +318,21 @@ namespace ApocalypterSteeringMod.Runtime
             // Forget destroyed vehicles only. Vehicles that are merely inactive keep their
             // record: re-capturing one later would read our own tuned values as "stock".
             PurgeDead();
+            if (ShouldSkipScan(Time.unscaledTime, _quietUntil))
+            {
+                return;
+            }
 
             VehicleController[] vehicles = UnityEngine.Object.FindObjectsOfType<VehicleController>();
+            int count = vehicles.Length;
+            if (ShouldDeferCapture(count, _lastScanCount, _spawnDeferrals))
+            {
+                _lastScanCount = count;
+                _spawnDeferrals++;
+                return;
+            }
+            _lastScanCount = count;
+            _spawnDeferrals = 0;
             for (int i = 0; i < vehicles.Length; i++)
             {
                 VehicleController vc = vehicles[i];
@@ -281,7 +340,7 @@ namespace ApocalypterSteeringMod.Runtime
                 {
                     continue;
                 }
-                VehicleRecord record = Capture(vc);
+                VehicleRecord record = TryCapture(vc);
                 if (record != null)
                 {
                     _records[vc] = record;
@@ -290,12 +349,68 @@ namespace ApocalypterSteeringMod.Runtime
             }
         }
 
+        // ---- per-category exception guards (0.6.3) -------------------------------------
+        public const int MaxCaptureAttempts = 3;     // retries for a vehicle whose capture threw somewhere
+        private readonly Dictionary<VehicleController, int> _captureFailures = new Dictionary<VehicleController, int>();
+        private static readonly HashSet<string> LoggedFaults = new HashSet<string>();
+
+        /// <summary>Log a fault once per key (exception path only; allocates there, never on the hot path).</summary>
+        internal static void LogFault(string category, VehicleController vc, Exception ex)
+        {
+            string key = category + "|" + VehicleName(vc) + "|" + (ex != null ? ex.GetType().Name : "");
+            if (Plugin.Log == null || LoggedFaults.Count > 256 || !LoggedFaults.Add(key))
+            {
+                return;
+            }
+            Plugin.Log.LogWarning(category + " on '" + VehicleName(vc) + "' failed and was skipped (other vehicles/categories unaffected): " + ex);
+        }
+
+        /// <summary>
+        /// Capture with retries: a vehicle captured mid-spawn may throw in one category (half
+        /// initialised). Such a capture is dropped and retried on the next scans; after
+        /// MaxCaptureAttempts the vehicle is kept with the categories that did capture (the
+        /// failed ones stay null and every apply/restore skips them).
+        /// </summary>
+        private VehicleRecord TryCapture(VehicleController vc)
+        {
+            bool incomplete;
+            VehicleRecord record;
+            try
+            {
+                record = Capture(vc, out incomplete);
+            }
+            catch (Exception ex)
+            {
+                // The wheel/axle pass itself threw: nothing usable, always retry later.
+                LogFault("Capture", vc, ex);
+                return null;
+            }
+            if (record == null)
+            {
+                return null;
+            }
+            if (incomplete)
+            {
+                int failures;
+                _captureFailures.TryGetValue(vc, out failures);
+                failures++;
+                if (failures < MaxCaptureAttempts)
+                {
+                    _captureFailures[vc] = failures;
+                    return null;
+                }
+            }
+            _captureFailures.Remove(vc);
+            return record;
+        }
+
         /// <summary>
         /// Snapshot stock values. Returns null while the vehicle has no initialised wheels
         /// yet, so it is retried on the next scan instead of being recorded as empty.
         /// </summary>
-        private static VehicleRecord Capture(VehicleController vc)
+        private static VehicleRecord Capture(VehicleController vc, out bool incomplete)
         {
+            incomplete = false;
             if (vc.powertrain == null || vc.powertrain.wheelGroups == null)
             {
                 return null;
@@ -385,21 +500,34 @@ namespace ApocalypterSteeringMod.Runtime
                 };
             }
 
-            if (vc.brakes != null)
+            // Each category on its own: one that throws (a half-initialised vehicle mid-spawn)
+            // is left null and logged; the others still capture. TryCapture decides on retries.
+            try
             {
-                record.Brakes = new BrakesData
+                if (vc.brakes != null)
                 {
-                    MaxTorque = vc.brakes.maxTorque,
-                    ActuationTime = vc.brakes.actuationTime
-                };
+                    record.Brakes = new BrakesData
+                    {
+                        MaxTorque = vc.brakes.maxTorque,
+                        ActuationTime = vc.brakes.actuationTime
+                    };
+                }
             }
-
-            record.Drivetrain = CaptureDrivetrain(vc);
-            LogStockLayout(vc, record.Drivetrain.Layout);
-            record.Aero = CaptureAero(vc);
-            record.Gearbox = CaptureGearbox(vc);
-            record.Assists = CreateAssistHandles(vc);
-            record.HasTyreWear = HasTyreWearComponent(vc);
+            catch (Exception ex) { record.Brakes = null; incomplete = true; LogFault("Brakes capture", vc, ex); }
+            try
+            {
+                record.Drivetrain = CaptureDrivetrain(vc);
+                LogStockLayout(vc, record.Drivetrain.Layout);
+            }
+            catch (Exception ex) { record.Drivetrain = null; incomplete = true; LogFault("Drivetrain capture", vc, ex); }
+            try { record.Aero = CaptureAero(vc); }
+            catch (Exception ex) { record.Aero = null; incomplete = true; LogFault("Aero capture", vc, ex); }
+            try { record.Gearbox = CaptureGearbox(vc); }
+            catch (Exception ex) { record.Gearbox = null; incomplete = true; LogFault("Gearbox capture", vc, ex); }
+            try { record.Assists = CreateAssistHandles(vc); }
+            catch (Exception ex) { record.Assists = null; incomplete = true; LogFault("Assists capture", vc, ex); }
+            try { record.HasTyreWear = HasTyreWearComponent(vc); }
+            catch (Exception ex) { incomplete = true; LogFault("TyreWear check", vc, ex); }
             return record;
         }
 
@@ -483,92 +611,104 @@ namespace ApocalypterSteeringMod.Runtime
                 {
                     continue;
                 }
-                switch (category)
+                try
                 {
-                    case Category.Suspension:
-                        foreach (KeyValuePair<WheelUAPI, WheelData> wk in r.Wheels)
-                        {
-                            WheelUAPI u = wk.Key;
-                            if (u == null)
-                            {
-                                continue;
-                            }
-                            wk.Value.SpringForce = u.SpringMaxForce;
-                            wk.Value.SpringLength = u.SpringMaxLength;
-                            wk.Value.BumpRate = u.DamperBumpRate;
-                            wk.Value.ReboundRate = u.DamperReboundRate;
-                        }
-                        foreach (KeyValuePair<WheelGroup, GroupData> gk in r.Groups)
-                        {
-                            if (gk.Key != null)
-                            {
-                                gk.Value.ArbForce = gk.Key.antiRollBarForce;
-                            }
-                        }
-                        break;
-
-                    case Category.Grip:
-                        foreach (KeyValuePair<WheelUAPI, WheelData> wk in r.Wheels)
-                        {
-                            WheelUAPI u = wk.Key;
-                            if (u == null)
-                            {
-                                continue;
-                            }
-                            wk.Value.LngGrip = u.LongitudinalFrictionGrip;
-                            wk.Value.LatGrip = u.LateralFrictionGrip;
-                            wk.Value.LngStiff = u.LongitudinalFrictionStiffness;
-                            wk.Value.LatStiff = u.LateralFrictionStiffness;
-                        }
-                        break;
-
-                    case Category.Brakes:
-                        if (r.Vc.brakes != null)
-                        {
-                            if (r.Brakes == null)
-                            {
-                                r.Brakes = new BrakesData();
-                            }
-                            r.Brakes.MaxTorque = r.Vc.brakes.maxTorque;
-                            r.Brakes.ActuationTime = r.Vc.brakes.actuationTime;
-                        }
-                        foreach (KeyValuePair<WheelGroup, GroupData> gk in r.Groups)
-                        {
-                            if (gk.Key != null)
-                            {
-                                gk.Value.BrakeCoeff = gk.Key.brakeCoefficient;
-                                gk.Value.HandbrakeCoeff = gk.Key.handbrakeCoefficient;
-                            }
-                        }
-                        break;
-
-                    case Category.Drivetrain:
-                        if (r.Vc.powertrain != null)
-                        {
-                            r.Drivetrain = CaptureDrivetrain(r.Vc);
-                        }
-                        break;
-
-                    case Category.Aero:
-                        // A module we onboarded keeps its own (inert) baseline; a shipped one,
-                        // or a vehicle that gained a module since, is read again.
-                        if (r.Aero == null || !r.Aero.Onboarded)
-                        {
-                            r.Aero = CaptureAero(r.Vc);
-                        }
-                        break;
-
-                    case Category.Alignment:
-                        RefreshAlignmentBaseline(r);
-                        break;
-
-                    case Category.Gearbox:
-                        if (r.Vc.powertrain != null && (r.Gearbox == null || !r.Gearbox.PendingTrim))
-                        {
-                            r.Gearbox = CaptureGearbox(r.Vc);
-                        }
-                        break;
+                    RefreshBaseline(r, category);
                 }
+                catch (Exception ex)
+                {
+                    LogFault(category + " baseline refresh", kv.Key, ex);
+                }
+            }
+        }
+
+        private static void RefreshBaseline(VehicleRecord r, Category category)
+        {
+            switch (category)
+            {
+                case Category.Suspension:
+                    foreach (KeyValuePair<WheelUAPI, WheelData> wk in r.Wheels)
+                    {
+                        WheelUAPI u = wk.Key;
+                        if (u == null)
+                        {
+                            continue;
+                        }
+                        wk.Value.SpringForce = u.SpringMaxForce;
+                        wk.Value.SpringLength = u.SpringMaxLength;
+                        wk.Value.BumpRate = u.DamperBumpRate;
+                        wk.Value.ReboundRate = u.DamperReboundRate;
+                    }
+                    foreach (KeyValuePair<WheelGroup, GroupData> gk in r.Groups)
+                    {
+                        if (gk.Key != null)
+                        {
+                            gk.Value.ArbForce = gk.Key.antiRollBarForce;
+                        }
+                    }
+                    break;
+
+                case Category.Grip:
+                    foreach (KeyValuePair<WheelUAPI, WheelData> wk in r.Wheels)
+                    {
+                        WheelUAPI u = wk.Key;
+                        if (u == null)
+                        {
+                            continue;
+                        }
+                        wk.Value.LngGrip = u.LongitudinalFrictionGrip;
+                        wk.Value.LatGrip = u.LateralFrictionGrip;
+                        wk.Value.LngStiff = u.LongitudinalFrictionStiffness;
+                        wk.Value.LatStiff = u.LateralFrictionStiffness;
+                    }
+                    break;
+
+                case Category.Brakes:
+                    if (r.Vc.brakes != null)
+                    {
+                        if (r.Brakes == null)
+                        {
+                            r.Brakes = new BrakesData();
+                        }
+                        r.Brakes.MaxTorque = r.Vc.brakes.maxTorque;
+                        r.Brakes.ActuationTime = r.Vc.brakes.actuationTime;
+                    }
+                    foreach (KeyValuePair<WheelGroup, GroupData> gk in r.Groups)
+                    {
+                        if (gk.Key != null)
+                        {
+                            gk.Value.BrakeCoeff = gk.Key.brakeCoefficient;
+                            gk.Value.HandbrakeCoeff = gk.Key.handbrakeCoefficient;
+                        }
+                    }
+                    break;
+
+                case Category.Drivetrain:
+                    if (r.Vc.powertrain != null)
+                    {
+                        r.Drivetrain = CaptureDrivetrain(r.Vc);
+                    }
+                    break;
+
+                case Category.Aero:
+                    // A module we onboarded keeps its own (inert) baseline; a shipped one,
+                    // or a vehicle that gained a module since, is read again.
+                    if (r.Aero == null || !r.Aero.Onboarded)
+                    {
+                        r.Aero = CaptureAero(r.Vc);
+                    }
+                    break;
+
+                case Category.Alignment:
+                    RefreshAlignmentBaseline(r);
+                    break;
+
+                case Category.Gearbox:
+                    if (r.Vc.powertrain != null && (r.Gearbox == null || !r.Gearbox.PendingTrim))
+                    {
+                        r.Gearbox = CaptureGearbox(r.Vc);
+                    }
+                    break;
             }
         }
 
@@ -848,8 +988,9 @@ namespace ApocalypterSteeringMod.Runtime
 
         public VehicleController FindDrivenVehicle()
         {
-            VehicleController driven = null;    // most live activity above the dead zone
-            float bestActivity = 0.0001f;
+            VehicleController driven = null;    // most live input above the dead zone
+            float bestInput = 0.0001f;
+            VehicleController running = null;   // first tracked vehicle with a running engine
             VehicleController fastest = null;
             float bestSpeed = 0f;
             VehicleController first = null;
@@ -865,16 +1006,20 @@ namespace ApocalypterSteeringMod.Runtime
                     first = vc;
                 }
                 float input = Mathf.Abs(vc.input.Steering) + vc.input.Throttle + vc.input.Brakes + vc.input.Handbrake;
-                // A running engine (idle or better) counts as a whisper of activity so a
-                // parked player car beats parked NPCs with dead engines when no input
-                // is held anywhere — otherwise the pick fell to the first tracked
-                // vehicle and the strip showed a random parked car's zeros.
-                bool running = vc.powertrain != null && vc.powertrain.engine != null && vc.powertrain.engine.OutputRPM > 10f;
-                float activity = input + (running ? 0.0004f : 0f);
-                if (activity > bestActivity)
+                if (input > bestInput)
                 {
-                    bestActivity = activity;
+                    bestInput = input;
                     driven = vc;
+                }
+                // 0.6.3: a running engine is a FALLBACK below the last-driven memory, not
+                // input. 0.6.2 added it to the input score, so with hands off the keys (e.g.
+                // clicking a panel setting) every idling car tied, the first tracked one won,
+                // and it also overwrote the memory: the telemetry strip showed a parked car's
+                // zeros until the player steered/accelerated again, and "Apply to: Last
+                // driven" moved the tuning onto that parked car.
+                if (running == null && vc.powertrain != null && vc.powertrain.engine != null && vc.powertrain.engine.OutputRPM > 10f)
+                {
+                    running = vc;
                 }
                 if (vc.Speed > bestSpeed)
                 {
@@ -897,6 +1042,10 @@ namespace ApocalypterSteeringMod.Runtime
                     return _lastDriven;
                 }
                 _lastDriven = null;
+            }
+            if (running != null)
+            {
+                return running;
             }
             return bestSpeed > 0.01f ? fastest : first;
         }
@@ -977,13 +1126,17 @@ namespace ApocalypterSteeringMod.Runtime
                 }
                 if (IsTarget(kv.Key))
                 {
-                    apply(r, preset);
+                    // Flag first: a pass that throws half-way has still written some fields,
+                    // and the flag is what makes OFF restore them.
                     r.Applied |= cat;
+                    try { apply(r, preset); }
+                    catch (Exception ex) { LogFault(cat + " apply", kv.Key, ex); }
                 }
                 else if ((r.Applied & cat) != 0)
                 {
-                    restore(r);
                     r.Applied &= ~cat;
+                    try { restore(r); }
+                    catch (Exception ex) { LogFault(cat + " restore", kv.Key, ex); }
                 }
             }
         }
@@ -999,13 +1152,15 @@ namespace ApocalypterSteeringMod.Runtime
                 }
                 if (IsTarget(kv.Key))
                 {
-                    apply(r);
                     r.Applied |= cat;
+                    try { apply(r); }
+                    catch (Exception ex) { LogFault(cat + " apply", kv.Key, ex); }
                 }
                 else if ((r.Applied & cat) != 0)
                 {
-                    restore(r);
                     r.Applied &= ~cat;
+                    try { restore(r); }
+                    catch (Exception ex) { LogFault(cat + " restore", kv.Key, ex); }
                 }
             }
         }
@@ -1018,8 +1173,9 @@ namespace ApocalypterSteeringMod.Runtime
                 VehicleRecord r = kv.Value;
                 if (r != null && (r.Applied & cat) != 0)
                 {
-                    restore(r);
                     r.Applied &= ~cat;
+                    try { restore(r); }
+                    catch (Exception ex) { LogFault(cat + " restore", kv.Key, ex); }
                 }
             }
         }

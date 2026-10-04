@@ -148,6 +148,10 @@ namespace ApocalypterSteeringMod.Runtime
         private static void ApplyAero(VehicleRecord r, AeroPreset p)
         {
             AeroData d = r.Aero;
+            if (d == null)
+            {
+                return;   // aero capture failed for this vehicle (0.6.3 guard)
+            }
             AerodynamicsModule m = d.Module;
             float onboardedDrag = OnboardedDragFactor(p);
             if (m == null)
@@ -241,7 +245,7 @@ namespace ApocalypterSteeringMod.Runtime
         private static void RestoreAero(VehicleRecord r)
         {
             AeroData d = r.Aero;
-            if (d.Module == null)
+            if (d == null || d.Module == null)
             {
                 return;
             }

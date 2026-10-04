@@ -1,22 +1,26 @@
 # FEATURES.md — Feature specification for v0.7.0-alpha
 
-**This file is the authoritative spec for the next version.** Implement everything below on top of the **0.6.2** code in this bundle. Where this file and PROMPT.md conflict, this file wins for *features*; PROMPT.md's hard constraints (no `ES3.Save`, no `vc.input.*` writes, allocation-free steering prefix, hidden-runner survival architecture, one Graphic per GameObject, mouse-only panel, BepInEx config the only persistence, unchanged GUID) always win.
+**This file is the authoritative spec for the next version.** Implement everything below on top of the **0.6.3** code in this bundle. Where this file and PROMPT.md conflict, this file wins for *features*; PROMPT.md's hard constraints (no `ES3.Save`, no `vc.input.*` writes, allocation-free steering prefix, hidden-runner survival architecture, one Graphic per GameObject, mouse-only panel, BepInEx config the only persistence, unchanged GUID) always win.
 
 You have no terminal. The user runs `bash verify/run.sh` (needs .NET SDK 8+; globs **all** `plugin/**/*.cs`, so every new file must compile against the stubs — extend them, §7). Reason through it carefully.
 
-Version: `plugin/PluginInfo.cs` → `"0.7.0"`. README title → "v0.7.0-alpha" + a new "## Changes in 0.7.0-alpha" section. Current suite: **467 tests (449 logic + 18 prefix)**, all passing. Keep them green, add the §7 tests, and remove `GearboxSettings.ComingSoon` (release gate from 0.6.0) only when the §1 shifting subsystem is done — until then the gate stays.
+Version: `plugin/PluginInfo.cs` → `"0.7.0"`. README title → "v0.7.0-alpha" + a new "## Changes in 0.7.0-alpha" section. Current suite: **490 tests (472 logic + 18 prefix)**, all passing. Keep them green, add the §7 tests, and remove `GearboxSettings.ComingSoon` (release gate from 0.6.0) only when the §1 shifting subsystem is done — until then the gate stays.
 
-## Status after 0.6.2-alpha (what is already done, what remains)
+## Status after 0.6.3-alpha (what is already done, what remains)
 
-**Done in 0.6.2** (verified, harness-tested, negative controls): §2's core question — custom drivetrain layouts, config-only (`[Drivetrain.Layout]`, README "Changes in 0.6.2-alpha": RWD↔AWD conversion, transfer cases Open/Locked/LSD with split/stiffness, multi-axle trucks, exact restore). Plus: the curve-editor/gear-graph grab fix (`pressPosition` picking) and the allocation-free apply path.
+| § | Item | State |
+|---|---|---|
+| §2 core | Custom drivetrain layouts, config-only (`[Drivetrain.Layout]`) | ✅ done 0.6.2, harness-tested, negative controls |
+| — | Curve-editor / gear-graph grab fix (press-position picking), allocation-free apply path | ✅ done 0.6.2, harness-tested |
+| §10 | Crash hardening: post-load quiet window + spawn-jump deferral; per-category exception guards (capture with retries, apply, restore, baseline refresh) | ✅ done 0.6.3, harness-tested, negative controls |
+| §11 | Telemetry "zeros until I steer" — root cause was the driven-vehicle pick (idling engines counted as input, above the last-driven memory); also fixed "Apply to: Last driven" mis-targeting | ✅ done 0.6.3, harness-tested, negative controls; in-game check README §10 item 34 |
+| §1 | Mod-owned gearbox subsystem (shift-write suppression + `ShiftController`); remove `ComingSoon` only here | ⏳ open — needs PlayMaker `SetProperty`/`CallMethod`/`FsmProperty` sources and the vehicle FSM dump (not in `gamecode/`; §1 says "inspect before patching") |
+| §2 rest | Panel UI for the drivetrain layout | ⏳ open |
+| §3 | Truck 12-gear preset (inert until §1) | ⏳ open |
+| §4 | Telemetry pins | ⏳ open |
+| §5 | Tighter UI | ⏳ open |
 
-**Remaining for 0.7.0** (the scope of this spec):
-- §1 — the mod-owned gearbox subsystem (shift-write suppression + `ShiftController`) that unlocks the Gearbox tab; remove the `ComingSoon` gate only here.
-- §2 remainder — panel UI for the drivetrain layout (a layout editor/status row; the old RWD/FWD "disabled slider" note is obsolete — a layout can convert).
-- §3 — Truck 12-gear preset · §4 — telemetry pins · §5 — tighter UI.
-- §10 — crash-report hardening (scan pause during the spawn wave; per-category exception guards).
-- §11 — telemetry display fix (user-reported, still open).
-- Known unknowns to verify in-game: whether the game's saves serialise drivetrain wiring (the 0.6.2 hash hygiene is defensive), game diff-lock FSMs acting on bypassed diffs, no low-range transfer gearing (NWH diffs have no ratio).
+Known unknowns to verify in-game: whether the game's saves serialise drivetrain wiring (the 0.6.2 hash hygiene is defensive), game diff-lock FSMs acting on bypassed diffs, no low-range transfer gearing (NWH diffs have no ratio), digit tab-hotkeys vs `ShiftInto1..8` on number keys (README §10 item 36).
 
 ## 1. Mod-owned gearbox subsystem (unlock Gearbox for every transmission)
 

@@ -36,6 +36,38 @@ public sealed class FakeWheel : WheelUAPI
     public void SetLongitudinalSlip(float v) { _longitudinalSlip = v; }
 }
 
+/// <summary>0.6.3: a module manager that throws like a half-initialised one mid-spawn.</summary>
+public sealed class ThrowingModuleManager : ModuleManager
+{
+    public bool Throw = true;
+    public override List<NWH.VehiclePhysics2.VehicleComponent> Components
+    {
+        get { if (Throw) throw new InvalidOperationException("half-initialised (test)"); return base.Components; }
+    }
+}
+
+/// <summary>0.6.3: a wheel whose spring setter throws (apply-time fault on one vehicle).</summary>
+public sealed class ThrowingWheel : WheelUAPI
+{
+    public bool Throw;
+    private float _spring = 30000f;
+    public override float SteerAngle { get; set; }
+    public override float SpringMaxLength { get; set; }
+    public override float SpringMaxForce
+    {
+        get { return _spring; }
+        set { if (Throw) throw new InvalidOperationException("wheel fault (test)"); _spring = value; }
+    }
+    public override float DamperBumpRate { get; set; }
+    public override float DamperReboundRate { get; set; }
+    public override float LongitudinalFrictionGrip { get; set; }
+    public override float LateralFrictionGrip { get; set; }
+    public override float LongitudinalFrictionStiffness { get; set; }
+    public override float LateralFrictionStiffness { get; set; }
+    public override bool IsGrounded { get { return true; } }
+    public override float LongitudinalSlip { get { return 0f; } }
+}
+
 public static class Tests
 {
     private static int _fail, _pass;
@@ -257,6 +289,16 @@ public static class Tests
 
         Console.WriteLine("0.6.2 apply path allocation");
         TestApplyAllocation();
+
+        Console.WriteLine("0.6.3 driven-vehicle pick (telemetry + Last driven)");
+        TestDrivenPick();
+
+        Console.WriteLine("0.6.3 crash hardening: per-category guards");
+        TestFaultGuards();
+
+        // Last: moves the static post-load quiet window (reset at its end).
+        Console.WriteLine("0.6.3 crash hardening: spawn-wave scan gate");
+        TestSpawnGate();
 
         Console.WriteLine();
         Console.WriteLine(_pass + " passed, " + _fail + " failed");
@@ -2476,6 +2518,195 @@ public static class Tests
             + "0.6.0 built a closure per category per pass)");
         ResetAllCategories();
         tuner.ApplyLive();
+        UnityEngine.Object.Registry.Clear();
+    }
+
+    // ================================================================ 0.6.3
+
+    private static void TestDrivenPick()
+    {
+        UnityEngine.Object.Registry.Clear();
+        ResetAllCategories();
+        TargetSettings.Mode = TargetMode.All;
+        TargetSettings.SelectedName = "";
+        // Three idling cars; the player drives the SECOND one tracked.
+        VehicleController a = MakeCar(out FakeWheel[] wa, 0f);
+        VehicleController b = MakeCar(out FakeWheel[] wb, 0f);
+        VehicleController c = MakeCar(out FakeWheel[] wc, 0f);
+        a.gameObject.name = "Parked A";
+        b.gameObject.name = "Player B";
+        c.gameObject.name = "Parked C";
+        foreach (VehicleController v in new[] { a, b, c })
+        {
+            v.powertrain.engine.OutputRPM = 900f;   // all engines idling
+            UnityEngine.Object.Registry.Add(v);
+        }
+        var tuner = new VehicleTuner();
+        tuner.ReapplyNow();
+
+        b.input.Throttle = 1f;
+        Check(tuner.FindDrivenVehicle() == b, "live input picks the player's car");
+        b.input.Throttle = 0f;   // hands off the keys (clicking a panel setting)
+        Check(tuner.FindDrivenVehicle() == b,
+            "hands off: the last-driven car keeps the pick (0.6.2: an idling engine counted as input, the first tracked idler won)");
+        VehicleTuner.TelemetrySample sample;
+        b.Speed = 12f;
+        Check(tuner.TryGetTelemetry(out sample) && Near(sample.SpeedKmh, 43.2f),
+            "telemetry shows the player's car with hands off, not a parked car's zeros");
+        b.Speed = 0f;
+
+        // "Apply to: Last driven" must not hop to a parked car when the player clicks a setting.
+        TargetSettings.Mode = TargetMode.LastDriven;
+        SuspensionSettings.Enabled = true;
+        SuspensionSettings.SetPresetByName("Race");
+        b.input.Steering = 0.5f;
+        tuner.ApplyLive();
+        b.input.Steering = 0f;
+        SuspensionSettings.BeginEdit().SpringFront = 1.7f;   // a panel edit with hands off the keys
+        tuner.ApplyLive();
+        Check(Near(wb[0].SpringMaxForce, 30000f * 1.7f) && Near(wa[0].SpringMaxForce, 30000f) && Near(wc[0].SpringMaxForce, 30000f),
+            "Last driven + hands off: the edit lands on the player's car, the parked cars stay stock");
+
+        // No input ever (fresh load): a running engine still beats dead ones, below the memory.
+        UnityEngine.Object.Registry.Clear();
+        VehicleController dead = MakeCar(out FakeWheel[] _, 0f);
+        VehicleController idle = MakeCar(out FakeWheel[] _, 0f);
+        dead.powertrain.engine.OutputRPM = 0f;
+        idle.powertrain.engine.OutputRPM = 800f;
+        UnityEngine.Object.Registry.Add(dead);
+        UnityEngine.Object.Registry.Add(idle);
+        var t2 = new VehicleTuner();
+        t2.ReapplyNow();
+        Check(t2.FindDrivenVehicle() == idle, "no input yet: a running engine beats a dead one");
+        SuspensionSettings.Enabled = false;
+        tuner.ApplyLive();
+        ResetAllCategories();
+        TargetSettings.Mode = TargetMode.All;
+        UnityEngine.Object.Registry.Clear();
+    }
+
+    private static void TestFaultGuards()
+    {
+        UnityEngine.Object.Registry.Clear();
+        ResetAllCategories();
+        TargetSettings.Mode = TargetMode.All;
+
+        // (a) Capture: a vehicle whose module manager throws (half-initialised mid-spawn).
+        VehicleController ok = MakeCar(out FakeWheel[] wOk, 0f);
+        VehicleController half = MakeCar(out FakeWheel[] wHalf, 0f);
+        var mm = new ThrowingModuleManager { vehicleController = half };
+        half.moduleManager = mm;
+        UnityEngine.Object.Registry.Add(ok);
+        UnityEngine.Object.Registry.Add(half);
+        var tuner = new VehicleTuner();
+        bool threw = false;
+        try { tuner.ReapplyNow(); } catch (Exception) { threw = true; }
+        Check(!threw && tuner.TrackedVehicles == 1, "a capture that throws in one category does not escape; the healthy vehicle is tracked");
+        mm.Throw = false;    // the vehicle finished initialising
+        tuner.ReapplyNow();
+        Check(tuner.TrackedVehicles == 2, "the half-initialised vehicle is captured on a later scan once it stops throwing");
+
+        UnityEngine.Object.Registry.Clear();
+        VehicleController broken = MakeCar(out FakeWheel[] wBroken, 0f);
+        broken.moduleManager = new ThrowingModuleManager { vehicleController = broken };
+        UnityEngine.Object.Registry.Add(broken);
+        var t2 = new VehicleTuner();
+        for (int i = 0; i < VehicleTuner.MaxCaptureAttempts; i++) t2.ReapplyNow();
+        Check(t2.TrackedVehicles == 1, "a vehicle that keeps throwing is kept after " + VehicleTuner.MaxCaptureAttempts
+            + " attempts with the categories that did capture");
+        SuspensionSettings.Enabled = true;
+        SuspensionSettings.SetPresetByName("Race");
+        AeroSettings.Enabled = true;
+        AeroSettings.SetPresetByName("Race");
+        threw = false;
+        try { t2.ApplyLive(); } catch (Exception) { threw = true; }
+        Check(!threw && !Near(wBroken[0].SpringMaxForce, 30000f), "its failed category (aero) is skipped, suspension still applies");
+        ResetAllCategories();
+        t2.ApplyLive();
+        Check(Near(wBroken[0].SpringMaxForce, 30000f), "and restores");
+
+        // (b) Apply: one vehicle's wheel throws mid-pass. 0.6.2 let it escape ApplyLive, which
+        // aborted that category for every later vehicle and every later category.
+        UnityEngine.Object.Registry.Clear();
+        VehicleController bad = MakeCar(out FakeWheel[] _, 0f);
+        var tw = new ThrowingWheel();
+        tw.transform.position = new Vector3(0f, 0f, 1.3f);
+        var twc = new WheelComponent { wheelUAPI = tw };
+        bad.powertrain.wheelGroups[0].Wheels.Add(twc);
+        bad.powertrain.wheels.Add(twc);
+        VehicleController good = MakeCar(out FakeWheel[] wGood, 0f);
+        UnityEngine.Object.Registry.Add(bad);
+        UnityEngine.Object.Registry.Add(good);
+        var t3 = new VehicleTuner();
+        t3.ReapplyNow();
+        tw.Throw = true;
+        SuspensionSettings.Enabled = true;
+        SuspensionSettings.SetPresetByName("Race");
+        BrakesSettings.Enabled = true;
+        BrakesSettings.SetPresetByName("Race");
+        threw = false;
+        try { t3.ApplyLive(); } catch (Exception) { threw = true; }
+        Check(!threw, "an apply that throws on one vehicle does not escape ApplyLive");
+        Check(!Near(wGood[0].SpringMaxForce, 30000f), "the other vehicle still gets the category");
+        Check(!Near(good.brakes.maxTorque, 7000f) && !Near(bad.brakes.maxTorque, 7000f),
+            "later categories still apply to every vehicle, the faulty one included");
+        tw.Throw = false;
+        ResetAllCategories();
+        t3.ApplyLive();
+        Check(Near(wGood[0].SpringMaxForce, 30000f) && Near(good.brakes.maxTorque, 7000f) && Near(bad.brakes.maxTorque, 7000f),
+            "OFF restores everything, including the categories applied around the fault");
+        UnityEngine.Object.Registry.Clear();
+    }
+
+    private static void TestSpawnGate()
+    {
+        Check(VehicleTuner.ShouldSkipScan(1f, 5f) && !VehicleTuner.ShouldSkipScan(5f, 5f), "quiet window: skip before its end, scan after");
+        Check(!VehicleTuner.ShouldDeferCapture(30, -1, 0), "first scan of a runner never defers (no previous count)");
+        Check(VehicleTuner.ShouldDeferCapture(6, 3, 0) && !VehicleTuner.ShouldDeferCapture(5, 3, 0),
+            "a jump of more than " + VehicleTuner.SpawnJump + " vehicles defers capture");
+        Check(!VehicleTuner.ShouldDeferCapture(20, 3, VehicleTuner.MaxSpawnDeferrals), "never more than " + VehicleTuner.MaxSpawnDeferrals + " deferrals in a row");
+
+        UnityEngine.Object.Registry.Clear();
+        ResetAllCategories();
+        Time.unscaledTime = 100f;
+        VehicleController first = MakeCar(out FakeWheel[] _, 0f);
+        UnityEngine.Object.Registry.Add(first);
+        var tuner = new VehicleTuner();
+        tuner.ReapplyNow();
+        Check(tuner.TrackedVehicles == 1, "(baseline scan before the load)");
+
+        VehicleTuner.NotifySceneLoaded();     // the game loads a save
+        for (int i = 0; i < 4; i++)
+        {
+            VehicleController v = MakeCar(out FakeWheel[] _, 0f);
+            UnityEngine.Object.Registry.Add(v);
+        }
+        Time.unscaledTime = 102f;
+        tuner.ReapplyNow();
+        Check(tuner.TrackedVehicles == 1, "inside the " + VehicleTuner.SpawnQuietSeconds + " s post-load window nothing new is captured");
+        Time.unscaledTime = 106f;
+        tuner.ReapplyNow();
+        Check(tuner.TrackedVehicles == 1, "after the window, a jump of 4 vehicles defers capture one scan (spawn wave still running)");
+        tuner.ReapplyNow();
+        Check(tuner.TrackedVehicles == 5, "the next scan with a stable count captures them all");
+
+        // Endless growth cannot starve capture.
+        for (int round = 0; round < VehicleTuner.MaxSpawnDeferrals + 1; round++)
+        {
+            for (int i = 0; i < 3; i++)
+            {
+                VehicleController v = MakeCar(out FakeWheel[] _, 0f);
+                UnityEngine.Object.Registry.Add(v);
+            }
+            tuner.ReapplyNow();
+        }
+        Check(tuner.TrackedVehicles == 5 + 3 * (VehicleTuner.MaxSpawnDeferrals + 1),
+            "steady growth defers at most " + VehicleTuner.MaxSpawnDeferrals + " scans, then captures");
+
+        // Reset the static window so nothing after this test is gated.
+        Time.unscaledTime = -VehicleTuner.SpawnQuietSeconds;
+        VehicleTuner.NotifySceneLoaded();
+        Time.unscaledTime = 0f;
         UnityEngine.Object.Registry.Clear();
     }
 }

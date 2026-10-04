@@ -1,4 +1,4 @@
-Apocalypter Vehicle Tuning 0.6.2-alpha
+Apocalypter Vehicle Tuning 0.6.3-alpha
 ======================================
 
 An in-game tuning panel for every vehicle in Apocalypter: steering,
@@ -48,6 +48,11 @@ NOTES
   and copy/paste for presets. Gearbox tuning is coming soon - the
   game's shift logic fights resized gearboxes, so the tab shows a
   notice until the mod ships its own shifting.
+- New in 0.6.3: the telemetry strip and "Apply to: Last driven" stay
+  on YOUR car when your hands leave the keys (a parked car's idling
+  engine no longer steals the pick), and the mod keeps out of the
+  game's post-load spawn wave plus survives a half-initialised
+  vehicle - after loading a save, tuning appears ~5 seconds later.
 - Steering tab: the two graphs are editable - click to add a point,
   drag to move, double-click to remove. The "Return to center" graph
   is what makes the Euro Truck preset hold its wheels when stopped

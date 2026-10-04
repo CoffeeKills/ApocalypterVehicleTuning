@@ -48,6 +48,8 @@ namespace ApocalypterSteeringMod
 
         private static void OnSceneLoaded(Scene scene, LoadSceneMode mode)
         {
+            // Stay out of the game's post-load spawn wave (docs/crash-2026-10-04.md).
+            VehicleTuner.NotifySceneLoaded();
             EnsureRunner("scene " + scene.name);
         }
 

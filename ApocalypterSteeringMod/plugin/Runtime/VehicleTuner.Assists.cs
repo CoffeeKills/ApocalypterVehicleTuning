@@ -114,6 +114,10 @@ namespace ApocalypterSteeringMod.Runtime
         private static void ApplyAssists(VehicleRecord r, AssistsPreset p)
         {
             AssistHandles h = r.Assists;
+            if (h == null)
+            {
+                return;   // capture failed for this vehicle (0.6.3 guard)
+            }
             bool wantAbs = AssistsSettings.Enabled && p != null && p.AbsEnabled;
             bool wantTcs = AssistsSettings.Enabled && p != null && p.TcsEnabled;
 
@@ -165,6 +169,10 @@ namespace ApocalypterSteeringMod.Runtime
         private static void RestoreAssists(VehicleRecord r)
         {
             AssistHandles h = r.Assists;
+            if (h == null)
+            {
+                return;
+            }
             if (h.AbsRegistered && r.Vc.brakes != null)
             {
                 List<Brakes.BrakeTorqueModifier> list = r.Vc.brakes.brakeTorqueModifiers;

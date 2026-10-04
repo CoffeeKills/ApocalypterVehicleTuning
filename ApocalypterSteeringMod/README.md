@@ -1,8 +1,8 @@
-# Apocalypter Vehicle Tuning (v0.6.2-alpha)
+# Apocalypter Vehicle Tuning (v0.6.3-alpha)
 
 A BepInEx mod for **Apocalypter** (SawyerK Games, Unity 2020.3.49, BepInEx 5.4.23.5 + Harmony 2) that adds a full vehicle-tuning panel: steering, suspension, aero, brakes, tire grip, drivetrain, stability assists (ABS/TCS), wheel alignment and gearbox, all applied live to every vehicle in the game. Since 0.6.0 the panel docks to the right edge and you can keep driving while it is open.
 
-The repo contains the complete mod source (`plugin/`) plus a self-contained test harness (`verify/` — Unity/NWH compile stubs and a 467-test suite, needs only a .NET SDK 8+; `verify/refs/` carries the BepInEx 5 core DLLs it needs). The `gamecode/` excerpts used for audits are kept out of the public repo.
+The repo contains the complete mod source (`plugin/`) plus a self-contained test harness (`verify/` — Unity/NWH compile stubs and a 490-test suite, needs only a .NET SDK 8+; `verify/refs/` carries the BepInEx 5 core DLLs it needs). The `gamecode/` excerpts used for audits are kept out of the public repo.
 
 ## Changes in 0.2.0-alpha
 
@@ -216,6 +216,38 @@ All §2 facts are preserved. The hidden-runner survival architecture is unchange
 - **Negative control** (against the untouched 0.5.0 plugin, compiled against the new stubs): the 9 new checks that compile against 0.5.0 give 5 failures (the four audit bugs: destroyed-vehicle writes ×2, latched-handbrake ABS, TCS mid-shift, external edit reverting panel edits) and 4 passes (their positive controls). The other 126 new checks exercise 0.6.0 API and do not compile against 0.5.0. `run.sh` is unchanged.
 - **gamecode/ gap:** `PowertrainComponent` (base of Engine/Clutch/Transmission/Wheel/Differential, declares `OutputRPM`) is referenced through `ClutchComponent.cs:10/95/108` but its file is not in the bundle. Please copy `PowertrainComponent.cs` from the decompiled tree into `gamecode/`. The stub mirrors only the members the mod uses.
 
+## Changes in 0.6.3-alpha
+
+Scope (agreed with the user for this round): the two open user-reported issues — the telemetry strip (FEATURES §11) and the save-load crash hardening (FEATURES §10, `docs/crash-2026-10-04.md`) — plus an audit pass. FEATURES §1 (shift controller), §2 remainder, §3–§5 are **not** in this round; `GearboxSettings.ComingSoon` stays. Suite: **490 tests (472 logic + 18 prefix), all passing — run** on .NET SDK 8.0.131; every new fix has a negative control (counts below).
+
+**Not changed** (all §2 facts preserved): hidden-runner survival architecture, the InputBlocker recipe, one Graphic per GameObject, mouse-only panel, no `ES3.Save`, no `vc.input.*` writes (still read-only), BepInEx config as the only persistence, the GUID, the steering prefix (byte-identical). **No config keys added, renamed or removed** — a 0.6.2 cfg loads as is.
+
+### Telemetry strip (FEATURES §11) — root cause was the vehicle pick, not the strip
+
+User symptom: after changing/enabling a setting the strip shows "0 km/h / N / zeros" until they steer, with no AI traffic around. The strip's scale (`Screen.height/1080 × scale`, ConstantPixelSize), corner anchoring (anchor = pivot = corner, margin inward) and 4 × 110 px cells were checked and are correct; the strip faithfully showed the vehicle `FindDrivenVehicle()` returned — the wrong one.
+
+1. **The driven-vehicle pick counted an idling engine as input.** 0.6.0's "running engine whisper" (+0.0004) sat *inside* the input score, above the last-driven memory — contrary to the documented order (CONTEXT.md: live input → last-driven → running engine → fastest → first). With hands off the keys (clicking a panel setting) every idling car tied, the **first tracked** idler won, and the tie also **overwrote the memory**, so the wrong car stuck until the player gave input again. Now a running engine is a fallback below the memory and only real input updates it. **Bigger consequence, same fix:** "Apply to: Last driven" uses the same pick, so a panel edit with hands off applied the tuning to a parked car and *restored* the player's (harness-tested).
+
+### Crash hardening (FEATURES §10, `docs/crash-2026-10-04.md`)
+
+Report reviewed: the crash was native, during the game's own post-load spawn wave, with every category OFF; nothing implicates the mod. The two requested insurance items are in:
+
+2. **Spawn-wave quiet window.** `Plugin.OnSceneLoaded` calls `VehicleTuner.NotifySceneLoaded()`: no scans for `SpawnQuietSeconds` = 5 s (static, so a recreated runner honours it). After the window, a scan whose vehicle count jumped by more than `SpawnJump` = 2 since the previous scan defers capture by one scan, at most `MaxSpawnDeferrals` = 3 in a row (a big save or a convoy mod can't starve capture). A runner's first scan never defers (no previous count). Apply/restore of already-tracked vehicles is unaffected. Pure gates `ShouldSkipScan` / `ShouldDeferCapture`. Side effect: after loading a save the telemetry strip and tuning appear ~5–7 s later than before.
+3. **Per-category exception guards.** 0.6.2 had **no** exception handling in the tuner (the crash report's "the gearbox capture diagnostic already does this" was not accurate). Now:
+   - *Capture*: each category (brakes, drivetrain + layout, aero, gearbox, assists, TyreWear check) is captured in its own try/catch; a failing one is left null and logged once. A capture with a failed category is dropped and retried on the next scans (a half-initialised vehicle usually completes); after `MaxCaptureAttempts` = 3 it is kept with the categories that worked. A throw in the wheel/axle pass itself always retries.
+   - *Apply/restore*: `TargetPass`/`RestorePass` guard each record per category. 0.6.2 let one throwing vehicle escape `ApplyLive`, which aborted that category for every later vehicle **and every later category** in the same pass. The applied flag is set before the apply, so a half-applied category is still restored on OFF.
+   - *Baseline refresh*: per record and category.
+   - `ApplyAero`/`RestoreAero`/`ApplyAssists`/`RestoreAssists` dereferenced their capture data unconditionally — null-checked now (a failed capture leaves it null).
+   - Faults log once per (category, vehicle, exception type), capped at 256 lines; the try/catch costs nothing on the hot path (the 0-byte allocation test still passes).
+
+### Audited, not changed
+Reviewed: the panel manager's per-frame path (hotkeys, rebind capture, one-frame-late unblock, selection clearing), telemetry layout math, gearbox capture null-guards, the 0.6.2 layout code. **Risk to check in-game (not changed):** the digit tab-hotkeys (1…0, live mode) could collide with the game's `ShiftInto1..8` if those are bound to number keys — a manual-gear driver would switch panel tabs while shifting. If so, the fix is to only take digits while the pointer is over the panel.
+
+### Verification harness
+- New tests (23): driven pick (hands-off keeps the player's car, telemetry shows it, Last-driven edits land on it, running beats dead with no history); fault guards (capture throw → healthy vehicle tracked, retry succeeds, give-up keeps partial record, failed category skipped; apply throw → no escape, other vehicle and later categories still applied, full restore); spawn gate (pure gates, quiet window, one-scan jump deferral, deferral cap). Test doubles `ThrowingModuleManager` (virtual `Components`, no stub change) and `ThrowingWheel`.
+- **Negative controls** (each fix reverted alone): driven pick → 3 failures; pass guards → 3; aero capture guard → 2; quiet window → 2; jump deferral → 2.
+- Stubs and `run.sh` unchanged.
+
 ## Changes in 0.6.2-alpha
 
 Scope of this pass: (1) verify the curve-editor fix from the playtest note, (2) a **custom drivetrain layout** — define in the config where the gearbox, transfer cases and differentials send torque, down to individual wheels (user request; config only, no panel UI yet). FEATURES.md (the 0.7.0 spec: own shift controller, Truck preset, telemetry pins, UI resize) is **not** implemented here; its §2 question is answered below. Suite: **467 tests (449 logic + 18 prefix), all passing — actually run** on .NET SDK 8.0.131 for this pass, with negative controls for every new hazard test (each one fails when its fix is reverted).
@@ -343,7 +375,7 @@ Runtime/VehicleTuner.Layout.cs  (0.6.2) Custom drivetrain layout: stock-wiring c
 Runtime/VehicleTuner.Gearbox.cs (0.6.0) gear capture/layout check/continuation, ratio+count write with the Gear re-shift guard and in-flight-shift deferral, clutch, mode, mid-shift restore + trim.
 Runtime/PanelLayout.cs          (0.6.0) Every panel size as a pure function of the width (wide = 0.5.0 geometry, narrow = stacked rows), scale factor, effective width, digit→tab.
 Runtime/GearGraph.cs            (0.6.0) Gear-ratio bar graph row (sibling of CurveEditor): bars vs stock outlines, click selects, bar drag edits, other drags scroll.
-Runtime/TelemetryStrip.cs       (0.6.0) Click-through speed/RPM/gear/slip strip on the hidden runner, own canvas, 4 Hz.
+Runtime/TelemetryStrip.cs       (0.6.0) Click-through speed/RPM/gear/slip strip on the hidden runner, own canvas, 4 Hz. Shows FindDrivenVehicle(): live input → last driven → running engine → fastest → first (0.6.3).
 Runtime/InputBlocker.cs        Two layers (0.6.0): InputController name whitelist (driving input stays live) + the PlayMaker class patch set (forks routed by name, OnEnter gated by everyFrame); SetInputBlocked / SetFreeze (see §2.8, §2.11).
 Runtime/SettingsPanelManager.cs On the hidden runner: hotkey/Esc/digit polling (dual input), menu-button injection (§2.7), panel lifecycle (live vs freeze), per-frame cursor freeing + selection clearing, EventSystem find-or-create, auto-save on close.
 Runtime/SettingsPanel.cs        The 10-tab docked panel (two-row tab strip, width-adaptive rows via Relayout, one Graphic per GO, mouse-only widgets, single refresher list, two-click per-tab reset-all and "Turn everything off", copy/paste preset footer, dim + click-outside close in Freeze mode only, absolute readouts).
@@ -378,7 +410,7 @@ Sections: `Steering` (Enabled **false** by default, Preset, MatchGameSteeringSpe
 
 ```
 cd plugin && dotnet build -c Release          # real DLL, references game DLLs at D:\SteamLibrary\...\Apocalypter_Data\Managed (adjust paths in the csproj; 0.6.0 adds UnityEngine.IMGUIModule for the clipboard)
-cd verify && bash run.sh                      # stubs compile + 467 tests (449 logic + 18 prefix); .NET SDK 8+; refs/ already populated
+cd verify && bash run.sh                      # stubs compile + 490 tests (472 logic + 18 prefix); .NET SDK 8+; refs/ already populated
 ```
 Install: copy the DLL to `BepInEx\plugins\` and `icon.png` next to it as `ApocalypterSteeringMod.png` (the Apocasetter Mods-window icon). Rebuild the install zip with both files at the zip root. **Never run it alongside an old `SteeringFix.dll`** (earlier assembly name) — both prefixes would double-process steering. The GUID is deliberately unchanged, so the existing config file migrates in place.
 
@@ -471,6 +503,10 @@ powershell Compress-Archive README.md,PROMPT.md,FEATURES.md,CONTEXT.md,plugin,ve
 31. **0.6.2 — RWD conversion:** on an AWD vehicle set `gearbox -> rear; rear: LSD -> RL, RR`: front wheels free-roll (no drive, but suspension and steering still work — if a front corner sinks or the front wheels stop turning, report it: that is the AutoSimulate hand-back), power oversteer is possible. Layout OFF: AWD again. No exceptions in the log.
 32. **0.6.2 — AWD conversion:** on a RWD vehicle use the default example: the car pulls with all four wheels (try a slope or mud), with the open transfer case one spinning axle stalls progress; `Locked` transfer case: it does not. A 6x6 (if any) with the 6x6 example drives all three axles.
 33. **0.6.2 — save while converted:** with a layout active, save, quit to menu, load: the vehicle loads driveable (stock wiring until the tuner re-applies a couple of seconds later), no NullReferenceException spam.
+
+34. **0.6.3 — telemetry with hands off:** drive a car, stop, click a setting in the panel (hands off the keys): the strip keeps showing YOUR car (speed/RPM/gear), not zeros. With "Apply to: Last driven", that edit tunes your car, not a parked one.
+35. **0.6.3 — save load:** load a save with several vehicles: the log shows no tuner activity for ~5 s, then the captures; no "failed and was skipped" warnings on a healthy save (if any appear, send the log — they name the category and vehicle).
+36. **0.6.3 — digit keys vs gears:** with the panel open in live mode, shift with the number keys (if the game binds ShiftInto1..8 to them): note whether the panel tab also switches.
 
 ## 11. Translation (ApocaLanguage)
 
