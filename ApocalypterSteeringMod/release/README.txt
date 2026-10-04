@@ -1,4 +1,4 @@
-Apocalypter Vehicle Tuning 0.4.0-alpha
+Apocalypter Vehicle Tuning 0.5.0-alpha
 ======================================
 
 An in-game tuning panel for every vehicle in Apocalypter: steering,
@@ -24,7 +24,7 @@ That's it. Settings live in:
    Apocalypter\BepInEx\config\dev.apocalypter.tractionsteering.cfg
 
 
-UPDATING FROM 0.2.0 / 0.3.0
+UPDATING FROM 0.2.0 / 0.3.0 / 0.4.0
 ---------------------------
 
 Just replace the DLL. Your settings carry over and convert
