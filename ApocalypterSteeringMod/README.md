@@ -1,11 +1,11 @@
-# Apocalypter Vehicle Tuning — Audit Bundle (v0.4.0)
+# Apocalypter Vehicle Tuning — Audit Bundle (v0.5.0)
 
 A BepInEx mod for **Apocalypter** (SawyerK Games, Unity 2020.3.49, BepInEx 5.4.23.5 + Harmony 2) that adds a full vehicle-tuning panel: steering, suspension, aero, brakes, tire grip, drivetrain and stability assists (ABS/TCS), all applied live to every vehicle in the game.
 
 This bundle is assembled so a third-party AI (or human) can audit and rework the mod **without terminal access**. It contains:
 
 - `plugin/` — the complete mod source (no build artifacts; build with `dotnet build -c Release`, see §6)
-- `verify/` — the self-contained test harness: Unity/NWH compile stubs, a 131-test suite (125 logic + 6 steering-prefix), `run.sh` (bash, needs a .NET SDK 8+), **plus `verify/refs/` with the BepInEx 5 core DLLs it needs**
+- `verify/` — the self-contained test harness: Unity/NWH compile stubs, a 238-test suite (220 logic + 18 steering-prefix), `run.sh` (bash, needs a .NET SDK 8+), **plus `verify/refs/` with the BepInEx 5 core DLLs it needs**
 - `gamecode/` — the relevant portions of the game's decompiled assemblies (ILSpy output): every game type the mod touches
 - `docs/plan.md` — the approved v3.2 implementation plan incl. exploration findings; `docs/decomSource.ps1` — the script that produced the decompiled source
 
@@ -103,6 +103,51 @@ Audit of 0.1.0-alpha against `gamecode/` and §2. Every fix below has a regressi
 
 **Bug fixed before release (playtest)**: the curve-editor graph rect used a zero-height anchor band with a centred pivot, which inverts the rect in Unity — the graph spilled over the rows below it, rendering "oversized" and swallowing their clicks (sliders looked unchangeable). The graph now uses full-area anchors with insets (CurveEditor.cs); its raycast area is exactly the graph.
 
+## Changes in 0.5.0-alpha
+
+Audit of 0.4.0 against `gamecode/` and §2, with the playtest note on the curve editor checked first. Nine bugs fixed; nothing else reworked. Every fix has a regression test (`verify/`, section "0.5.0 regressions" plus 4 new prefix checks). **Negative control:** the new tests run against the untouched 0.4.0 plugin fail 14 logic checks (13 new + the one updated aero assertion) and 2 prefix checks; the other 16 new checks exercise new public API (`EditableCurve.SameAs`, the curve-editor layout constants and routing helpers) and cannot compile against 0.4.0. Suite: 238 tests (220 logic + 18 prefix), all passing.
+
+**Not changed** (all §2 facts preserved): the hidden-runner survival architecture, the InputBlocker recipe, one Graphic per GameObject, the mouse-only panel, no `ES3.Save`, no `vc.input.*` writes, BepInEx config as the only persistence, the GUID, the steering prefix's target, allocation-free body and every guard for flat-return presets.
+
+### Bugs fixed
+
+**UI — curve editor (the playtest report)**
+1. **The 0.4.0 one-line fix made the graph fill the whole row, so the rest of the row ended up underneath it.** Title, hint and readout were still anchored to the row's top and bottom halves, and the per-graph **Reset** button to its vertical centre: all under the opaque graph, which is a later sibling and a raycast target. The labels were invisible, Reset could not be clicked, and clicking where Reset should be added a curve point. Combined with the long wrapped hints, this matches the reported "oversized rows, values can't be changed". The row is now a header band (title + readout + Reset on one line, the hint wrapped below it) above the graph. The graph keeps the 0.4.0 full-area anchors with insets, now starting below the header (row 300 px, graph 190 px). The bands are public constants checked by the harness.
+2. **The graph swallowed list scrolling.** uGUI sends a drag to the first `IDragHandler` up the hierarchy, which is the graph itself, so 0.4.0's "don't `Use()` the event" never reached the `ScrollRect`. Dragging over the graph's empty area did nothing. Drags that don't start on a handle are now forwarded to the parent `ScrollRect` (`OnBeginDrag/OnDrag/OnEndDrag`).
+3. **Releasing a drag added a point.** uGUI still delivers `OnPointerClick` after a drag when the press and drag handler are the same object, with `eventData.dragging` still true. A scroll gesture over the graph therefore ended with a new point where the mouse was released. Clicks during or after a drag are ignored now.
+4. **The graph was editable on a disabled tab.** `CanvasGroup.interactable` only gates `Selectable`s, never a custom Graphic's handlers. With Steering OFF (or Vanilla), clicking a graph forked the active preset into "Custom (…)" behind the dimmed UI. The editor now takes a `canEdit` predicate (`Steering ON && !Vanilla`). While it's false, drags scroll the list and clicks do nothing.
+
+Routing decisions are pure static functions (`CurveEditor.RouteDrag/RouteClick`) so the harness can test them without a UI runtime. *(The mouse-only rule is unchanged: no navigation, no keyboard handling was added.)*
+
+**Steering prefix (hold/return model from 0.4.0)**
+5. **Counter-steering across center ran at the return rate.** "Unwinding" was `|target| < |angle|`, which is also true when the driver steers to the *other* side with less input than the current angle. With a hold curve (Euro Truck, 0 at rest), the wheels froze at rest until the opposite input exceeded the held angle. That is a long dead zone on a gamepad, and a hesitation while a keyboard ramps. At speed, counter-steer through center ran at 40–70%. The reduced rate now applies only when the target is on the same side as the wheel (or zero). Crossing center is driver input and uses the full rate. At return ×1 (every non-hold preset) the rate is unchanged.
+6. **A hold curve ignored the vehicle's `returnToCenter = false`.** Vanilla's guard (deadzone input + `!returnToCenter` → keep the angle) ran only on the flat-return path, so on such a vehicle Euro Truck's return ramp straightened wheels the vehicle was built to hold. The guard now runs before the hold/flat split. On the flat path the order of the two guards is irrelevant (both return `true`), so flat-return behaviour is identical. README §7.1 ("prefix honors `returnToCenter`") holds again.
+
+**Persistence**
+7. **A dragged curve did not survive save/reload.** `TryMovePoint` clamped x *onto* a neighbour's x, a vertical step that `TryParse` deduplicates on load, so the reloaded curve lost a point and changed shape. A moved point now keeps a 2 × `MinXGap` (0.0002) gap to its neighbours. Neighbours already closer than that (a hand-edited file) keep x and move only y. This is the same rule that already makes adding a point onto an existing x fail.
+
+**Aero (behaviour change)**
+8. **Vehicles without aero got drag from "stock-drag" presets.** An onboarded module (the vehicle shipped none) used `default Cd × DragScale` whenever *any* factor differed from 1. Street ("less downforce, stock drag", drag ×1.0) gave every aero-less vehicle a full 0.35 Cd, Off-road ×1.05 gave 0.37, and a Custom drag *below* 1 added drag. The onboarded module can't simulate downforce (no point synthesis), so only drag matters. Its stock drag is none, so the factor now applies to the excess: `Cd = default × (DragScale − 1)`, onboarded and active only when that is positive, parked otherwise. This is continuous at ×1.0 and monotone. **Behaviour change:** on aero-less vehicles Race (×1.35) now adds 0.12 Cd instead of 0.47, and Sport 0.035 instead of 0.385. Vehicles that ship an `AerodynamicsModule` are unaffected.
+
+**Restore completeness**
+9. **Stale baselines.** Stock values were captured once, when the vehicle was first seen. If the game later changed a field while its category was OFF (the harness simulates FSM writes such as `maxPower`), switching the category ON scaled the stale value, and switching it OFF wrote the stale value back over the game's change. 0.2.0 fix 16 only covered categories that were never enabled. Now a category that goes from not-applied to applied re-reads its own fields on every tracked vehicle first (`VehicleTuner.RefreshBaselines`). This is safe because the fields then belong to the game, and categories never share a field. Nothing is re-read while a category is applied, so no compounding (tested). Onboarded aero modules keep their own inert baseline. Refreshing runs on a toggle, not per tick.
+
+### Allocation
+- The curve editor compared curves via two `Serialize()` strings on every panel refresh (1 Hz while open), on every refresher pass and on every mesh rebuild, i.e. every frame while dragging. `EditableCurve.SameAs` replaces it and allocates nothing. Hot paths (`Prefix`, apply/restore, ABS/TCS bodies) are unchanged and still allocation-free. The new `RefreshBaselines` allocates only for the drivetrain/aero re-capture, once per toggle.
+
+### Config keys and migration
+- **No new, renamed or removed keys** (GUID unchanged). A 0.4.0 config file loads as is, and so do 0.3.x/3.1 files (all earlier migrations unchanged and still covered).
+- Curve strings written by 0.4.0 that already contain a near-coincident pair (gap < 0.0001) were already deduplicated on load by 0.4.0, so nothing changes for them. From now on the editor cannot create such pairs.
+
+### Verification harness
+- Stubs (real Unity 2020.3 signatures): `Component.GetComponentInParent<T>()`, and `ScrollRect` now implements `IBeginDragHandler/IDragHandler/IEndDragHandler` with the public virtual handlers.
+- Logic tests: curve round-trip + `SameAs`, aero onboarding drag, baseline refresh (power/spring/brake torque), curve-editor header bands, drag/click routing; one 0.4.0 assertion updated to the fix-8 semantics (`onboarded module Cd = default × excess drag`).
+- Prefix tests: opposite input at rest with a hold curve, same-side ease-off still holds, `returnToCenter = false` with a hold curve, flat-1 crossing unchanged.
+- `run.sh` unchanged. Note that `run.sh` stops at the first failing stage (`set -e`), so the prefix suite only runs when the logic suite passes.
+
+### Audited and left alone
+Checked and not changed: brake normalisation (every NWH brake path goes through `AddBrakeTorque × coefficient`, verified against `Brakes.cs`/`WheelComponent.cs`), diff classification and the delegate-on-change rule, shift-point caps, ABS/TCS sign conventions and the handbrake guard, assists registration flags, every config migration (presence detection before Bind, one-time folds, Truck-sim rewrite, `_syncing` guard), InputBlocker/timeScale restore, the one-frame-late unblock, EventSystem find-or-create, menu-button injection. The curve readouts ("63 km/h · 40%", "N points") stay concatenated as documented in `docs/strings.md` §6.
+
 ## 1. What the mod does
 
 Seven tuning categories, each with: a master ON/OFF switch (all default OFF — every category is opt-in), a row of presets, and labelled sliders with live values, "changed" highlight, per-slider Reset and plain-language hints. Moving any slider while a built-in preset is active copies that preset into a "Custom (Base)" slot (BasedOn tracked) so presets are never mutated. Everything applies live; settings persist in a BepInEx config file; panel opens via F7 or a "Vehicle Tuning" button cloned into the game's menus.
@@ -117,7 +162,7 @@ Seven tuning categories, each with: a master ON/OFF switch (all default OFF — 
 | Drivetrain | power/revLimiter/loss/boost/finalDrive/shift-RPMs (guarded)/shiftDuration ×, diff modes (Stock/Open/Locked/LSD) per axle resolved from the wheels each diff drives, centre-diff bias ×, diff stiffness × | Powertrain fields |
 | Assists | ABS + TCS via NWH's public delegate hooks — no modules, no vehicle fields | `brakes.brakeTorqueModifiers` / `engine.powerModifiers` |
 
-All factors are **multipliers on each vehicle's captured stock values** (effective = stock × factor). Stock baselines are captured once per vehicle and restored exactly when a category is switched off. The suspension tab additionally shows computed **absolute readouts** (mean stock baseline × factor, e.g. "×1.40 / 42 000 N").
+All factors are **multipliers on each vehicle's captured stock values** (effective = stock × factor). Stock baselines are captured when a vehicle is first seen, re-read whenever a category is switched on (while it was off the fields were the game's), and restored exactly when a category is switched off. The suspension tab additionally shows computed **absolute readouts** (mean stock baseline × factor, e.g. "×1.40 / 42 000 N").
 
 ## 2. Load-bearing game facts (verified against decompiled source + game data)
 
@@ -138,7 +183,7 @@ These drove several unusual design decisions; treat them as load-bearing when re
 
 ```
 Plugin.cs                       Slim entry: config load → ES3 read-only import → Harmony patches (steering + InputBlocker) → hidden runner GO; sceneLoaded → recreate runner.
-PluginInfo.cs                   GUID "dev.apocalypter.tractionsteering" (unchanged for config continuity), name, version "0.4.0" (numeric-only: BepInEx 5 skips "-alpha" tags).
+PluginInfo.cs                   GUID "dev.apocalypter.tractionsteering" (unchanged for config continuity), name, version "0.5.0" (numeric-only: BepInEx 5 skips "-alpha" tags).
 Settings/PresetBook.cs          Generic preset semantics shared by all 7 categories: ITunablePreset + PresetBook<T> (Identity/Custom/Defaults/NotFound, SetByName with legacy-name mapping, BeginEdit copy-to-Custom with BasedOn, Reference for per-slider Reset, ResetCustom).
 Settings/EditableCurve.cs       Piecewise-linear curve over [0,1]², 2-8 points: allocation-free Evaluate (prefix hot path), add/move/remove, Clone, "x:y;x:y" (de)serialization with validation.
 Settings/SteeringPreset.cs      6 presets (Vanilla/GTA/Euro Truck/Sim-Race/Drift/Custom) + Defaults; UseVehicleCurve + LockCurve + ReturnCurve; v2.0.0-behavior defaults; Custom mutated by UI; RestoreBaseCurve() re-attaches the BasedOn preset's curves (config-parse fallback).
@@ -154,14 +199,14 @@ Settings/Limits.cs              Single source of truth for every slider/config r
 Game/GameSettingsReader.cs      Read-only ES3 import of steeringspeed/smoothinput/normalizeinput; re-read on panel open.
 Persistence/ModConfig.cs        BepInEx ConfigFile binding for all categories; AcceptableValueRange clamping; SettingChanged → runtime push + event; one write per save; v3.1→v3.2, v0.3.0 and v0.4.0 migrations (see §5); [General] Apocasetter opt-in key.
 Patching/TractionEdgeSteeringPatch.cs  The steering prefix (allocation-free; target/guards unchanged since v3.0; Vanilla preset = early return true).
-Runtime/VehicleTuner.cs         The multi-system tuner (replaces SuspensionApplier): 2 s unscaled scans (FindObjectsOfType), per-vehicle baseline capture (one pass, per-system null guards, mean-wheel-Z axle detection, TyreWear flag), per-category apply/restore with applied-flags, OnDestroy → RestoreAll, MeanBaseline readout API, TrackedVehicles.
-Runtime/VehicleTuner.Systems.cs Suspension/Grip/Brakes/Drivetrain/Aero apply+restore. Aero: find module in vc.moduleManager.Components; onboard when absent AND the preset differs from Stock; re-enable after restore; no downforce-point synthesis (Stock = exactly as shipped).
+Runtime/VehicleTuner.cs         The multi-system tuner (replaces SuspensionApplier): 2 s unscaled scans (FindObjectsOfType), per-vehicle baseline capture (one pass, per-system null guards, mean-wheel-Z axle detection, TyreWear flag), per-category baseline refresh on OFF→ON (0.5.0), per-category apply/restore with applied-flags, OnDestroy → RestoreAll, MeanBaseline readout API, TrackedVehicles.
+Runtime/VehicleTuner.Systems.cs Suspension/Grip/Brakes/Drivetrain/Aero apply+restore. Aero: find module in vc.moduleManager.Components; onboard when absent AND the preset asks for more drag than stock (an onboarded module adds Cd × (DragScale − 1)); re-enable after restore; no downforce-point synthesis (Stock = exactly as shipped).
 Runtime/VehicleTuner.Assists.cs ABS/TCS delegate factory (allocated once per vehicle, reads live settings each tick) + registration/removal with flags.
 Runtime/InputBlocker.cs        PlayMaker input suppression + timeScale freeze (see §2.8).
 Runtime/SettingsPanelManager.cs On the hidden runner: hotkey/Esc polling (dual input), menu-button injection (§2.7), panel lifecycle, per-frame cursor freeing, EventSystem find-or-create, auto-save on close.
 Runtime/SettingsPanel.cs        The 7-tab panel (anchored layout, one Graphic per GO, mouse-only widgets, single refresher list for all tabs, two-click per-tab reset-all, dim-click close, absolute readouts on suspension sliders).
 Runtime/UiStrings.cs            Every dynamic panel string as a {0} template + value formatters, so ApocaLanguage can translate them (docs/strings.md).
-Runtime/CurveEditor.cs          The visual curve editor row: MaskableGraphic graph (grid + curve + mesh-drawn handles), click-add / drag-move / double-click-remove, ScrollRect-friendly drag handling.
+Runtime/CurveEditor.cs          The visual curve editor row: header band (title, readout, Reset, hint) above a MaskableGraphic graph (grid + curve + mesh-drawn handles), click-add / drag-move / double-click-remove, non-handle drags forwarded to the list's ScrollRect, inert while its tab is OFF/Vanilla.
 Runtime/UiKit.cs                Tiny uGUI widget kit (anchored layout, built-in Arial font with fallbacks, HitArea sliders, scroll view with auto-hide scrollbar).
 icon.png                        Mod icon for the Apocasetter Mods window (generated by tools/make_icon.ps1; installs beside the DLL as ApocalypterSteeringMod.png).
 tools/make_icon.ps1             Reproducible icon generator (System.Drawing); icon.png may be hand-replaced.
@@ -190,7 +235,7 @@ Sections: `Steering` (Enabled **false** by default, Preset, MatchGameSteeringSpe
 
 ```
 cd plugin && dotnet build -c Release          # real DLL, references game DLLs at D:\SteamLibrary\...\Apocalypter_Data\Managed (adjust paths in the csproj)
-cd verify && bash run.sh                      # stubs compile + 205 tests (191 logic + 14 prefix); .NET SDK 8+; refs/ already populated
+cd verify && bash run.sh                      # stubs compile + 238 tests (220 logic + 18 prefix); .NET SDK 8+; refs/ already populated
 ```
 Install: copy the DLL to `BepInEx\plugins\` and `icon.png` next to it as `ApocalypterSteeringMod.png` (the Apocasetter Mods-window icon). Rebuild the install zip with both files at the zip root. **Never run it alongside an old `SteeringFix.dll`** (earlier assembly name) — both prefixes would double-process steering. The GUID is deliberately unchanged, so the existing config file migrates in place.
 
@@ -198,7 +243,7 @@ Install: copy the DLL to `BepInEx\plugins\` and `icon.png` next to it as `Apocal
 
 The Apocasetter updater installs mods from its GitHub index (`DeonUrist/Apocasetter-Index`); its contract for a loose-DLL mod like this one:
 
-- a public GitHub repo with a release whose tag equals the `[BepInPlugin]` version (`0.4.0`),
+- a public GitHub repo with a release whose tag equals the `[BepInPlugin]` version (`0.5.0`),
 - a release `.zip` that unpacks into `BepInEx\plugins` — i.e. `ApocalypterSteeringMod.dll` + `ApocalypterSteeringMod.png` at the zip root (the layout of `BepInEx\plugins\ApocalypterSteeringMod.zip`),
 - the `[General] Apocasetter = true` config entry (bound on load, written on first run),
 - one-time submission via the index repo's "Submit a mod" issue template.
@@ -225,7 +270,7 @@ powershell Compress-Archive README.md,PROMPT.md,plugin,verify,gamecode,docs ..\A
 
 - Suspension/other tuning applies globally to all vehicles (opt-in per category; stock restored on disable). Factors preserve each vehicle's own character.
 - The panel pauses the game while open (blocker recipe). Widgets are mouse-only (user decision — no keyboard navigation).
-- Vehicles without an aero module get drag tuning only (no downforce-point synthesis); onboarded modules stay in `Components` (disabled and inert) after restore and are reused. A shipped module's own `simulateDrag`/`simulateDownforce` switches are never changed.
+- Vehicles without an aero module get extra drag only (0.5.0: default-module Cd × (DragScale − 1), so nothing at ×1.0 or below; no downforce-point synthesis); onboarded modules stay in `Components` (disabled and inert) after restore and are reused. A shipped module's own `simulateDrag`/`simulateDownforce` switches are never changed.
 - The mod's TCS keeps a low-speed cutoff (`TcsCutoffSpeed`, default 2 m/s). NWH's `TCSModule` declares `lowerSpeedThreshold` but never reads it, so the stock module also cuts during a standing-start; the mod's launch behaviour therefore differs below the cutoff (set it to 0 for NWH-like launches). Left as is in 0.2.0 — it is a feel decision that needs in-game testing.
 - Digressive damper valving params are deliberately untouched. `brakeOffThrottleIntensity` is deliberately untouched.
 - The engine sound's max RPM (NWH2_RES2) is read once at Start — rev-limiter slider changes won't re-pitch existing sounds (cosmetic). Electric engines ignore the boost slider.
@@ -243,7 +288,7 @@ powershell Compress-Archive README.md,PROMPT.md,plugin,verify,gamecode,docs ..\A
 
 ## 10. In-game test checklist (for the machine with the game)
 
-1. Log shows `Apocalypter Vehicle Tuning 0.4.0 loaded.` and no errors.
+1. Log shows `Apocalypter Vehicle Tuning 0.5.0 loaded.` and no errors.
 2. F7 (or the "Vehicle Tuning" button in the pause menu) opens the panel centred; cursor free; game frozen. Esc/F7/X/Done/click-outside close it.
 3. Each of the 7 tabs: master ON applies the preset, sliders live-edit (preset → "Custom (Base)"), Reset returns to the preset origin, OFF restores stock feel.
 4. Steering tab: Vanilla must feel exactly unmodded; Custom defaults ≈ the old v2.0.0 feel; traction clamp + opposite lock behave as before.
@@ -259,6 +304,10 @@ powershell Compress-Archive README.md,PROMPT.md,plugin,verify,gamecode,docs ..\A
 14. **0.4.0 — hold-then-straighten (Euro Truck):** with the wheels turned, stop and release the key — the wheels stay turned. Drive off: the truck follows the held angle, then straightens out as speed builds. At standstill, steering input still winds the wheels to lock at the normal rate. True reverse behaves like vanilla.
 15. **0.4.0 — flat-1 regression:** on any non-Euro-Truck preset (or a Custom with a flat return line), low-speed and parking behavior matches 0.3.0 exactly (vanilla below 1.5 m/s).
 16. **0.4.0 — migration:** with a 0.3.0 cfg containing `SpeedCurveScale`/`CenterReturnScale`, after launch the cfg has `UseVehicleCurve`, `LockCurve = …`, `ReturnCurve = …` and neither legacy key; the panel's graphs show the folded values; a reload does not change them again.
+17. **0.5.0 — curve rows:** each graph row shows its title, hint and (when changed) the point count ABOVE the graph; the per-graph Reset button is visible top-right and works (after editing a curve it returns the preset curve). Dragging over the empty graph area scrolls the list; releasing that drag adds no point. With Steering OFF, or Vanilla selected, clicking/dragging a graph changes nothing (the preset stays selected, no "Custom (…)").
+18. **0.5.0 — counter-steer at rest (Euro Truck):** stop with the wheels turned right, release, then tap/hold LEFT lightly (gamepad: a small stick deflection): the wheels move left immediately instead of staying frozen until the input exceeds the held angle. Releasing still holds.
+19. **0.5.0 — aero on a vehicle without aero:** Aero ON + Street (or a Custom with drag ×1.0 or below) does not lower that vehicle's top speed; Race lowers it slightly (about a quarter of 0.4.0's Race drag).
+20. **0.5.0 — save/reload a dragged curve:** drag a curve point hard against its neighbour, close the panel, restart: the curve has the same number of points and the same shape.
 
 ## 11. Translation (ApocaLanguage)
 

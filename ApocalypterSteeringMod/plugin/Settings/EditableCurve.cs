@@ -137,7 +137,11 @@ namespace ApocalypterSteeringMod.Settings
 
         /// <summary>
         /// Moves a point. y is clamped to [0,1]; x is clamped between the
-        /// neighbours' x so point order can never break.
+        /// neighbours' x so point order can never break, keeping a gap of
+        /// 2 x MinXGap to each neighbour. Without the gap a point dragged onto its
+        /// neighbour's x formed a vertical step that TryParse deduplicates on the
+        /// next load, so the curve the user saved was not the curve that came back.
+        /// When the neighbours are already closer than that (a parsed file), x stays.
         /// </summary>
         public bool TryMovePoint(int index, float x, float y)
         {
@@ -145,10 +149,35 @@ namespace ApocalypterSteeringMod.Settings
             {
                 return false;
             }
-            float minX = index > 0 ? _x[index - 1] : 0f;
-            float maxX = index < _x.Length - 1 ? _x[index + 1] : 1f;
-            _x[index] = Clamp(x, minX, maxX);
+            const float gap = 2f * MinXGap;
+            float minX = index > 0 ? _x[index - 1] + gap : 0f;
+            float maxX = index < _x.Length - 1 ? _x[index + 1] - gap : 1f;
+            if (minX <= maxX)
+            {
+                _x[index] = Clamp(x, minX, maxX);
+            }
             _y[index] = Clamp01(y);
+            return true;
+        }
+
+        /// <summary>
+        /// Same points within eps. Allocation-free replacement for comparing
+        /// Serialize() strings (the panel compares on every refresh and every
+        /// mesh rebuild while a point is dragged).
+        /// </summary>
+        public bool SameAs(EditableCurve other, float eps = 1e-5f)
+        {
+            if (other == null || other._x.Length != _x.Length)
+            {
+                return false;
+            }
+            for (int i = 0; i < _x.Length; i++)
+            {
+                if (Math.Abs(_x[i] - other._x[i]) > eps || Math.Abs(_y[i] - other._y[i]) > eps)
+                {
+                    return false;
+                }
+            }
             return true;
         }
 

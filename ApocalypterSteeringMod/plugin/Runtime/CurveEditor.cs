@@ -10,8 +10,8 @@ namespace ApocalypterSteeringMod.Runtime
     /// A visual, mouse-only curve editor row for the tuning panel: a graph of a
     /// piecewise-linear EditableCurve over x = speed (0..1 = 0..180 km/h) and
     /// y = amount. Click empty space to add a point, drag a point to move it,
-    /// double-click a point to remove it. Dragging only consumes the event when
-    /// it starts on a point, so the surrounding ScrollRect still scrolls.
+    /// double-click a point to remove it. A drag that does not start on a point
+    /// is forwarded to the surrounding ScrollRect, so the list still scrolls.
     /// The graph is a single MaskableGraphic (one Graphic per GameObject rule);
     /// all display strings come from the panel (translatable statics).
     /// </summary>
@@ -19,23 +19,46 @@ namespace ApocalypterSteeringMod.Runtime
     {
         private const float PickRadius = 14f;
         private const float Pad = 10f;
-        private const float RowHeight = 268f;
         private const int SegmentsPerCircle = 12;
+
+        // Row layout, in pixels from the row's top edge. The header (title, readout,
+        // Reset, hint) is a band ABOVE the graph and never overlaps it: the graph is a
+        // later sibling and an opaque raycast target, so anything under it is invisible
+        // and unclickable. 0.4.0 placed the header in the row's vertical halves while the
+        // graph filled the row, which hid the title/hint/readout and made the per-graph
+        // Reset button unreachable (a click there added a curve point instead).
+        // Public so the harness can check the bands (no layout engine in the stubs).
+        public const float RowHeight = 300f;
+        public const float Side = 16f;
+        public const float TitleTop = 8f, TitleHeight = 24f;
+        public const float ResetWidth = 72f, ResetHeight = 28f, ResetRight = 14f;
+        public const float ReadoutWidth = 150f, ReadoutRight = ResetRight + ResetWidth + 10f;
+        public const float HintTop = 38f, HintHeight = 56f;   // 3 wrapped lines at 13 px (the longest English hint)
+        public const float GraphTop = 100f, GraphBottom = 10f;
 
         private CurveGraphic _graphic;
         private Button _reset;
         private Text _readout;
         private Func<EditableCurve> _get;
         private Func<EditableCurve> _reference;
+        private Func<bool> _canEdit;
 
         public GameObject Row { get; private set; }
 
+        /// <param name="canEdit">
+        /// False while the surrounding group is disabled (category OFF, Vanilla). A
+        /// CanvasGroup's interactable flag only gates Selectables, never a custom Graphic's
+        /// event handlers, so the graph has to ask; 0.4.0's graph stayed editable on a dimmed
+        /// tab and silently forked the active preset into Custom.
+        /// </param>
         public static CurveEditor Create(RectTransform content, string title, string hint,
-            Func<EditableCurve> get, Func<EditableCurve> reference, Func<Action<EditableCurve>, EditableCurve> edit)
+            Func<EditableCurve> get, Func<EditableCurve> reference, Func<Action<EditableCurve>, EditableCurve> edit,
+            Func<bool> canEdit)
         {
             var editor = new CurveEditor();
             editor._get = get;
             editor._reference = reference;
+            editor._canEdit = canEdit;
 
             RectTransform row = UiKit.Make("Curve_" + title, content);
             var le = row.gameObject.AddComponent<LayoutElement>();
@@ -44,11 +67,10 @@ namespace ApocalypterSteeringMod.Runtime
             UiKit.Paint(row, UiKit.RowNormal, false);
             editor.Row = row.gameObject;
 
-            RectTransform t = UiKit.Place(UiKit.Make("Title", row), 0f, 0.5f, 1f, 1f, 16f, 0f, 180f, 6f);
+            RectTransform t = UiKit.Top(UiKit.Make("Title", row), TitleTop, TitleHeight, Side, ReadoutRight + ReadoutWidth);
             UiKit.Label(t, title, 17, UiKit.TextMain, TextAnchor.MiddleLeft, FontStyle.Bold);
-            RectTransform h = UiKit.Place(UiKit.Make("Hint", row), 0f, 0f, 1f, 0.5f, 16f, 6f, 180f, 0f);
-            UiKit.Label(h, hint, 13, UiKit.TextMuted, TextAnchor.MiddleLeft, FontStyle.Normal, true);
-            RectTransform ro = UiKit.Place(UiKit.Make("Readout", row), 0f, 0f, 1f, 0.5f, 16f, 6f, 88f, 0f);
+
+            RectTransform ro = TopRightBox(UiKit.Make("Readout", row), ReadoutWidth, TitleHeight, ReadoutRight, TitleTop);
             editor._readout = UiKit.Label(ro, "", 13, UiKit.TextMuted, TextAnchor.MiddleRight);
 
             Button reset = UiKit.MakeButton(row, "Reset", "Reset", UiKit.ChipBase, 14, () =>
@@ -60,14 +82,18 @@ namespace ApocalypterSteeringMod.Runtime
                     editor.Refresh();
                 }
             }, out Text resetLabel);
-            UiKit.RightBox((RectTransform)reset.transform, 72f, 32f, 14f);
+            TopRightBox((RectTransform)reset.transform, ResetWidth, ResetHeight, ResetRight, TitleTop);
             editor._reset = reset;
 
+            RectTransform h = UiKit.Top(UiKit.Make("Hint", row), HintTop, HintHeight, Side, Side);
+            UiKit.Label(h, hint, 13, UiKit.TextMuted, TextAnchor.UpperLeft, FontStyle.Normal, true);
+
             RectTransform graph = UiKit.Make("Graph", row);
-            // Full-area anchors (NOT a zero-height band): UiKit.Place keeps a centred
-            // pivot, which inverts the rect on degenerate bands — the graph would spill
-            // over neighbouring rows and eat their clicks.
-            UiKit.Place(graph, 0f, 0f, 1f, 1f, 16f, 10f, 16f, 46f);
+            // Full-area anchors with insets (NOT a zero-height band): UiKit.Place keeps a
+            // centred pivot, which inverts the rect on degenerate bands — the graph would
+            // spill over neighbouring rows and eat their clicks. The top inset leaves the
+            // header band free.
+            UiKit.Place(graph, 0f, 0f, 1f, 1f, Side, GraphBottom, Side, GraphTop);
             var graphic = graph.gameObject.AddComponent<CurveGraphic>();
             graphic.raycastTarget = true;
             graphic.Owner = editor;
@@ -76,6 +102,79 @@ namespace ApocalypterSteeringMod.Runtime
 
             editor.Refresh();
             return editor;
+        }
+
+        /// <summary>Fixed-size box hanging from the top-right corner.</summary>
+        private static RectTransform TopRightBox(RectTransform rt, float width, float height, float fromRight, float fromTop)
+        {
+            rt.anchorMin = rt.anchorMax = new Vector2(1f, 1f);
+            rt.pivot = new Vector2(1f, 1f);
+            rt.sizeDelta = new Vector2(width, height);
+            rt.anchoredPosition = new Vector2(-fromRight, -fromTop);
+            return rt;
+        }
+
+        internal bool CanEdit()
+        {
+            return _canEdit == null || _canEdit();
+        }
+
+        internal bool IsChanged(EditableCurve cur)
+        {
+            EditableCurve r = _reference();
+            return cur != null && r != null && !cur.SameAs(r);
+        }
+
+        // ------------------------------------------------------------- input routing
+        // Pure decisions, public so the harness can check them without a UI runtime.
+
+        public enum DragRoute
+        {
+            None,          // nothing to do (no handle, no scroll view)
+            MovePoint,     // the drag started on a handle of an editable curve
+            ScrollList     // anything else scrolls the surrounding list
+        }
+
+        /// <summary>
+        /// A drag over the graph moves a point only when it starts on a handle of an
+        /// editable curve. Everything else is handed to the parent ScrollRect: uGUI sends
+        /// the drag to the first IDragHandler up the hierarchy, which is the graph itself,
+        /// so 0.4.0's "don't Use() the event" never reached the list and the list could not
+        /// be scrolled by dragging over a graph.
+        /// </summary>
+        public static DragRoute RouteDrag(bool canEdit, int handle, bool hasScroll)
+        {
+            if (canEdit && handle >= 0)
+            {
+                return DragRoute.MovePoint;
+            }
+            return hasScroll ? DragRoute.ScrollList : DragRoute.None;
+        }
+
+        public enum ClickAction
+        {
+            None,
+            AddPoint,
+            RemovePoint
+        }
+
+        /// <summary>
+        /// uGUI still delivers OnPointerClick after a drag when the press and drag handler
+        /// are the same object (eventData.dragging is still true at that point), so a drag
+        /// must never turn into a click: in 0.4.0, scrolling the list by dragging over the
+        /// graph added a point where the mouse was released.
+        /// </summary>
+        public static ClickAction RouteClick(bool canEdit, bool dragging, bool leftButton, int clickCount, int handle)
+        {
+            if (!canEdit || dragging || !leftButton)
+            {
+                return ClickAction.None;
+            }
+            if (clickCount >= 2)
+            {
+                return handle >= 0 ? ClickAction.RemovePoint : ClickAction.None;
+            }
+            return handle < 0 ? ClickAction.AddPoint : ClickAction.None;
         }
 
         /// <summary>Called from the panel's refresher list on every control change.</summary>
@@ -87,7 +186,7 @@ namespace ApocalypterSteeringMod.Runtime
             {
                 return;
             }
-            bool changed = cur.Serialize() != r.Serialize();
+            bool changed = !cur.SameAs(r);
             if (_reset != null)
             {
                 _reset.interactable = changed;
@@ -118,6 +217,8 @@ namespace ApocalypterSteeringMod.Runtime
             public CurveEditor Owner;
             public Func<Action<EditableCurve>, EditableCurve> Edit;
             private int _dragged = -1;
+            private bool _scrolling;     // this drag is being forwarded to the list
+            private ScrollRect _scroll;  // resolved lazily (the row is parented after creation)
 
             protected override void OnPopulateMesh(VertexHelper vh)
             {
@@ -152,8 +253,7 @@ namespace ApocalypterSteeringMod.Runtime
                     return;
                 }
 
-                bool changed = Owner._reference() != null && curve.Serialize() != Owner._reference().Serialize();
-                Color curveColor = changed ? UiKit.Accent : UiKit.HandleColor;
+                Color curveColor = Owner.IsChanged(curve) ? UiKit.Accent : UiKit.HandleColor;
                 float gw = w - 2f * Pad;
                 float gh = h - 2f * Pad;
 
@@ -270,18 +370,44 @@ namespace ApocalypterSteeringMod.Runtime
                 return best;
             }
 
+            private ScrollRect ParentScroll()
+            {
+                if (_scroll == null)
+                {
+                    _scroll = GetComponentInParent<ScrollRect>();
+                }
+                return _scroll;
+            }
+
             public void OnBeginDrag(PointerEventData e)
             {
-                _dragged = PickHandle(e);
-                if (_dragged < 0)
+                bool canEdit = Owner.CanEdit();
+                int handle = canEdit ? PickHandle(e) : -1;
+                _dragged = -1;
+                _scrolling = false;
+                switch (RouteDrag(canEdit, handle, ParentScroll() != null))
                 {
-                    return;   // do not consume: let the ScrollRect scroll
+                    case DragRoute.MovePoint:
+                        _dragged = handle;
+                        e.Use();
+                        break;
+                    case DragRoute.ScrollList:
+                        _scrolling = true;
+                        _scroll.OnBeginDrag(e);
+                        break;
                 }
-                e.Use();
             }
 
             public void OnDrag(PointerEventData e)
             {
+                if (_scrolling)
+                {
+                    if (_scroll != null)
+                    {
+                        _scroll.OnDrag(e);
+                    }
+                    return;
+                }
                 if (_dragged < 0)
                 {
                     return;
@@ -305,6 +431,15 @@ namespace ApocalypterSteeringMod.Runtime
 
             public void OnEndDrag(PointerEventData e)
             {
+                if (_scrolling)
+                {
+                    _scrolling = false;
+                    if (_scroll != null)
+                    {
+                        _scroll.OnEndDrag(e);
+                    }
+                    return;
+                }
                 if (_dragged < 0)
                 {
                     return;
@@ -315,7 +450,11 @@ namespace ApocalypterSteeringMod.Runtime
 
             public void OnPointerClick(PointerEventData e)
             {
-                if (e.button != PointerEventData.InputButton.Left)
+                bool canEdit = Owner.CanEdit();
+                int handle = canEdit ? PickHandle(e) : -1;
+                ClickAction action = RouteClick(canEdit, e.dragging,
+                    e.button == PointerEventData.InputButton.Left, e.clickCount, handle);
+                if (action == ClickAction.None)
                 {
                     return;
                 }
@@ -324,20 +463,15 @@ namespace ApocalypterSteeringMod.Runtime
                 {
                     return;
                 }
-                if (e.clickCount >= 2)
+                if (action == ClickAction.RemovePoint)
                 {
-                    int i = PickHandle(e);
-                    if (i >= 0)
-                    {
-                        Edit(c => c.TryRemovePoint(i));
-                        Owner.Refresh();
-                    }
+                    Edit(c => c.TryRemovePoint(handle));
                 }
-                else if (PickHandle(e) < 0)
+                else
                 {
                     Edit(c => c.TryAddPoint(x, y));
-                    Owner.Refresh();
                 }
+                Owner.Refresh();
             }
         }
     }

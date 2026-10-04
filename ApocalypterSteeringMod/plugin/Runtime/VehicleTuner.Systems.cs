@@ -141,23 +141,32 @@ namespace ApocalypterSteeringMod.Runtime
             }
         }
 
-        private static bool IsIdentity(AeroPreset p)
+        /// <summary>
+        /// Drag factor for a vehicle that shipped WITHOUT aero (an onboarded module).
+        /// Its stock drag is none, so "x factor on stock" can only mean the excess:
+        /// default-module Cd x (DragScale - 1). Continuous at 1 (Stock, Street and any
+        /// drag x1.0 or below add nothing), and an onboarded module never simulates
+        /// downforce (no point synthesis), so downforce factors cannot onboard one.
+        /// 0.4.0 used Cd x DragScale whenever ANY factor differed from 1: Street
+        /// ("stock drag") gave every aero-less vehicle a full 0.35 Cd, and a drag
+        /// factor below 1 ADDED drag to them.
+        /// </summary>
+        internal static float OnboardedDragFactor(AeroPreset p)
         {
-            return Mathf.Abs(p.DownforceScale - 1f) < 1e-4f
-                && Mathf.Abs(p.DragScale - 1f) < 1e-4f
-                && Mathf.Abs(p.MaxDownforceSpeedScale - 1f) < 1e-4f;
+            float extra = p.DragScale - 1f;
+            return extra > 1e-4f ? extra : 0f;
         }
 
         private static void ApplyAero(VehicleRecord r, AeroPreset p)
         {
             AeroData d = r.Aero;
             AerodynamicsModule m = d.Module;
-            bool identity = IsIdentity(p);
+            float onboardedDrag = OnboardedDragFactor(p);
             if (m == null)
             {
-                // Onboard only when the preset actually changes something, so the
-                // Stock preset never adds a module to a vehicle that lacks one.
-                if (identity || r.Vc.moduleManager == null)
+                // Onboard only when there is extra drag to add, so no preset that
+                // leaves drag at or below stock ever adds a module to a vehicle.
+                if (onboardedDrag <= 0f || r.Vc.moduleManager == null)
                 {
                     return;
                 }
@@ -174,15 +183,17 @@ namespace ApocalypterSteeringMod.Runtime
                 d.Points = new DownforcePoint[0];
             }
 
+            float dragFactor = p.DragScale;
             if (d.Onboarded)
             {
-                // Back on an identity preset while enabled: the vehicle must behave as
+                // No extra drag requested while enabled: the vehicle must behave as
                 // shipped, i.e. without aero. Park the module exactly like a restore.
-                if (identity)
+                if (onboardedDrag <= 0f)
                 {
                     ParkOnboarded(d);
                     return;
                 }
+                dragFactor = onboardedDrag;
                 // IsActive, not state.isEnabled: onboarding can load isEnabled = true from
                 // the vehicle's state settings without initialising the module, and an
                 // uninitialised module never runs. VC_Enable initialises it.
@@ -202,8 +213,8 @@ namespace ApocalypterSteeringMod.Runtime
                 m.simulateDownforce = d.WasSimulateDownforce;
             }
 
-            m.frontalCd = Mathf.Clamp(d.FrontalCd * p.DragScale, 0f, 1f);
-            m.sideCd = Mathf.Clamp(d.SideCd * p.DragScale, 0f, 2f);
+            m.frontalCd = Mathf.Clamp(d.FrontalCd * dragFactor, 0f, 1f);
+            m.sideCd = Mathf.Clamp(d.SideCd * dragFactor, 0f, 2f);
             m.maxDownforceSpeed = d.MaxDownforceSpeed * p.MaxDownforceSpeedScale;
             List<DownforcePoint> points = m.downforcePoints;
             if (points != null)

@@ -57,16 +57,22 @@ namespace ApocalypterSteeringMod.Patching
             Vector3 localVel = vc.transform.InverseTransformDirection(rb.velocity);
             float forwardVel = localVel.z;
 
+            // Mirror vanilla's guard: with returnToCenter disabled on the vehicle, the
+            // wheels hold position on release. This applies to every preset, including
+            // hold curves (0.4.0 skipped it there, so a hold curve's return ramp
+            // straightened a vehicle that was built never to self-center).
+            if (!__instance.returnToCenter && steeringInput > -0.04f && steeringInput < 0.04f)
+            {
+                return true;
+            }
+
             // A return curve that holds at rest takes over low-speed steering; a
             // symmetric one (flat 1) keeps vanilla's own guards untouched so every
             // other configuration behaves exactly as before.
             bool holdsAtRest = preset.ReturnCurve.Evaluate(0f) < 0.999f;
             if (!holdsAtRest)
             {
-                // Mirror vanilla's guards: raw-input vehicles steer directly, and
-                // with returnToCenter disabled the wheels hold position on release.
-                if ((!__instance.returnToCenter && steeringInput > -0.04f && steeringInput < 0.04f)
-                    || forwardVel < MIN_TRACTION_SPEED)
+                if (forwardVel < MIN_TRACTION_SPEED)
                 {
                     return true;
                 }
@@ -147,8 +153,13 @@ namespace ApocalypterSteeringMod.Patching
             // Unwinding toward center runs at ReturnCurve(speed) of the steer-in
             // rate. Flat 1 = symmetric (unchanged feel). A curve that starts at 0
             // makes the wheels hold their angle when stopped; as speed builds the
-            // same line straightens them out. Winding on always uses the full rate.
-            if (Mathf.Abs(smoothedTarget) < Mathf.Abs(__instance.angle))
+            // same line straightens them out. Winding on always uses the full rate,
+            // and so does steering across center toward the other side: that is the
+            // driver steering, not the wheel returning (with a hold curve the wheels
+            // otherwise froze at rest whenever the opposite input was smaller than the
+            // held angle, and counter-steer through center ran at the return rate).
+            float current = __instance.angle;
+            if (Mathf.Abs(smoothedTarget) < Mathf.Abs(current) && smoothedTarget * current >= 0f)
             {
                 rateLimit *= preset.ReturnCurve.Evaluate(speedNorm);
             }

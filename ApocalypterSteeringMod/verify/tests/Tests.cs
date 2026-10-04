@@ -205,6 +205,13 @@ public static class Tests
         TestEditableCurve();
         TestSteeringCurveMigration(dir);
 
+        Console.WriteLine("0.5.0 regressions");
+        TestCurveRoundTrip();
+        TestAeroOnboardingDrag();
+        TestBaselineRefresh();
+        TestCurveEditorLayout();
+        TestCurveEditorRouting();
+
         Console.WriteLine();
         Console.WriteLine(_pass + " passed, " + _fail + " failed");
         return _fail == 0 ? 0 : 1;
@@ -391,7 +398,7 @@ public static class Tests
         Check(vcWithout.moduleManager.Components.Count == 1, "module onboarded for vehicle without one");
         AerodynamicsModule added = (AerodynamicsModule)vcWithout.moduleManager.Components[0];
         Check(added.state.isEnabled, "onboarded module enabled");
-        Check(Near(added.frontalCd, 0.35f * race.DragScale), "onboarded module Cd = default x preset");
+        Check(Near(added.frontalCd, 0.35f * (race.DragScale - 1f)), "onboarded module Cd = default x the preset's EXCESS drag (0.5.0)");
 
         AeroSettings.Enabled = false;
         tuner.ApplyLive();
@@ -924,6 +931,143 @@ public static class Tests
         EditableCurve commas;
         Check(EditableCurve.TryParse("0,5:0,25;1:1", out commas) && Near(commas.X(0), 0.5f) && Near(commas.Y(0), 0.25f),
             "parse accepts comma decimals");
+    }
+
+    // ---------------------------------------------------------------- 0.5.0
+
+    private static void TestCurveRoundTrip()
+    {
+        // Dragging a point onto its neighbour's x used to create a vertical step that
+        // TryParse deduplicates: the reloaded curve had one point less than the saved one.
+        EditableCurve c = EditableCurve.FromPoints(0f, 0f, 0.5f, 0.5f, 1f, 1f);
+        c.TryMovePoint(1, 2f, 0.8f);                    // drag far right, onto x = 1
+        EditableCurve back;
+        Check(EditableCurve.TryParse(c.Serialize(), out back) && back.Count == c.Count && back.SameAs(c, 1e-6f),
+            "point dragged onto its neighbour survives save + reload (count " + (back != null ? back.Count : 0) + ")");
+        Check(c.X(1) < c.X(2), "moved point keeps a gap to its neighbour (x " + c.X(1).ToString("R") + ")");
+        c.TryMovePoint(1, -5f, 0.2f);                   // and onto the left neighbour
+        Check(EditableCurve.TryParse(c.Serialize(), out back) && back.Count == 3 && c.X(1) > c.X(0),
+            "left neighbour likewise");
+
+        // Neighbours already closer than the gap (a parsed file): y moves, x stays put.
+        EditableCurve tight;
+        EditableCurve.TryParse("0:0;0.00015:0.5;0.0003:1;1:1", out tight);
+        float x1 = tight.X(1);
+        Check(tight.TryMovePoint(1, 0.9f, 0.7f) && Near(tight.X(1), x1, 1e-7f) && Near(tight.Y(1), 0.7f),
+            "tight neighbours: y moves, x stays (order can never break)");
+
+        EditableCurve a = EditableCurve.FromPoints(0f, 1f, 0.5f, 0.35f, 1f, 0.22f);
+        Check(a.SameAs(a.Clone()) && !a.SameAs(EditableCurve.Flat(1f)) && !a.SameAs(null), "SameAs: equal / different count / null");
+        EditableCurve moved = a.Clone();
+        moved.TryMovePoint(1, 0.5f, 0.36f);
+        Check(!a.SameAs(moved), "SameAs: a moved point differs");
+    }
+
+    private static void TestAeroOnboardingDrag()
+    {
+        UnityEngine.Object.Registry.Clear();
+        AeroSettings.ResetAll();
+        var vc = MakeCar(out FakeWheel[] _, 0f);   // ships WITHOUT an aero module
+        UnityEngine.Object.Registry.Add(vc);
+        var tuner = new VehicleTuner();
+        AeroSettings.Enabled = true;
+
+        // Street = x0.8 downforce, x1.0 ("stock") drag: nothing to add to a vehicle without aero.
+        AeroSettings.SetPresetByName("Street");
+        tuner.ReapplyNow();
+        Check(vc.moduleManager.Components.Count == 0, "Street (drag x1.0) onboards nothing on an aero-less vehicle (0.4.0: full 0.35 Cd)");
+
+        // Less drag than stock cannot ADD drag.
+        AeroPreset custom = AeroSettings.BeginEdit();
+        custom.DragScale = 0.8f;
+        custom.DownforceScale = 1.5f;
+        tuner.ApplyLive();
+        Check(vc.moduleManager.Components.Count == 0, "drag x0.8 (+ downforce x1.5) adds no module/drag (0.4.0 added 0.28 Cd)");
+
+        custom.DragScale = 1.2f;
+        tuner.ApplyLive();
+        AerodynamicsModule m = vc.moduleManager.Components.Count == 1 ? (AerodynamicsModule)vc.moduleManager.Components[0] : null;
+        Check(m != null && m.simulateDrag && !m.simulateDownforce && Near(m.frontalCd, 0.35f * 0.2f) && Near(m.sideCd, 1.05f * 0.2f),
+            "drag x1.2 onboards drag = default Cd x 0.2 (continuous at x1.0), never downforce");
+
+        custom.DragScale = 0.9f;
+        tuner.ApplyLive();
+        Check(m != null && !m.state.isEnabled && !m.simulateDrag, "dropping back below x1.0 parks the onboarded module");
+        AeroSettings.ResetAll();
+        tuner.ApplyLive();
+    }
+
+    private static void TestBaselineRefresh()
+    {
+        UnityEngine.Object.Registry.Clear();
+        SuspensionSettings.ResetAll();
+        DrivetrainSettings.ResetAll();
+        BrakesSettings.ResetAll();
+        VehicleController vc = MakeCar(out FakeWheel[] w, 0f);
+        UnityEngine.Object.Registry.Add(vc);
+        var tuner = new VehicleTuner();
+        tuner.ReapplyNow();                          // first sight: everything captured, nothing applied
+
+        // The game changes fields of categories that are OFF.
+        vc.powertrain.engine.maxPower = 175f;
+        w[0].SpringMaxForce = 40000f;
+        vc.brakes.maxTorque = 9000f;
+
+        DrivetrainSettings.Enabled = true;
+        DrivetrainSettings.SetPresetByName("Race");
+        DrivetrainPreset race = DrivetrainSettings.ActivePreset;
+        SuspensionSettings.Enabled = true;
+        SuspensionSettings.SetPresetByName("Race");
+        float springF = SuspensionSettings.Spring(true);
+        BrakesSettings.Enabled = true;
+        BrakesSettings.SetPresetByName("Stock");
+        tuner.ApplyLive();
+        Check(Near(vc.powertrain.engine.maxPower, 175f * race.PowerScale), "enable scales the game's CURRENT power (0.4.0: first-sight value)");
+        Check(Near(w[0].SpringMaxForce, 40000f * springF), "enable scales the game's current spring");
+        Check(Near(vc.brakes.maxTorque, 9000f), "Stock brakes keep the game's current torque");
+
+        // While applied, a later game change is NOT re-read (it would read our own values).
+        tuner.ApplyLive();
+        Check(Near(vc.powertrain.engine.maxPower, 175f * race.PowerScale), "re-apply while on does not compound");
+
+        DrivetrainSettings.Enabled = false;
+        SuspensionSettings.Enabled = false;
+        BrakesSettings.Enabled = false;
+        tuner.ApplyLive();
+        Check(Near(vc.powertrain.engine.maxPower, 175f) && Near(w[0].SpringMaxForce, 40000f) && Near(vc.brakes.maxTorque, 9000f),
+            "disable restores the game's value, not the first-sight one (0.4.0: 150 / 30000 / 7000)");
+        SuspensionSettings.ResetAll();
+        DrivetrainSettings.ResetAll();
+        BrakesSettings.ResetAll();
+    }
+
+    private static void TestCurveEditorLayout()
+    {
+        // The stubs have no layout engine, so check the bands the row is built from.
+        float titleBottom = CurveEditor.TitleTop + CurveEditor.TitleHeight;
+        float resetBottom = CurveEditor.TitleTop + CurveEditor.ResetHeight;
+        float hintBottom = CurveEditor.HintTop + CurveEditor.HintHeight;
+        Check(resetBottom <= CurveEditor.GraphTop && titleBottom <= CurveEditor.GraphTop && hintBottom <= CurveEditor.GraphTop,
+            "header (title, readout, Reset, hint) ends above the graph (0.4.0: Reset sat under the graph, unclickable)");
+        Check(resetBottom <= CurveEditor.HintTop && titleBottom <= CurveEditor.HintTop, "hint starts below the title/Reset line");
+        Check(CurveEditor.ReadoutRight >= CurveEditor.ResetRight + CurveEditor.ResetWidth, "readout sits left of Reset");
+        float graphHeight = CurveEditor.RowHeight - CurveEditor.GraphTop - CurveEditor.GraphBottom;
+        Check(graphHeight >= 150f, "graph keeps a usable height (" + graphHeight + " px)");
+    }
+
+    private static void TestCurveEditorRouting()
+    {
+        Check(CurveEditor.RouteDrag(true, 2, true) == CurveEditor.DragRoute.MovePoint, "drag on a handle moves the point");
+        Check(CurveEditor.RouteDrag(true, -1, true) == CurveEditor.DragRoute.ScrollList, "drag on empty graph scrolls the list (0.4.0: swallowed)");
+        Check(CurveEditor.RouteDrag(false, 2, true) == CurveEditor.DragRoute.ScrollList, "disabled curve: even a handle drag scrolls");
+        Check(CurveEditor.RouteDrag(true, -1, false) == CurveEditor.DragRoute.None, "no scroll view: nothing");
+
+        Check(CurveEditor.RouteClick(true, false, true, 1, -1) == CurveEditor.ClickAction.AddPoint, "click on empty space adds");
+        Check(CurveEditor.RouteClick(true, false, true, 2, 1) == CurveEditor.ClickAction.RemovePoint, "double-click on a handle removes");
+        Check(CurveEditor.RouteClick(true, true, true, 1, -1) == CurveEditor.ClickAction.None, "release after a drag never adds a point (0.4.0 did)");
+        Check(CurveEditor.RouteClick(false, false, true, 1, -1) == CurveEditor.ClickAction.None, "disabled (OFF/Vanilla) graph ignores clicks (0.4.0 forked to Custom)");
+        Check(CurveEditor.RouteClick(true, false, false, 1, -1) == CurveEditor.ClickAction.None, "right click does nothing");
+        Check(CurveEditor.RouteClick(true, false, true, 1, 0) == CurveEditor.ClickAction.None, "single click on a handle does nothing");
     }
 
     private static void TestApocasetterKey(string dir)

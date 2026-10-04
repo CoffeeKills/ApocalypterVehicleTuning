@@ -156,22 +156,27 @@ namespace ApocalypterSteeringMod.Runtime
             ApplyLive();
         }
 
-        /// <summary>Apply the current settings to vehicles already tracked. Cheap; safe to call every slider tick.</summary>
+        /// <summary>
+        /// Apply the current settings to vehicles already tracked. Cheap; safe to call every slider tick.
+        /// A category that goes from not-applied to applied first re-reads its stock values
+        /// (RefreshBaselines): while it was off the fields belonged to the game, so whatever
+        /// the game set since the vehicle was first seen is the stock to scale and to restore.
+        /// </summary>
         public void ApplyLive()
         {
-            if (SuspensionSettings.Enabled) { ApplyAllSuspension(); _suspApplied = true; }
+            if (SuspensionSettings.Enabled) { if (!_suspApplied) RefreshBaselines(Category.Suspension); ApplyAllSuspension(); _suspApplied = true; }
             else if (_suspApplied) { RestoreAllSuspension(); _suspApplied = false; }
 
-            if (AeroSettings.Enabled) { ApplyAllAero(); _aeroApplied = true; }
+            if (AeroSettings.Enabled) { if (!_aeroApplied) RefreshBaselines(Category.Aero); ApplyAllAero(); _aeroApplied = true; }
             else if (_aeroApplied) { RestoreAllAero(); _aeroApplied = false; }
 
-            if (BrakesSettings.Enabled) { ApplyAllBrakes(); _brakesApplied = true; }
+            if (BrakesSettings.Enabled) { if (!_brakesApplied) RefreshBaselines(Category.Brakes); ApplyAllBrakes(); _brakesApplied = true; }
             else if (_brakesApplied) { RestoreAllBrakes(); _brakesApplied = false; }
 
-            if (GripSettings.Enabled) { ApplyAllGrip(); _gripApplied = true; }
+            if (GripSettings.Enabled) { if (!_gripApplied) RefreshBaselines(Category.Grip); ApplyAllGrip(); _gripApplied = true; }
             else if (_gripApplied) { RestoreAllGrip(); _gripApplied = false; }
 
-            if (DrivetrainSettings.Enabled) { ApplyAllDrivetrain(); _drivetrainApplied = true; }
+            if (DrivetrainSettings.Enabled) { if (!_drivetrainApplied) RefreshBaselines(Category.Drivetrain); ApplyAllDrivetrain(); _drivetrainApplied = true; }
             else if (_drivetrainApplied) { RestoreAllDrivetrain(); _drivetrainApplied = false; }
 
             if (AssistsSettings.Enabled) { ApplyAllAssists(); _assistsApplied = true; }
@@ -300,6 +305,15 @@ namespace ApocalypterSteeringMod.Runtime
                 };
             }
 
+            record.Drivetrain = CaptureDrivetrain(vc);
+            record.Aero = CaptureAero(vc);
+            record.Assists = CreateAssistHandles(vc);
+            record.HasTyreWear = HasTyreWearComponent(vc);
+            return record;
+        }
+
+        private static DrivetrainData CaptureDrivetrain(VehicleController vc)
+        {
             var dt = new DrivetrainData();
             if (vc.powertrain.engine != null)
             {
@@ -340,12 +354,112 @@ namespace ApocalypterSteeringMod.Runtime
                     dt.DiffCaptured[i] = true;
                 }
             }
-            record.Drivetrain = dt;
+            return dt;
+        }
 
-            record.Aero = CaptureAero(vc);
-            record.Assists = CreateAssistHandles(vc);
-            record.HasTyreWear = HasTyreWearComponent(vc);
-            return record;
+        internal enum Category
+        {
+            Suspension,
+            Aero,
+            Brakes,
+            Grip,
+            Drivetrain
+        }
+
+        /// <summary>
+        /// Re-read one category's stock values on every tracked vehicle. Only called while
+        /// that category is NOT applied (its fields hold the game's values, never ours), so
+        /// this can never capture tuned values. Without it the baseline was frozen at first
+        /// sight: a value the game changed later (while the category was off) was scaled from
+        /// the stale number on enable and overwritten with it on disable. The category's own
+        /// fields only: categories never share a field, so another category's applied state
+        /// cannot leak in. Runs on a toggle, not per tick (drivetrain/aero re-capture allocates).
+        /// </summary>
+        private void RefreshBaselines(Category category)
+        {
+            foreach (KeyValuePair<VehicleController, VehicleRecord> kv in _records)
+            {
+                VehicleRecord r = kv.Value;
+                if (kv.Key == null || r.Vc == null)
+                {
+                    continue;
+                }
+                switch (category)
+                {
+                    case Category.Suspension:
+                        foreach (KeyValuePair<WheelUAPI, WheelData> wk in r.Wheels)
+                        {
+                            WheelUAPI u = wk.Key;
+                            if (u == null)
+                            {
+                                continue;
+                            }
+                            wk.Value.SpringForce = u.SpringMaxForce;
+                            wk.Value.SpringLength = u.SpringMaxLength;
+                            wk.Value.BumpRate = u.DamperBumpRate;
+                            wk.Value.ReboundRate = u.DamperReboundRate;
+                        }
+                        foreach (KeyValuePair<WheelGroup, GroupData> gk in r.Groups)
+                        {
+                            if (gk.Key != null)
+                            {
+                                gk.Value.ArbForce = gk.Key.antiRollBarForce;
+                            }
+                        }
+                        break;
+
+                    case Category.Grip:
+                        foreach (KeyValuePair<WheelUAPI, WheelData> wk in r.Wheels)
+                        {
+                            WheelUAPI u = wk.Key;
+                            if (u == null)
+                            {
+                                continue;
+                            }
+                            wk.Value.LngGrip = u.LongitudinalFrictionGrip;
+                            wk.Value.LatGrip = u.LateralFrictionGrip;
+                            wk.Value.LngStiff = u.LongitudinalFrictionStiffness;
+                            wk.Value.LatStiff = u.LateralFrictionStiffness;
+                        }
+                        break;
+
+                    case Category.Brakes:
+                        if (r.Vc.brakes != null)
+                        {
+                            if (r.Brakes == null)
+                            {
+                                r.Brakes = new BrakesData();
+                            }
+                            r.Brakes.MaxTorque = r.Vc.brakes.maxTorque;
+                            r.Brakes.ActuationTime = r.Vc.brakes.actuationTime;
+                        }
+                        foreach (KeyValuePair<WheelGroup, GroupData> gk in r.Groups)
+                        {
+                            if (gk.Key != null)
+                            {
+                                gk.Value.BrakeCoeff = gk.Key.brakeCoefficient;
+                                gk.Value.HandbrakeCoeff = gk.Key.handbrakeCoefficient;
+                            }
+                        }
+                        break;
+
+                    case Category.Drivetrain:
+                        if (r.Vc.powertrain != null)
+                        {
+                            r.Drivetrain = CaptureDrivetrain(r.Vc);
+                        }
+                        break;
+
+                    case Category.Aero:
+                        // A module we onboarded keeps its own (inert) baseline; a shipped one,
+                        // or a vehicle that gained a module since, is read again.
+                        if (r.Aero == null || !r.Aero.Onboarded)
+                        {
+                            r.Aero = CaptureAero(r.Vc);
+                        }
+                        break;
+                }
+            }
         }
 
         private static bool HasTyreWearComponent(VehicleController vc)

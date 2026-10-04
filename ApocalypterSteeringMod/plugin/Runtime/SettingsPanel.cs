@@ -622,7 +622,8 @@ namespace ApocalypterSteeringMod.Runtime
                 "How much steering you keep at speed. Left edge = stopped, right edge = 180 km/h and above. Click = add a point, drag = move, double-click = remove.",
                 () => Shown.LockCurve,
                 () => SteeringSettings.Reference().LockCurve,
-                mutate => EditCurve(pp => pp.LockCurve, mutate));
+                mutate => EditCurve(pp => pp.LockCurve, mutate),
+                () => SteeringSettings.Enabled && !IsVanilla);
             _refreshers.Add(lockEditor.Refresh);
             GameObject lockRow = lockEditor.Row;
             _refreshers.Add(() =>
@@ -639,7 +640,8 @@ namespace ApocalypterSteeringMod.Runtime
                 "How fast the wheel straightens after you let go. Flat at 1 = steers back as fast as it steers in. A lower line = lazier. Ramping up from 0 = holds the wheels while stopped, then straightens out as you drive. Flat at the left edge = vanilla low-speed handling.",
                 () => Shown.ReturnCurve,
                 () => SteeringSettings.Reference().ReturnCurve,
-                mutate => EditCurve(pp => pp.ReturnCurve, mutate));
+                mutate => EditCurve(pp => pp.ReturnCurve, mutate),
+                () => SteeringSettings.Enabled && !IsVanilla);
             _refreshers.Add(returnEditor.Refresh);
 
             AddSectionTitle(t, "Grip and slides");

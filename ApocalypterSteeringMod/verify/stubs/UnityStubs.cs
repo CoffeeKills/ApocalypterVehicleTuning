@@ -47,6 +47,7 @@ namespace UnityEngine
         public T GetComponent<T>() { return default(T); }
         public T GetComponentInChildren<T>(bool includeInactive) { return default(T); }
         public T GetComponentInChildren<T>() { return default(T); }
+        public T GetComponentInParent<T>() { return default(T); }
         public T[] GetComponentsInChildren<T>(bool includeInactive) { return null; }
         public void GetComponentsInChildren<T>(bool includeInactive, List<T> result) { result.Clear(); }
     }
@@ -469,8 +470,13 @@ namespace UnityEngine.UI
         public RectTransform handleRect { get; set; }
     }
 
-    public class ScrollRect : UIBehaviour
+    // Real ScrollRect implements the drag interfaces; the curve editor forwards
+    // list-scroll drags to these (UnityEngine.UI 2020.3: public virtual).
+    public class ScrollRect : UIBehaviour, IBeginDragHandler, IDragHandler, IEndDragHandler
     {
+        public virtual void OnBeginDrag(PointerEventData eventData) { }
+        public virtual void OnDrag(PointerEventData eventData) { }
+        public virtual void OnEndDrag(PointerEventData eventData) { }
         public enum MovementType { Unrestricted, Elastic, Clamped }
         public enum ScrollbarVisibility { Permanent, AutoHide, AutoHideAndExpandViewport }
         public bool horizontal { get; set; }

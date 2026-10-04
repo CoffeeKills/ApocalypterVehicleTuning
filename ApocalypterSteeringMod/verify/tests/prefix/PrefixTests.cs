@@ -163,6 +163,32 @@ public static class PrefixTests
             Check(!TractionEdgeSteeringPatch.Prefix(s) && s.angle > 10f,
                 "low-speed input steers with a hold curve (angle " + s.angle.ToString("0.00") + ")");
 
+            // 0.5.0: counter-steering across center at rest is the driver steering, not
+            // the wheel returning. 0.4.0 applied the hold rate (0) and froze the wheels
+            // at +10 for any left input smaller than the held angle.
+            s.angle = 10f;
+            vc.input.Steering = -0.1f;                      // linear, vehicle curve 2 x 30 -> target -6 (|6| < |10|)
+            vc.Speed = 0f;
+            vc.vehicleRigidbody.velocity = new Vector3(0f, 0f, 0f);
+            Check(!TractionEdgeSteeringPatch.Prefix(s) && s.angle < 9.5f,
+                "hold curve: small opposite input still steers across center at rest (angle " + s.angle.ToString("0.00") + ")");
+            s.angle = 10f;
+            vc.input.Steering = 0.1f;                       // same side, smaller -> still a (held) return
+            TractionEdgeSteeringPatch.Prefix(s);
+            Check(s.angle > 9.999f, "hold curve: easing off on the same side still holds at rest (angle " + s.angle.ToString("0.00") + ")");
+
+            // 0.5.0: a vehicle built with returnToCenter = false keeps vanilla's hold on
+            // release, also under a hold curve (0.4.0 ran the return ramp instead).
+            s.returnToCenter = false;
+            s.angle = 10f;
+            vc.input.Steering = 0f;
+            vc.Speed = 25f;
+            vc.vehicleRigidbody.velocity = new Vector3(0f, 0f, 25f);
+            Check(TractionEdgeSteeringPatch.Prefix(s) && Near(s.angle, 10f),
+                "returnToCenter=false + hold curve: release falls through to vanilla's hold");
+            s.returnToCenter = true;
+            vc.Speed = 0.5f;
+
             // True reverse still falls through to vanilla even with a hold curve.
             vc.vehicleRigidbody.velocity = new Vector3(0f, 0f, -5f);
             Check(TractionEdgeSteeringPatch.Prefix(s), "true reverse falls through with a hold curve");
@@ -173,6 +199,15 @@ public static class PrefixTests
             Check(TractionEdgeSteeringPatch.Prefix(s), "flat-1 return keeps the vanilla low-speed fall-through");
             vc.vehicleRigidbody.velocity = new Vector3(0f, 0f, 20f);
             vc.Speed = 20f;
+            s.degreesPerSecondLimit = 100000f;
+
+            // Flat-1 (every non-hold preset): counter-steer across center keeps the full
+            // rate, exactly as before (the 0.5.0 crossing rule changes nothing at rate x1).
+            s.degreesPerSecondLimit = 100f;
+            s.angle = 10f;
+            vc.input.Steering = -0.1f;
+            TractionEdgeSteeringPatch.Prefix(s);
+            Check(Near(s.angle, 8f), "flat-1 return: crossing toward center runs at the full rate (angle " + s.angle.ToString("0.00") + ")");
             s.degreesPerSecondLimit = 100000f;
 
             // Vanilla preset falls through.
