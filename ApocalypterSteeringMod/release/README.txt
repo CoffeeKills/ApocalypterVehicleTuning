@@ -3,7 +3,7 @@ Apocalypter Vehicle Tuning 0.6.0-alpha
 
 An in-game tuning panel for every vehicle in Apocalypter: steering,
 suspension, wheel alignment, aero, brakes, tire grip, drivetrain,
-gearbox, and ABS/TCS assists. All applied live, all persisted per
+and ABS/TCS assists. All applied live, all persisted per
 setting.
 
 In game: press F7 (or the "Vehicle Tuning" button in the pause menu).
@@ -40,10 +40,13 @@ NOTES
 - The panel keeps the game running while it is open (docked on the
   right) - tune and drive at the same time. The telemetry strip shows
   speed/RPM/gear/slip. Prefer the old paused panel? Turn on
-  "Freeze game while open" in the Panel tab.
+  "Freeze game while open" in the Settings tab.
 - New in 0.6.0: wheel alignment (camber, caster, toe, position),
-  gearbox tuning (gear count, clutch, per-gear ratios), panel width /
-  size / transparency settings, and copy/paste for presets.
+  panel width/size/transparency settings, a rebindable panel hotkey
+  (Settings tab), an optional live telemetry strip (off by default),
+  and copy/paste for presets. Gearbox tuning is coming soon - the
+  game's shift logic fights resized gearboxes, so the tab shows a
+  notice until the mod ships its own shifting.
 - Steering tab: the two graphs are editable - click to add a point,
   drag to move, double-click to remove. The "Return to center" graph
   is what makes the Euro Truck preset hold its wheels when stopped

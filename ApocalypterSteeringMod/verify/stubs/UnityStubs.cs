@@ -14,7 +14,7 @@ namespace UnityEngine
     public enum HorizontalWrapMode { Wrap, Overflow }
     public enum VerticalWrapMode { Truncate, Overflow }
     public enum RenderMode { ScreenSpaceOverlay, ScreenSpaceCamera, WorldSpace }
-    public enum KeyCode { None = 0, Backspace = 8, Return = 13, Escape = 27, Space = 32, Alpha0 = 48, Alpha1, Alpha2, Alpha3, Alpha4, Alpha5, Alpha6, Alpha7, Alpha8, Alpha9, A = 97, D = 100, S = 115, W = 119, Home = 278, End = 279, Insert = 277, F1 = 282, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, F12 }
+    public enum KeyCode { None = 0, Backspace = 8, Return = 13, Escape = 27, Space = 32, Alpha0 = 48, Alpha1, Alpha2, Alpha3, Alpha4, Alpha5, Alpha6, Alpha7, Alpha8, Alpha9, A = 97, D = 100, S = 115, W = 119, Home = 278, End = 279, Insert = 277, F1 = 282, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, F12, F13, F14, F15, Mouse0 = 323, Mouse1, Mouse2, Mouse3, Mouse4, Mouse5, Mouse6, JoystickButton0 = 330 }
 
     public class SerializeField : Attribute { }
 

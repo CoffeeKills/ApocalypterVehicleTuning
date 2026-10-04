@@ -12,6 +12,13 @@ namespace ApocalypterSteeringMod.Settings
 
         public static bool Enabled = false;
 
+        /// <summary>
+        /// Release gate: the gearbox category is hidden behind "coming soon" until the
+        /// mod owns shifting (the game's FSM shift logic fights resized boxes on
+        /// automatic transmissions). The tests flip this off to exercise the logic.
+        /// </summary>
+        public static bool ComingSoon = true;
+
         public static GearboxPreset ActivePreset
         {
             get { return Book.Active; }

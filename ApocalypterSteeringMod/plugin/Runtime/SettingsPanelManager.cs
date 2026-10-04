@@ -75,7 +75,20 @@ namespace ApocalypterSteeringMod.Runtime
             "Settings", "Credits", "Tutorial", "Codex", "Quit", "Quit_To_Menu", "Exit", "Options"
         };
 
+        /// <summary>The live manager (the Settings tab's hotkey rebinder uses it).</summary>
+        public static SettingsPanelManager Current;
+
+        /// <summary>True while the hotkey rebinder waits for the next key press.</summary>
+        public bool CapturingToggleKey { get; private set; }
+
         private void Awake()
+        {
+            Current = this;
+            ApplyToggleKey();
+        }
+
+        /// <summary>Re-parse UI.ToggleKey (startup, and after an in-game rebind).</summary>
+        private void ApplyToggleKey()
         {
             if (!Enum.TryParse(ModConfig.ToggleKeyString, true, out _toggleKey) || _toggleKey == KeyCode.None)
             {
@@ -90,6 +103,12 @@ namespace ApocalypterSteeringMod.Runtime
             {
                 _toggleInputKey = Key.None;   // fall back to the legacy Input path
             }
+        }
+
+        /// <summary>The Settings tab asks for a new hotkey; the next key press binds it.</summary>
+        public void CaptureToggleKey()
+        {
+            CapturingToggleKey = true;
         }
 
         private void OnEnable()
@@ -128,6 +147,34 @@ namespace ApocalypterSteeringMod.Runtime
 
         private void Update()
         {
+            // Hotkey rebind capture: the next suitable key binds the panel toggle,
+            // Esc cancels. Runs before everything else so the captured key never
+            // also toggles or closes the panel.
+            if (CapturingToggleKey)
+            {
+                if (Input.GetKeyDown(KeyCode.Escape))
+                {
+                    CapturingToggleKey = false;
+                    return;
+                }
+                for (int k = (int)KeyCode.Backspace; k <= (int)KeyCode.F15; k++)
+                {
+                    KeyCode key = (KeyCode)k;
+                    if (key == KeyCode.None || IsReservedToggleKey(key))
+                    {
+                        continue;
+                    }
+                    if (Input.GetKeyDown(key))
+                    {
+                        ModConfig.SetToggleKey(key.ToString());
+                        ApplyToggleKey();
+                        CapturingToggleKey = false;
+                        return;
+                    }
+                }
+                return;
+            }
+
             // Keep blocking for one extra frame after closing so the game never
             // sees the key press that closed the panel.
             if (_unblockNextFrame)
@@ -218,6 +265,27 @@ namespace ApocalypterSteeringMod.Runtime
         /// Reads a key through the new Input System when a Keyboard device is
         /// present, falling back to the legacy Input class otherwise.
         /// </summary>
+        /// <summary>
+        /// Keys the rebinder refuses: Escape cancels, mouse buttons would break UI
+        /// clicks, digits are the tab hotkeys, joystick axes poll weirdly.
+        /// </summary>
+        private static bool IsReservedToggleKey(KeyCode key)
+        {
+            if (key >= KeyCode.Mouse0 && key <= KeyCode.Mouse6)
+            {
+                return true;
+            }
+            if (key >= KeyCode.JoystickButton0)
+            {
+                return true;
+            }
+            if (key >= KeyCode.Alpha0 && key <= KeyCode.Alpha9)
+            {
+                return true;
+            }
+            return false;
+        }
+
         private static bool IsKeyPressed(KeyCode legacy, Key newKey)
         {
             Keyboard kb = Keyboard.current;

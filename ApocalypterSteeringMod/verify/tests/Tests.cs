@@ -1506,6 +1506,7 @@ public static class Tests
     {
         UnityEngine.Object.Registry.Clear();
         ResetAllCategories();
+        GearboxSettings.ComingSoon = false;   // the harness exercises the gated code
         TransmissionComponent.DeferShifts = false;
 
         float[] stock = { -2.216f, 0f, 3.274f, 2.093f, 1.439f, 1.084f, 0.817f };
@@ -1669,6 +1670,7 @@ public static class Tests
         Check(poisoned.powertrain.transmission.gears.Count == 7 && poisoned.powertrain.transmission.Gear <= 5,
             "capture truncates a baked-in continuation and fixes the live gear");
         ResetAllCategories();
+        GearboxSettings.ComingSoon = true;   // release gate back on
     }
 
     private static void TestInputBlocker()
@@ -1858,8 +1860,8 @@ public static class Tests
         ModConfig.Load(cfg);
         Check(!UiSettings.FreezeWhileOpen && Near(UiSettings.PanelWidth, 460f) && Near(UiSettings.PanelScale, 1f)
               && Near(UiSettings.PanelAlpha, 1f) && UiSettings.LastTab == 0, "UI defaults: live panel, 460 px, scale 1, opaque, first tab");
-        Check(UiSettings.TelemetryEnabled && Near(UiSettings.TelemetryScale, 1f) && UiSettings.TelemetryPosition == TelemetryCorner.TopLeft,
-            "telemetry defaults: on, x1, top left");
+        Check(!UiSettings.TelemetryEnabled && Near(UiSettings.TelemetryScale, 1f) && UiSettings.TelemetryPosition == TelemetryCorner.TopLeft,
+            "telemetry defaults: off (opt-in), x1, top left");
         Check(!AlignmentSettings.Enabled && !GearboxSettings.Enabled && AlignmentSettings.ActivePreset == AlignmentPreset.Stock
               && GearboxSettings.ActivePreset == GearboxPreset.Stock, "Alignment and Gearbox are opt-in (off, Stock)");
 
@@ -1904,7 +1906,7 @@ public static class Tests
         Check(txt.Contains("RateMultiplier = 1.5") && txt.Contains("SpringFront = 0.5") && txt.Contains("ToggleKey = F8")
               && txt.Contains("[Alignment]") && txt.Contains("[Gearbox.Custom]") && txt.Contains("[Telemetry]") && txt.Contains("FreezeWhileOpen = false"),
             "0.5.0 cfg: no key removed or renamed, new sections appended");
-        Check(!UiSettings.FreezeWhileOpen && UiSettings.TelemetryEnabled, "0.5.0 cfg: new behaviour defaults (live panel, telemetry on)");
+        Check(!UiSettings.FreezeWhileOpen && !UiSettings.TelemetryEnabled, "0.5.0 cfg: new behaviour defaults (live panel, telemetry off)");
 
         // Hand-edited out-of-range values clamp on load; name-only enum parsing.
         string bad = Path.Combine(dir, "bad060.cfg");

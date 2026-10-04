@@ -235,7 +235,7 @@ namespace ApocalypterSteeringMod.Runtime
             if (AlignmentSettings.Enabled) { if (!_alignmentApplied) RefreshBaselines(Category.Alignment); ApplyAllAlignment(); _alignmentApplied = true; }
             else if (_alignmentApplied) { RestoreAllAlignment(); _alignmentApplied = false; }
 
-            if (GearboxSettings.Enabled) { if (!_gearboxApplied) RefreshBaselines(Category.Gearbox); ApplyAllGearbox(); _gearboxApplied = true; }
+            if (GearboxSettings.Enabled && !GearboxSettings.ComingSoon) { if (!_gearboxApplied) RefreshBaselines(Category.Gearbox); ApplyAllGearbox(); _gearboxApplied = true; }
             else
             {
                 if (_gearboxApplied) { RestoreAllGearbox(); _gearboxApplied = false; }

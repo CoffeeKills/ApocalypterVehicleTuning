@@ -1592,6 +1592,13 @@ namespace ApocalypterSteeringMod.Runtime
 
         private void BuildGearbox(RectTransform content)
         {
+            if (GearboxSettings.ComingSoon)
+            {
+                RectTransform soon = AddBlock(content, "ComingSoon", 120f, true, out LayoutElement _);
+                RectTransform t = UiKit.Place(UiKit.Make("T", soon), 0f, 0f, 1f, 1f, 16f, 0f, 16f, 0f);
+                UiKit.Label(t, "Coming soon: gearbox customization - gear count, clutch feel and per-gear ratios.\nUntil the mod owns its own shifting, changing gears on automatic transmissions breaks the game's gear logic.", 16, UiKit.TextMain, TextAnchor.MiddleLeft, FontStyle.Bold, true);
+                return;
+            }
             AddMasterSwitch(content, "Gearbox", "OFF = every vehicle keeps its original gears and clutch.",
                 () => GearboxSettings.Enabled, v =>
                 {
@@ -1803,6 +1810,25 @@ namespace ApocalypterSteeringMod.Runtime
             });
 
             AddSectionTitle(content, "Settings");
+            GameObject keyRow = AddBlock(content, "ToggleKey", 58f, true, out LayoutElement _).gameObject;
+            RectTransform kr = (RectTransform)keyRow.transform;
+            RectTransform kl = UiKit.Place(UiKit.Make("T", kr), 0f, 0.5f, 1f, 1f, 16f, 0f, 140f, 6f);
+            UiKit.Label(kl, "Panel hotkey", 17, UiKit.TextMain, TextAnchor.MiddleLeft, FontStyle.Bold);
+            Button keyBtn = UiKit.MakeButton(kr, "KeyBtn", "", UiKit.ChipBase, 15, () =>
+            {
+                SettingsPanelManager m = SettingsPanelManager.Current;
+                if (m != null)
+                {
+                    m.CaptureToggleKey();
+                }
+                Refresh();
+            }, out Text keyLabel);
+            UiKit.RightBox((RectTransform)keyBtn.transform, 130f, 34f, 14f);
+            _refreshers.Add(() =>
+            {
+                SettingsPanelManager m = SettingsPanelManager.Current;
+                keyLabel.text = m != null && m.CapturingToggleKey ? "Press a key..." : ModConfig.ToggleKeyString;
+            });
             AddOption(content, "Freeze game while open", "OFF = keep driving while the panel is open",
                 () => UiSettings.FreezeWhileOpen, v =>
                 {

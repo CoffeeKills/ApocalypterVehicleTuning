@@ -27,8 +27,8 @@ namespace ApocalypterSteeringMod.Settings
         public static float PanelAlpha = DefaultAlpha;
         public static int LastTab;
 
-        /// <summary>Default true: passive, click-through UI (see README §8).</summary>
-        public static bool TelemetryEnabled = true;
+        /// <summary>Default false: opt-in, click-through UI (see README §8).</summary>
+        public static bool TelemetryEnabled = false;
         public static float TelemetryScale = 1f;
         public static TelemetryCorner TelemetryPosition = TelemetryCorner.TopLeft;
 

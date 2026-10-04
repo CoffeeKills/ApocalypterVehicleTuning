@@ -106,6 +106,17 @@ namespace ApocalypterSteeringMod.Persistence
             get { return _toggleKey != null ? _toggleKey.Value : "F7"; }
         }
 
+        /// <summary>Write the panel hotkey (the Settings tab rebinder calls this) and save.</summary>
+        public static void SetToggleKey(string keyName)
+        {
+            if (_toggleKey == null || string.IsNullOrEmpty(keyName))
+            {
+                return;
+            }
+            _toggleKey.Value = keyName;
+            _config.Save();
+        }
+
         private static ConfigEntry<float> BindRange(string section, string key, float def, float min, float max, string description)
         {
             return _config.Bind(section, key, def,
@@ -156,7 +167,7 @@ namespace ApocalypterSteeringMod.Persistence
             BindGearbox();
 
             _toggleKey = config.Bind("UI", "ToggleKey", "F7",
-                "Hotkey that opens/closes the tuning panel (a Unity KeyCode name, e.g. F7, F8, Home). Restart the game after changing.");
+                "Hotkey that opens/closes the tuning panel (a Unity KeyCode name, e.g. F7, F8, Home). Rebind in the Settings tab; applies immediately.");
             BindUi();
             _targetMode = config.Bind("General", "ApplyTarget", "All",
                 "What the tuning applies to: All, Last driven, or Selected vehicle.");
@@ -372,7 +383,7 @@ namespace ApocalypterSteeringMod.Persistence
             _uiWidth = BindRange("UI", "PanelWidth", Limits.PanelWidthDefault, Limits.PanelWidthMin, Limits.PanelWidthMax, "Panel width in reference pixels.");
             _uiAlpha = BindRange("UI", "PanelAlpha", 1f, Limits.PanelAlphaMin, Limits.PanelAlphaMax, "Panel opacity (1 = opaque).");
             _uiLastTab = BindIntRange("UI", "LastTab", 0, Limits.LastTabMin, Limits.LastTabMax, "Tab the panel opens on (remembered).");
-            _telEnabled = _config.Bind("Telemetry", "Enabled", true,
+            _telEnabled = _config.Bind("Telemetry", "Enabled", false,
                 "Show the small click-through telemetry strip (speed, RPM, gear, front slip) while driving.");
             _telScale = BindRange("Telemetry", "Scale", 1f, Limits.TelemetryScaleMin, Limits.TelemetryScaleMax, "Telemetry strip size.");
             _telPosition = _config.Bind("Telemetry", "Position", "TopLeft", "Screen corner: TopLeft, TopRight, BottomLeft, BottomRight.");
