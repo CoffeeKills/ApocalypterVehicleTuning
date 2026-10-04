@@ -58,6 +58,21 @@ namespace NWH.Common.Vehicles
         public virtual float LateralSlip { get { return _lateralSlip; } }
         public void SetLateralSlip(float v) { _lateralSlip = v; }   // test hook
         public virtual float SpringLength { get { return 0f; } }
+
+        // 0.6.2 drivetrain layout. Abstract in WheelUAPI.cs (MotorTorque :7, Inertia, AutoSimulate
+        // :133, Step :135, AngularVelocity, Mass, Radius, CounterTorque); virtual here for the same
+        // FakeWheel reason as Camber. AutoSimulate defaults to true (WheelController.cs:110).
+        private float _motorTorque, _inertia = 1.2f, _angularVelocity;
+        private bool _autoSimulate = true;
+        public virtual float MotorTorque { get { return _motorTorque; } set { _motorTorque = value; } }
+        public virtual float Inertia { get { return _inertia; } set { _inertia = value; } }
+        public virtual bool AutoSimulate { get { return _autoSimulate; } set { _autoSimulate = value; } }
+        public virtual float AngularVelocity { get { return _angularVelocity; } }   // get-only, as in WheelUAPI.cs:27
+        public virtual float Mass { get { return 20f; } }
+        public virtual float Radius { get { return 0.35f; } }
+        public virtual float CounterTorque { get { return 0f; } }
+        public int StepCount;                                   // test hook: Step() calls this tick
+        public virtual void Step() { StepCount++; }
     }
 }
 
@@ -88,11 +103,110 @@ namespace NWH.VehiclePhysics2.Powertrain
         public float OutputRPM { get; set; }
         public float InputRPM { get; set; }
         protected float _damage;
+
+        // 0.6.2: wiring + stepping, verbatim from PowertrainComponent.cs (now in gamecode/).
+        // Abstract in the game; concrete here because older tests instantiate it.
+        public string name = "";
+        public float inertia = 0.05f;
+        public float inputTorque, outputTorque, inputInertia, outputInertia;
+        protected PowertrainComponent _input;
+        public int inputNameHash;
+        protected PowertrainComponent _output;
+        public int outputNameHash;
+
+        // :42-60
+        public PowertrainComponent Input
+        {
+            get { return _input; }
+            set
+            {
+                if (value == null || value == this) { _input = null; inputNameHash = 0; }
+                else { _input = value; }
+            }
+        }
+
+        // :62-93
+        public PowertrainComponent Output
+        {
+            get { return _output; }
+            set
+            {
+                if (value == this) { outputNameHash = 0; _output = null; return; }
+                if (_output != null) { _output.inputNameHash = 0; _output._input = null; }
+                _output = value;
+                if (_output != null)
+                {
+                    outputNameHash = _output.name.GetHashCode();
+                    _output._input = this;
+                    _output.inputNameHash = name.GetHashCode();
+                }
+                else { outputNameHash = 0; }
+            }
+        }
+
+        // :156-165
+        public virtual float QueryAngularVelocity(float angularVelocity, float dt)
+        {
+            if (outputNameHash == 0) return angularVelocity;
+            return _output.QueryAngularVelocity(angularVelocity, dt);
+        }
+
+        // :167-176
+        public virtual float QueryInertia()
+        {
+            if (outputNameHash == 0) return inertia;
+            return inertia + _output.QueryInertia();
+        }
+
+        // :178-189
+        public virtual float ForwardStep(float torque, float inertiaSum, float dt)
+        {
+            inputTorque = torque;
+            inputInertia = inertiaSum;
+            if (outputNameHash == 0) return torque;
+            outputTorque = inputTorque;
+            outputInertia = inertiaSum + inertia;
+            return _output.ForwardStep(outputTorque, outputInertia, dt);
+        }
     }
 
     public class WheelComponent : PowertrainComponent
     {
         public NWH.Common.Vehicles.WheelUAPI wheelUAPI;
+        private float _initialWheelInertia = -1f;
+
+        // WheelComponent.cs:28 reads this in VC_Initialize; the stub reads it on first use.
+        private float InitialInertia
+        {
+            get { if (_initialWheelInertia < 0f) _initialWheelInertia = wheelUAPI.Inertia; return _initialWheelInertia; }
+        }
+
+        // WheelComponent.cs:64-75
+        public override float QueryAngularVelocity(float angularVelocity, float dt)
+        {
+            return wheelUAPI.AngularVelocity;
+        }
+
+        public override float QueryInertia()
+        {
+            float num = Mathf.Clamp(vehicleController.fixedDeltaTime, 0.01f, 0.05f) / 0.005f;
+            return 0.5f * wheelUAPI.Mass * wheelUAPI.Radius * wheelUAPI.Radius * num;
+        }
+
+        // WheelComponent.cs:81-93
+        public override float ForwardStep(float torque, float inertiaSum, float dt)
+        {
+            float initial = InitialInertia;
+            inputTorque = torque;
+            inputInertia = inertiaSum;
+            outputTorque = inputTorque;
+            outputInertia = initial + inertiaSum;
+            wheelUAPI.MotorTorque = outputTorque;
+            wheelUAPI.Inertia = outputInertia;
+            wheelUAPI.AutoSimulate = false;
+            wheelUAPI.Step();
+            return wheelUAPI.CounterTorque;
+        }
     }
 
     public class Powertrain
@@ -267,13 +381,121 @@ namespace NWH.VehiclePhysics2.Powertrain
     {
         public enum Type { Open, Locked, LimitedSlip, External }
 
+        public delegate void SplitTorque(float T, float Wa, float Wb, float Ia, float Ib, float dt, float biasAB, float stiffness, float powerRamp, float coastRamp, float slipTorque, out float Ta, out float Tb);
+
         private Type _differentialType = Type.Open;
         // Test hook: counts setter calls (the real setter allocates a new split delegate).
         public int TypeAssignments;
-        public Type DifferentialType { get { return _differentialType; } set { _differentialType = value; TypeAssignments++; } }
+        // DifferentialComponent.cs:65-76 — the setter (re)assigns the split delegate. A freshly
+        // constructed diff has NO delegate until this runs (or VC_Initialize does), so its
+        // ForwardStep throws; the stub reproduces that.
+        public Type DifferentialType
+        {
+            get { return _differentialType; }
+            set { _differentialType = value; TypeAssignments++; AssignDifferentialDelegate(); }
+        }
         public float biasAB = 0.5f;
         public float stiffness = 0.5f;
-        public PowertrainComponent OutputB { get; set; }   // DifferentialComponent.cs:78
+        public float powerRamp = 1f;
+        public float coastRamp = 0.5f;
+        public float slipTorque = 400f;
+        public SplitTorque splitTorqueDelegate;
+        protected PowertrainComponent _outputB;
+        public int outputBNameHash;
+
+        // DifferentialComponent.cs:78-107 (verbatim, including NWH's self-assignment quirk)
+        public PowertrainComponent OutputB
+        {
+            get { return _outputB; }
+            set
+            {
+                if (value == this) { outputBNameHash = 0; _output = null; return; }
+                if (_outputB != null) { _outputB.inputNameHash = 0; _outputB.Input = null; }
+                _outputB = value;
+                if (_outputB != null) { outputBNameHash = _outputB.name.GetHashCode(); _outputB.Input = this; }
+                else { outputBNameHash = 0; }
+            }
+        }
+
+        // :139-190 (the three split functions, real math)
+        public void OpenDiffTorqueSplit(float T, float Wa, float Wb, float Ia, float Ib, float dt, float biasAB, float stiffness, float powerRamp, float coastRamp, float slipTorque, out float Ta, out float Tb)
+        {
+            Ta = T * (1f - biasAB);
+            Tb = T * biasAB;
+        }
+
+        public void LockingDiffTorqueSplit(float T, float Wa, float Wb, float Ia, float Ib, float dt, float biasAB, float stiffness, float powerRamp, float coastRamp, float slipTorque, out float Ta, out float Tb)
+        {
+            float num = Ia + Ib;
+            float num2 = Ia / num * Wa + Ib / num * Wb;
+            float num3 = (num2 - Wa) * Ia / dt * stiffness;
+            float num4 = (num2 - Wb) * Ib / dt * stiffness;
+            float num5 = T < 0f ? -T : T;
+            num4 = num4 > 0f ? (num4 > num5 ? num5 : num4) : (num4 < -num5 ? -num5 : num4);
+            float num6 = Mathf.Clamp(0.5f + (Wb - Wa) * 10f * stiffness, 0f, 1f);
+            Ta = T * num6 + num3;
+            Tb = T * (1f - num6) + num4;
+        }
+
+        public void LimitedDiffTorqueSplit(float T, float Wa, float Wb, float Ia, float Ib, float dt, float biasAB, float stiffness, float powerRamp, float coastRamp, float slipTorque, out float Ta, out float Tb)
+        {
+            if (Wa < 0f || Wb < 0f) { Ta = T * (1f - biasAB); Tb = T * biasAB; return; }
+            float num = T > 0f ? powerRamp : coastRamp;
+            float num2 = (Wa < 0f ? -Wa : Wa) + (Wb < 0f ? -Wb : Wb);
+            float value = (num2 == 0f ? 0f : (Wa - Wb) / num2) * stiffness * num * slipTorque;
+            float num3 = Mathf.Abs(T);
+            value = Mathf.Clamp(value, -num3 * 0.5f, num3 * 0.5f);
+            Ta = T * 0.5f - value;
+            Tb = T * 0.5f + value;
+        }
+
+        // :192-203
+        public override float QueryAngularVelocity(float angularVelocity, float dt)
+        {
+            if (outputNameHash == 0 || outputBNameHash == 0) return angularVelocity;
+            float num = _output.QueryAngularVelocity(angularVelocity, dt);
+            float num2 = _outputB.QueryAngularVelocity(angularVelocity, dt);
+            return (num + num2) * 0.5f;
+        }
+
+        // :205-214
+        public override float QueryInertia()
+        {
+            if (outputNameHash == 0 || outputBNameHash == 0) return inertia;
+            return inertia + (_output.QueryInertia() + _outputB.QueryInertia());
+        }
+
+        // :216-234
+        public override float ForwardStep(float torque, float inertiaSum, float dt)
+        {
+            inputTorque = torque;
+            inputInertia = inertiaSum;
+            if (outputNameHash == 0 || outputBNameHash == 0) return torque;
+            float wa = _output.QueryAngularVelocity(0f, dt);
+            float wb = _outputB.QueryAngularVelocity(0f, dt);
+            float num = _output.QueryInertia();
+            float num2 = _outputB.QueryInertia();
+            float Ta, Tb;
+            splitTorqueDelegate(torque, wa, wb, num, num2, dt, biasAB, stiffness, powerRamp, coastRamp, slipTorque, out Ta, out Tb);
+            float num3 = inertiaSum * 0.5f + num;
+            float num4 = inertiaSum * 0.5f + num2;
+            outputTorque = Ta + Tb;
+            outputInertia = num3 + num4;
+            return _output.ForwardStep(Ta, num3, dt) + _outputB.ForwardStep(Tb, num4, dt);
+        }
+
+        // :236-255
+        private void AssignDifferentialDelegate()
+        {
+            switch (_differentialType)
+            {
+                case Type.Open: splitTorqueDelegate = OpenDiffTorqueSplit; break;
+                case Type.Locked: splitTorqueDelegate = LockingDiffTorqueSplit; break;
+                case Type.LimitedSlip: splitTorqueDelegate = LimitedDiffTorqueSplit; break;
+                case Type.External: break;
+                default: splitTorqueDelegate = OpenDiffTorqueSplit; break;
+            }
+        }
     }
 }
 

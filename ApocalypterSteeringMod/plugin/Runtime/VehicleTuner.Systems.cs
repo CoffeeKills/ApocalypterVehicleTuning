@@ -121,7 +121,7 @@ namespace ApocalypterSteeringMod.Runtime
         private void ApplyAllAero()
         {
             AeroPreset p = AeroSettings.ActivePreset ?? AeroPreset.Stock;
-            TargetPass(AppliedCat.Aero, r => ApplyAero(r, p), RestoreAero);
+            TargetPass(AppliedCat.Aero, ApplyAero, p, RestoreAero);
         }
 
         private void RestoreAllAero()
@@ -276,7 +276,7 @@ namespace ApocalypterSteeringMod.Runtime
         private void ApplyAllBrakes()
         {
             BrakesPreset p = BrakesSettings.ActivePreset ?? BrakesPreset.Stock;
-            TargetPass(AppliedCat.Brakes, r => ApplyBrakes(r, p), RestoreBrakes);
+            TargetPass(AppliedCat.Brakes, ApplyBrakes, p, RestoreBrakes);
         }
 
         private void RestoreAllBrakes()
@@ -369,7 +369,7 @@ namespace ApocalypterSteeringMod.Runtime
         private void ApplyAllGrip()
         {
             GripPreset p = GripSettings.ActivePreset ?? GripPreset.Stock;
-            TargetPass(AppliedCat.Grip, r => ApplyGrip(r, p), RestoreGrip);
+            TargetPass(AppliedCat.Grip, ApplyGrip, p, RestoreGrip);
         }
 
         private void RestoreAllGrip()
@@ -415,7 +415,8 @@ namespace ApocalypterSteeringMod.Runtime
         private void ApplyAllDrivetrain()
         {
             DrivetrainPreset p = DrivetrainSettings.ActivePreset ?? DrivetrainPreset.Stock;
-            TargetPass(AppliedCat.Drivetrain, r => ApplyDrivetrain(r, p), RestoreDrivetrain);
+            LogLayoutParseError();
+            TargetPass(AppliedCat.Drivetrain, ApplyDrivetrain, p, RestoreDrivetrain);
         }
 
         private void RestoreAllDrivetrain()
@@ -560,6 +561,9 @@ namespace ApocalypterSteeringMod.Runtime
                     diff.stiffness = Mathf.Min(b.DiffStiff[i] * p.DiffStiffnessScale, Mathf.Max(1f, b.DiffStiff[i]));
                 }
             }
+
+            // 0.6.2: custom layout last (it bypasses the vehicle's own diffs, never edits them).
+            ApplyLayout(r);
         }
 
         private static void RestoreDrivetrain(VehicleRecord r)
@@ -568,6 +572,10 @@ namespace ApocalypterSteeringMod.Runtime
             if (b == null)
             {
                 return;
+            }
+            if (b.Layout != null && b.Layout.Applied)
+            {
+                RestoreLayout(b.Layout);
             }
             if (b.HasEngine && r.Vc.powertrain.engine != null)
             {

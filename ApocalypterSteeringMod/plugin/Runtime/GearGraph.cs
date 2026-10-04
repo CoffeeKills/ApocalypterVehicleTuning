@@ -258,9 +258,14 @@ namespace ApocalypterSteeringMod.Runtime
 
             private bool Local(PointerEventData e, out float xn, out float yn)
             {
+                return Local(e.position, e.pressEventCamera, out xn, out yn);
+            }
+
+            private bool Local(Vector2 screenPoint, Camera cam, out float xn, out float yn)
+            {
                 xn = yn = 0f;
                 Vector2 local;
-                if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(rectTransform, e.position, e.pressEventCamera, out local))
+                if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(rectTransform, screenPoint, cam, out local))
                 {
                     return false;
                 }
@@ -276,11 +281,11 @@ namespace ApocalypterSteeringMod.Runtime
             }
 
             /// <summary>Bar under the pointer (1-based), or -1. The whole slot column counts.</summary>
-            private int PickBar(PointerEventData e)
+            private int PickBar(Vector2 screenPoint, Camera cam)
             {
                 float xn, yn;
                 int n = Owner._count();
-                if (n <= 0 || !Local(e, out xn, out yn) || xn < 0f || xn > 1f || yn < -0.05f || yn > 1.05f)
+                if (n <= 0 || !Local(screenPoint, cam, out xn, out yn) || xn < 0f || xn > 1f || yn < -0.05f || yn > 1.05f)
                 {
                     return -1;
                 }
@@ -300,7 +305,9 @@ namespace ApocalypterSteeringMod.Runtime
             public void OnBeginDrag(PointerEventData e)
             {
                 bool canEdit = Owner.CanEdit();
-                int bar = canEdit ? PickBar(e) : -1;
+                // 0.6.2: pick where the drag started, not where it crossed the drag threshold
+                // (a fast pull from a short bar ended below it and scrolled the list instead).
+                int bar = canEdit ? PickBar(e.pressPosition, e.pressEventCamera) : -1;
                 _dragged = -1;
                 _scrolling = false;
                 switch (RouteDrag(canEdit, bar, ParentScroll() != null))
@@ -362,7 +369,7 @@ namespace ApocalypterSteeringMod.Runtime
             public void OnPointerClick(PointerEventData e)
             {
                 bool canEdit = Owner.CanEdit();
-                int bar = canEdit ? PickBar(e) : -1;
+                int bar = canEdit ? PickBar(e.position, e.pressEventCamera) : -1;
                 if (RouteClick(canEdit, e.dragging, e.button == PointerEventData.InputButton.Left, bar) == ClickAction.Select)
                 {
                     Owner._select(bar);

@@ -32,7 +32,7 @@ namespace ApocalypterSteeringMod.Runtime
         private void ApplyAllAlignment()
         {
             AlignmentPreset p = AlignmentSettings.ActivePreset ?? AlignmentPreset.Stock;
-            TargetPass(AppliedCat.Alignment, r => ApplyAlignment(r, p), RestoreAlignment);
+            TargetPass(AppliedCat.Alignment, ApplyAlignment, p, RestoreAlignment);
         }
 
         private void RestoreAllAlignment()

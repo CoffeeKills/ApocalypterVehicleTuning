@@ -243,6 +243,21 @@ public static class Tests
         Console.WriteLine("0.6.0 telemetry + small extras");
         TestTelemetryAndExtras();
 
+        Console.WriteLine("0.6.2 drivetrain layout: parser + validator");
+        TestLayoutParser();
+
+        Console.WriteLine("0.6.2 drivetrain layout: wiring, stepping, restore");
+        TestLayoutRuntime();
+
+        Console.WriteLine("0.6.2 drivetrain layout: config");
+        TestLayoutConfig(dir);
+
+        Console.WriteLine("0.6.2 curve editor: drag picks at the press position");
+        TestCurveEditorPick();
+
+        Console.WriteLine("0.6.2 apply path allocation");
+        TestApplyAllocation();
+
         Console.WriteLine();
         Console.WriteLine(_pass + " passed, " + _fail + " failed");
         return _fail == 0 ? 0 : 1;
@@ -2055,5 +2070,412 @@ public static class Tests
               && !DrivetrainSettings.Enabled && !AssistsSettings.Enabled && !AlignmentSettings.Enabled && !GearboxSettings.Enabled,
             "'Turn everything off' switches all nine categories off");
         ResetAllCategories();
+    }
+
+    // ================================================================ 0.6.2 drivetrain layout
+
+    private sealed class LayoutRig
+    {
+        public VehicleController Vc;
+        public FakeWheel[] W;              // FL, FR, A2L, A2R, ... (front to back, left first)
+        public WheelComponent[] Wc;
+        public DifferentialComponent[] AxleDiffs;
+        public DifferentialComponent Centre;
+    }
+
+    /// <summary>
+    /// A car wired the way NWH's auto-setup wires one (Powertrain.cs:118-165): one Open diff per
+    /// axle (Output = left, OutputB = right), and either a centre diff over the first two axle
+    /// diffs (awd) or the gearbox straight into the last axle's diff (rear-drive).
+    /// </summary>
+    private static LayoutRig MakeLayoutCar(int axles, bool awd, string name)
+    {
+        var rig = new LayoutRig();
+        var vc = new VehicleController();
+        vc.gameObject.name = name;
+        vc.vehicleRigidbody = new Rigidbody();
+        vc.fixedDeltaTime = 0.02f;
+        vc.moduleManager.vehicleController = vc;
+        vc.powertrain.transmission.name = "Transmission";
+        rig.Vc = vc;
+        rig.W = new FakeWheel[axles * 2];
+        rig.Wc = new WheelComponent[axles * 2];
+        rig.AxleDiffs = new DifferentialComponent[axles];
+        for (int a = 0; a < axles; a++)
+        {
+            var group = new WheelGroup();
+            for (int side = 0; side < 2; side++)
+            {
+                var w = new FakeWheel { SpringMaxForce = 30000f, SpringMaxLength = 0.3f };
+                w.transform.position = new Vector3(side == 0 ? -0.8f : 0.8f, 0f, 1.5f - a * 1.5f);
+                var wc = new WheelComponent { name = "Wheel" + (a * 2 + side), wheelUAPI = w, vehicleController = vc };
+                rig.W[a * 2 + side] = w;
+                rig.Wc[a * 2 + side] = wc;
+                group.Wheels.Add(wc);
+                vc.powertrain.wheels.Add(wc);
+            }
+            vc.powertrain.wheelGroups.Add(group);
+            var diff = new DifferentialComponent { name = "Axle Diff " + (a + 1), DifferentialType = DifferentialComponent.Type.Open };
+            diff.Output = rig.Wc[a * 2];
+            diff.OutputB = rig.Wc[a * 2 + 1];
+            rig.AxleDiffs[a] = diff;
+            vc.powertrain.differentials.Add(diff);
+        }
+        if (awd)
+        {
+            rig.Centre = new DifferentialComponent { name = "Center Differential", DifferentialType = DifferentialComponent.Type.LimitedSlip, biasAB = 0.4f };
+            rig.Centre.Output = rig.AxleDiffs[0];
+            rig.Centre.OutputB = rig.AxleDiffs[1];
+            vc.powertrain.differentials.Add(rig.Centre);
+            vc.powertrain.transmission.Output = rig.Centre;
+        }
+        else
+        {
+            vc.powertrain.transmission.Output = rig.AxleDiffs[axles - 1];
+        }
+        return rig;
+    }
+
+    /// <summary>One powertrain step below the gearbox, as TransmissionComponent.ForwardStep does it (:420-433, ratio 1).</summary>
+    private static void StepDrive(LayoutRig rig, float torque)
+    {
+        for (int i = 0; i < rig.W.Length; i++)
+        {
+            rig.W[i].StepCount = 0;
+        }
+        TransmissionComponent t = rig.Vc.powertrain.transmission;
+        if (t.outputNameHash != 0 && t.Output != null)
+        {
+            t.Output.ForwardStep(torque, 0f, 0.02f);
+        }
+    }
+
+    private static string StepCounts(LayoutRig rig)
+    {
+        var sb = new System.Text.StringBuilder();
+        for (int i = 0; i < rig.W.Length; i++) sb.Append(rig.W[i].StepCount);
+        return sb.ToString();
+    }
+
+    private static void TestLayoutParser()
+    {
+        DrivetrainLayout l;
+        string err;
+        Check(DrivetrainLayout.TryParse(DrivetrainSettings.DefaultLayoutText, out l, out err) && l.Nodes.Length == 3
+              && l.Root.Kind == DrivetrainLayout.TargetKind.Node && l.Nodes[l.Root.Node].Name == "transfer"
+              && Near(l.Nodes[l.Root.Node].Split, 0.4f) && l.Nodes[2].Type == DiffMode.LimitedSlip,
+            "default layout parses: transfer (Open, split 0.4) -> front, rear (LSD)");
+        Check(DrivetrainLayout.TryParse("  GEARBOX->r ;; r : lsd STIFFNESS=0.7 slip=900 power=0.8 coast=0.2 -> rl , rr ; ", out l, out err)
+              && Near(l.Nodes[0].Stiffness, 0.7f) && Near(l.Nodes[0].SlipTorque, 900f) && Near(l.Nodes[0].PowerRamp, 0.8f)
+              && Near(l.Nodes[0].CoastRamp, 0.2f) && l.Nodes[0].A.Axle == 0 && l.Nodes[0].A.Side == 'L',
+            "case/space tolerant, empty statements ignored, all LSD keys read (" + err + ")");
+        Check(DrivetrainLayout.TryParse("transmission -> A2", out l, out err) && l.Nodes.Length == 0
+              && l.Root.Kind == DrivetrainLayout.TargetKind.Wheel && l.Root.Axle == 2 && l.Root.Side == 'C',
+            "the gearbox can drive one wheel directly ('transmission' accepted)");
+
+        DrivetrainLayout.Target t;
+        Check(DrivetrainLayout.TryParseWheel("a12r", out t) && t.Axle == 12 && t.Side == 'R', "wheel token A12R");
+        Check(!DrivetrainLayout.TryParseWheel("A0L", out t) && !DrivetrainLayout.TryParseWheel("AxL", out t)
+              && !DrivetrainLayout.TryParseWheel("A1LR", out t) && !DrivetrainLayout.TryParseWheel("A", out t),
+            "bad wheel tokens rejected (A0L, AxL, A1LR, A)");
+
+        string[,] bad =
+        {
+            { "", "empty" },
+            { "r: Open -> RL, RR", "gearbox" },
+            { "gearbox -> RL; gearbox -> RR", "twice" },
+            { "gearbox -> RL, RR", "exactly one" },
+            { "gearbox -> r; r: Stock -> RL, RR", "unknown type" },
+            { "gearbox -> r; r: Viscous -> RL, RR", "unknown type" },
+            { "gearbox -> r; r: Open bias=0.3 -> RL, RR", "unknown key" },
+            { "gearbox -> r; r: Open split=1.5 -> RL, RR", "outside" },
+            { "gearbox -> r; r: Open split=0,4 -> RL, RR", "not a number" },
+            { "gearbox -> r; r: Open -> RL", "two outputs" },
+            { "gearbox -> r; r: Open -> RL, RR, FL", "two outputs" },
+            { "gearbox -> r; r: Open -> RL, RR; r: Open -> FL, FR", "defined twice" },
+            { "gearbox -> r; r: Open -> RL, nowhere", "neither" },
+            { "gearbox -> r; r: Open -> RL, gearbox", "gearbox cannot be an output" },
+            { "gearbox -> r; r: Open -> r, RR", "feeds itself" },
+            { "gearbox -> a; a: Open -> b, FL; b: Open -> FR, RL; c: Open -> b, RR", "fed twice" },
+            { "gearbox -> RL; a: Open -> b, FL; b: Open -> a, FR", "not connected" },   // a detached cycle
+            { "gearbox -> RL; a: Open -> FL, FR", "not connected" },
+            { "gearbox -> r; r: Open -> FL, FL", "driven twice" },
+            { "gearbox -> FL; FL: Open -> RL, RR", "wheel name" },
+            { "gearbox -> 4wd; 4wd: Open -> RL, RR", "start with a letter" },
+            { "gearbox -> r; r: Open -> RL, RR -> FL", "one '->'" },
+            { "gearbox RL", "missing '->'" },
+        };
+        for (int i = 0; i < bad.GetLength(0); i++)
+        {
+            bool ok = DrivetrainLayout.TryParse(bad[i, 0], out l, out err);
+            Check(!ok && l == null && err != null && err.IndexOf(bad[i, 1], StringComparison.OrdinalIgnoreCase) >= 0,
+                "rejected: '" + bad[i, 0] + "' -> " + err);
+        }
+    }
+
+    private static void TestLayoutRuntime()
+    {
+        UnityEngine.Object.Registry.Clear();
+        ResetAllCategories();
+        TargetSettings.Mode = TargetMode.All;
+        TargetSettings.SelectedName = "";
+
+        // ---- a 4-wheel AWD car the game has already been driving (stepped once before capture)
+        LayoutRig awd = MakeLayoutCar(2, true, "Duke(Clone)");
+        StepDrive(awd, 100f);
+        Check(StepCounts(awd) == "1111" && !awd.W[0].AutoSimulate && awd.W[0].Inertia > 1.2f,
+            "rig: stock AWD steps every wheel once and the powertrain owns them (AutoSimulate off, reflected inertia)");
+        UnityEngine.Object.Registry.Add(awd.Vc);
+        var tuner = new VehicleTuner();
+        tuner.ReapplyNow();
+
+        TransmissionComponent t = awd.Vc.powertrain.transmission;
+        PowertrainComponent stockOut = t.Output;
+        int stockOutHash = t.outputNameHash;
+        var stockIn = new PowertrainComponent[4];
+        var stockInHash = new int[4];
+        for (int i = 0; i < 4; i++) { stockIn[i] = awd.Wc[i].Input; stockInHash[i] = awd.Wc[i].inputNameHash; }
+
+        string stock = tuner.StockLayoutText(awd.Vc);
+        DrivetrainLayout parsed;
+        string err;
+        Check(stock != null && DrivetrainLayout.TryParse(stock, out parsed, out err) && parsed.Nodes.Length == 3,
+            "the vehicle's own wiring is logged as layout text that parses back: " + stock);
+        Check(stock != null && stock.IndexOf("LSD", StringComparison.Ordinal) >= 0 && stock.IndexOf("split=0.6", StringComparison.Ordinal) >= 0
+              && stock.IndexOf("-> FL, FR", StringComparison.Ordinal) >= 0 && stock.IndexOf("-> RL, RR", StringComparison.Ordinal) >= 0,
+            "stock text keeps the centre diff's type and split (biasAB 0.4 = 60% to output A) and the wheel tokens");
+
+        // Layout on: rear-drive with an LSD.
+        DrivetrainSettings.Enabled = true;
+        DrivetrainSettings.LayoutEnabled = true;
+        DrivetrainSettings.LayoutText = "gearbox -> rear; rear: LSD -> RL, RR";
+        tuner.ApplyLive();
+        var node = t.Output as DifferentialComponent;
+        Check(node != null && node != stockOut && node.name == "AVT rear", "the gearbox now drives the layout's root node");
+        Check(awd.Vc.powertrain.differentials.Count == 3, "layout nodes are NOT added to powertrain.differentials");
+        Check(t.outputNameHash == stockOutHash, "the transmission keeps its stock output hash (a save can't bake a dangling name)");
+        bool hashesStock = true;
+        for (int i = 0; i < 4; i++) hashesStock &= awd.Wc[i].inputNameHash == stockInHash[i];
+        Check(hashesStock, "every wheel keeps its stock input hash");
+        StepDrive(awd, 100f);
+        Check(StepCounts(awd) == "0011", "only RL/RR are stepped by the powertrain, once each (" + StepCounts(awd) + ")");
+        Check(Near(awd.W[2].MotorTorque + awd.W[3].MotorTorque, 100f), "all torque reaches the rear wheels");
+        Check(awd.W[0].AutoSimulate && awd.W[1].AutoSimulate && Near(awd.W[0].MotorTorque, 0f) && Near(awd.W[0].Inertia, 1.2f),
+            "released front wheels simulate themselves again, with no motor torque and their own inertia");
+        Check(awd.Centre.Output == awd.AxleDiffs[0] && awd.Centre.OutputB == awd.AxleDiffs[1]
+              && awd.Centre.DifferentialType == DifferentialComponent.Type.LimitedSlip && Near(awd.Centre.biasAB, 0.4f)
+              && awd.AxleDiffs[0].Output == awd.Wc[0],
+            "the vehicle's own diffs are bypassed, never edited");
+
+        int assigns = node.TypeAssignments;
+        tuner.ApplyLive();
+        tuner.ApplyLive();
+        StepDrive(awd, 100f);
+        Check(t.Output == node && node.TypeAssignments == assigns && StepCounts(awd) == "0011",
+            "re-applying is idempotent (same node, no split-delegate churn, still one step per wheel)");
+
+        // A new Open node: Open is also the field default, so an assign-on-change rule would
+        // leave NWH's split delegate null and ForwardStep would throw every tick.
+        DrivetrainSettings.LayoutText = "gearbox -> rear; rear: Open -> RL, RR";
+        tuner.ApplyLive();
+        bool threw = false;
+        try { StepDrive(awd, 50f); } catch (NullReferenceException) { threw = true; }
+        Check(!threw && Near(awd.W[2].MotorTorque, 25f), "a new Open node has its split delegate assigned");
+
+        // Full-time AWD with a 40/60 open transfer case (the shipped example).
+        DrivetrainSettings.LayoutText = DrivetrainSettings.DefaultLayoutText;
+        tuner.ApplyLive();
+        StepDrive(awd, 100f);
+        Check(StepCounts(awd) == "1111" && Near(awd.W[0].MotorTorque + awd.W[1].MotorTorque, 40f)
+              && Near(awd.W[2].MotorTorque + awd.W[3].MotorTorque, 60f) && !awd.W[0].AutoSimulate,
+            "Open transfer case split=0.4: 40% front / 60% rear, every wheel stepped once");
+
+        // Layout OFF (category stays on): exact restore of references and hashes.
+        DrivetrainSettings.LayoutEnabled = false;
+        tuner.ApplyLive();
+        bool inputsStock = true;
+        for (int i = 0; i < 4; i++) inputsStock &= awd.Wc[i].Input == stockIn[i] && awd.Wc[i].inputNameHash == stockInHash[i];
+        Check(t.Output == stockOut && t.outputNameHash == stockOutHash && stockOut.Input == t && inputsStock,
+            "layout OFF restores the gearbox output, the root's input and every wheel's input + hash");
+        StepDrive(awd, 100f);
+        Check(StepCounts(awd) == "1111", "the stock AWD drivetrain steps all four wheels again");
+
+        // A layout that does not fit this vehicle: it keeps its own drivetrain.
+        DrivetrainSettings.LayoutEnabled = true;
+        DrivetrainSettings.LayoutText = "gearbox -> rear; rear: Open -> A3L, A3R";
+        tuner.ApplyLive();
+        string problem = tuner.LayoutProblem(awd.Vc);
+        Check(t.Output == stockOut && problem != null && problem.IndexOf("2 axles", StringComparison.Ordinal) >= 0,
+            "an axle the vehicle lacks: layout skipped, own drivetrain kept (" + problem + ")");
+
+        // Applied, then a layout that only collides on this vehicle (RL = A2L on two axles): restored.
+        DrivetrainSettings.LayoutText = "gearbox -> rear; rear: LSD -> RL, RR";
+        tuner.ApplyLive();
+        Check(t.Output != stockOut, "(applied again)");
+        DrivetrainSettings.LayoutText = "gearbox -> rear; rear: Open -> RL, A2L";
+        tuner.ApplyLive();
+        problem = tuner.LayoutProblem(awd.Vc);
+        Check(t.Output == stockOut && problem != null && problem.IndexOf("driven twice", StringComparison.Ordinal) >= 0,
+            "RL and A2L name the same wheel here: rejected and the previous layout restored (" + problem + ")");
+
+        // Invalid text while enabled: nothing changes, the reason is available.
+        DrivetrainSettings.LayoutText = "gearbox -> nowhere";
+        tuner.ApplyLive();
+        Check(t.Output == stockOut && DrivetrainSettings.Layout == null && DrivetrainSettings.LayoutError != null
+              && tuner.LayoutProblem(awd.Vc) == DrivetrainSettings.LayoutError,
+            "invalid layout text: every vehicle keeps its own drivetrain (" + DrivetrainSettings.LayoutError + ")");
+
+        // The gearbox straight into one wheel.
+        DrivetrainSettings.LayoutText = "gearbox -> RL";
+        tuner.ApplyLive();
+        StepDrive(awd, 100f);
+        Check(t.Output == awd.Wc[2] && StepCounts(awd) == "0010" && Near(awd.W[2].MotorTorque, 100f) && awd.W[3].AutoSimulate,
+            "'gearbox -> RL' drives that one wheel and releases the rest");
+
+        // Category OFF restores too.
+        DrivetrainSettings.LayoutText = "gearbox -> rear; rear: LSD -> RL, RR";
+        tuner.ApplyLive();
+        DrivetrainSettings.Enabled = false;
+        tuner.ApplyLive();
+        StepDrive(awd, 100f);
+        Check(t.Output == stockOut && StepCounts(awd) == "1111", "Drivetrain OFF restores the vehicle's own wiring");
+
+        // Runner disabled (OnDisable restores, like every category).
+        DrivetrainSettings.Enabled = true;
+        tuner.ApplyLive();
+        Check(t.Output != stockOut, "(applied again)");
+        Invoke(tuner, "OnDisable");
+        Check(t.Output == stockOut && t.outputNameHash == stockOutHash, "runner OnDisable restores the layout");
+        Invoke(tuner, "OnEnable");
+
+        // ---- 6x6 truck: rear-drive from the factory, layout drives all three axles.
+        UnityEngine.Object.Registry.Clear();
+        LayoutRig six = MakeLayoutCar(3, false, "Rustliner(Clone)");
+        StepDrive(six, 100f);
+        UnityEngine.Object.Registry.Add(six.Vc);
+        var t6 = new VehicleTuner();
+        t6.ReapplyNow();
+        string sixStock = t6.StockLayoutText(six.Vc);
+        Check(sixStock != null && sixStock.IndexOf("-> RL, RR", StringComparison.Ordinal) >= 0 && sixStock.IndexOf("A2", StringComparison.Ordinal) < 0,
+            "6x6 stock text: only the last axle is driven (" + sixStock + ")");
+        DrivetrainSettings.Enabled = true;
+        DrivetrainSettings.LayoutEnabled = true;
+        DrivetrainSettings.LayoutText = "gearbox -> transfer; transfer: Locked -> front, bogie; front: Open -> FL, FR; "
+            + "bogie: Locked -> mid, rear; mid: Open -> A2L, A2R; rear: Open -> RL, RR";
+        t6.ApplyLive();
+        StepDrive(six, 80f);
+        Check(StepCounts(six) == "111111", "6x6 layout: all six wheels stepped exactly once (" + StepCounts(six) + ")");
+        Check(Near(six.W[0].MotorTorque, 20f) && Near(six.W[2].MotorTorque, 10f) && Near(six.W[5].MotorTorque, 10f),
+            "6x6 torque: 1/2 to the front axle, 1/4 each to the middle and rear (locked, equal wheel speeds)");
+        Check(!six.W[0].AutoSimulate && !six.W[2].AutoSimulate, "previously undriven wheels are now owned by the powertrain");
+        DrivetrainSettings.LayoutEnabled = false;
+        t6.ApplyLive();
+        StepDrive(six, 80f);
+        Check(StepCounts(six) == "000011" && six.W[0].AutoSimulate && six.W[2].AutoSimulate && Near(six.W[0].MotorTorque, 0f)
+              && Near(six.W[0].Inertia, 1.2f),
+            "OFF: back to rear-drive; the front/middle wheels simulate themselves again with their own inertia");
+
+        // ---- targeting: Selected vehicle only, switching restores the old one.
+        UnityEngine.Object.Registry.Clear();
+        LayoutRig a = MakeLayoutCar(2, true, "Outrider(Clone)");
+        LayoutRig b = MakeLayoutCar(2, true, "Junker(Clone)");
+        UnityEngine.Object.Registry.Add(a.Vc);
+        UnityEngine.Object.Registry.Add(b.Vc);
+        var t2 = new VehicleTuner();
+        t2.ReapplyNow();
+        DrivetrainSettings.LayoutEnabled = true;
+        DrivetrainSettings.LayoutText = "gearbox -> rear; rear: LSD -> RL, RR";
+        TargetSettings.Mode = TargetMode.Selected;
+        TargetSettings.SelectedName = "Outrider(Clone)";
+        t2.ApplyLive();
+        Check(a.Vc.powertrain.transmission.Output != a.Centre && b.Vc.powertrain.transmission.Output == b.Centre,
+            "Selected: only the selected vehicle gets the layout");
+        TargetSettings.SelectedName = "Junker(Clone)";
+        t2.ApplyLive();
+        Check(a.Vc.powertrain.transmission.Output == a.Centre && b.Vc.powertrain.transmission.Output != b.Centre,
+            "switching the selection restores the old vehicle and rewires the new one");
+        TargetSettings.Mode = TargetMode.All;
+        TargetSettings.SelectedName = "";
+        DrivetrainSettings.Enabled = false;
+        t2.ApplyLive();
+        Check(a.Vc.powertrain.transmission.Output == a.Centre && b.Vc.powertrain.transmission.Output == b.Centre, "OFF restores both");
+        ResetAllCategories();
+        UnityEngine.Object.Registry.Clear();
+    }
+
+    private static void TestLayoutConfig(string dir)
+    {
+        string path = Path.Combine(dir, "layout.cfg");
+        ModConfig.Load(new ConfigFile(path, true));
+        Check(!DrivetrainSettings.LayoutEnabled && DrivetrainSettings.LayoutText == DrivetrainSettings.DefaultLayoutText
+              && DrivetrainSettings.Layout != null,
+            "fresh config: layout off, the example text present and valid");
+        string text = "gearbox ->  rear ; rear: LSD  stiffness=0.65 -> RL, RR";
+        DrivetrainSettings.LayoutEnabled = true;
+        DrivetrainSettings.LayoutText = text;
+        ModConfig.Save();
+        DrivetrainSettings.LayoutEnabled = false;
+        DrivetrainSettings.LayoutText = "gearbox -> FL";
+        ModConfig.Load(new ConfigFile(path, true));
+        Check(DrivetrainSettings.LayoutEnabled && DrivetrainSettings.LayoutText == text && DrivetrainSettings.Layout != null
+              && Near(DrivetrainSettings.Layout.Nodes[0].Stiffness, 0.65f),
+            "layout Enabled + text round-trip through the file verbatim");
+        Check(File.ReadAllText(path).IndexOf("[Drivetrain.Layout]", StringComparison.Ordinal) >= 0, "written under [Drivetrain.Layout]");
+
+        string broken = Path.Combine(dir, "layout-broken.cfg");
+        File.WriteAllText(broken, "[Drivetrain.Layout]\nEnabled = true\nLayout = gearbox -> a; a: Open -> b, RL; b: Open -> a, RR\n");
+        ModConfig.Load(new ConfigFile(broken, true));
+        Check(DrivetrainSettings.LayoutEnabled && DrivetrainSettings.Layout == null && DrivetrainSettings.LayoutError != null,
+            "a hand-edited cyclic layout loads without throwing and is rejected (" + DrivetrainSettings.LayoutError + ")");
+
+        DrivetrainSettings.LayoutEnabled = true;
+        DrivetrainSettings.ResetAll();
+        Check(!DrivetrainSettings.LayoutEnabled && DrivetrainSettings.LayoutText.IndexOf("a: Open", StringComparison.Ordinal) >= 0,
+            "Reset-all turns the layout off but keeps the user's text");
+        ModConfig.Load(new ConfigFile(Path.Combine(dir, "layout-reset.cfg"), true));
+        ResetAllCategories();
+    }
+
+    private static void TestCurveEditorPick()
+    {
+        // 300x190 graph, centred pivot: the middle handle (0.5, 0.5) sits at local (0, 0).
+        EditableCurve curve = EditableCurve.FromPoints(0f, 0f, 0.5f, 0.5f, 1f, 1f);
+        Check(CurveEditor.PickHandleAt(curve, new Vector2(2f, 1f), 300f, 190f, 0.5f, 0.5f) == 1, "press on a handle picks it");
+        Check(CurveEditor.PickHandleAt(curve, new Vector2(18f, 1f), 300f, 190f, 0.5f, 0.5f) == -1,
+            "16 px further on — where OnBeginDrag fires on a quick pull past the 10 px drag threshold — the same handle "
+            + "is outside the 14 px pick radius: the drag must pick at pressPosition (0.6.0 used the current position and scrolled instead)");
+        Check(CurveEditor.PickHandleAt(null, Vector2.zero, 300f, 190f, 0.5f, 0.5f) == -1, "no curve: no handle");
+    }
+
+    private static void TestApplyAllocation()
+    {
+        UnityEngine.Object.Registry.Clear();
+        ResetAllCategories();
+        TargetSettings.Mode = TargetMode.All;
+        LayoutRig rig = MakeLayoutCar(2, true, "Duke(Clone)");
+        UnityEngine.Object.Registry.Add(rig.Vc);
+        var tuner = new VehicleTuner();
+        tuner.ReapplyNow();
+        SuspensionSettings.Enabled = true; SuspensionSettings.SetPresetByName("Race");
+        BrakesSettings.Enabled = true; BrakesSettings.SetPresetByName("Race");
+        GripSettings.Enabled = true; GripSettings.SetPresetByName("Race");
+        DrivetrainSettings.Enabled = true; DrivetrainSettings.SetPresetByName("Race");
+        AssistsSettings.Enabled = true; AssistsSettings.SetPresetByName("Standard");
+        AlignmentSettings.Enabled = true; AlignmentSettings.SetPresetByName("Race");
+        DrivetrainSettings.LayoutEnabled = true;
+        DrivetrainSettings.LayoutText = DrivetrainSettings.DefaultLayoutText;
+        tuner.ApplyLive();   // first apply: baseline refresh + layout resolve (allocates by design)
+        tuner.ApplyLive();
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 50; i++)
+        {
+            tuner.ApplyLive();
+        }
+        long bytes = GC.GetAllocatedBytesForCurrentThread() - before;
+        Check(bytes == 0, "steady-state ApplyLive with six categories + a layout allocates nothing (" + bytes + " bytes over 50 passes; "
+            + "0.6.0 built a closure per category per pass)");
+        ResetAllCategories();
+        tuner.ApplyLive();
+        UnityEngine.Object.Registry.Clear();
     }
 }

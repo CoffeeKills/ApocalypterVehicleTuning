@@ -302,7 +302,12 @@ namespace ApocalypterSteeringMod.Runtime
         {
             GearboxPreset p = GearboxSettings.ActivePreset ?? GearboxPreset.Stock;
             AnyGearboxSkipped = false;
-            TargetPass(AppliedCat.Gearbox, r => ApplyGearbox(r, p), RestoreGearbox);
+            // ApplyGearbox is an instance method (it sets AnyGearboxSkipped): cache its delegate once.
+            if (_applyGearbox == null)
+            {
+                _applyGearbox = ApplyGearbox;
+            }
+            TargetPass(AppliedCat.Gearbox, _applyGearbox, p, RestoreGearbox);
         }
 
         private void RestoreAllGearbox()
@@ -315,6 +320,8 @@ namespace ApocalypterSteeringMod.Runtime
             return d.HasTransmission && d.Standard && !d.IsCvt
                 && d.Type != TransmissionComponent.TransmissionShiftType.External;
         }
+
+        private Action<VehicleRecord, GearboxPreset> _applyGearbox;
 
         private void ApplyGearbox(VehicleRecord r, GearboxPreset p)
         {

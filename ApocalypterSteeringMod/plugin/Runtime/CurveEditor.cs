@@ -207,6 +207,42 @@ namespace ApocalypterSteeringMod.Runtime
         /// so 0.4.0's "don't Use() the event" never reached the list and the list could not
         /// be scrolled by dragging over a graph.
         /// </summary>
+        /// <summary>
+        /// Index of the handle within PickRadius of a point in the graph's local space, or -1.
+        /// 0.6.2: OnBeginDrag must pick at the PRESS position. uGUI only calls OnBeginDrag once
+        /// the pointer has moved past the EventSystem drag threshold (10 px by default), so the
+        /// current position is already 10+ px from where the user grabbed — often outside the
+        /// 14 px pick radius, and the drag fell through to scrolling the list: a point the user
+        /// clearly grabbed would not move.
+        /// </summary>
+        public static int PickHandleAt(EditableCurve curve, Vector2 local, float width, float height, float pivotX, float pivotY)
+        {
+            if (curve == null)
+            {
+                return -1;
+            }
+            float gw = width - 2f * Pad;
+            float gh = height - 2f * Pad;
+            float px = width * pivotX;
+            float py = height * pivotY;
+            int best = -1;
+            float bestD = PickRadius * PickRadius;
+            for (int i = 0; i < curve.Count; i++)
+            {
+                float hx = Pad + curve.X(i) * gw - px;
+                float hy = Pad + curve.Y(i) * gh - py;
+                float dx = local.x - hx;
+                float dy = local.y - hy;
+                float d = dx * dx + dy * dy;
+                if (d <= bestD)
+                {
+                    bestD = d;
+                    best = i;
+                }
+            }
+            return best;
+        }
+
         public static DragRoute RouteDrag(bool canEdit, int handle, bool hasScroll)
         {
             if (canEdit && handle >= 0)
@@ -403,36 +439,15 @@ namespace ApocalypterSteeringMod.Runtime
                 return true;
             }
 
-            private int PickHandle(PointerEventData e)
+            private int PickHandle(Vector2 screenPoint, Camera cam)
             {
-                EditableCurve curve = Owner.GetCurve();
-                if (curve == null)
-                {
-                    return -1;
-                }
                 Vector2 local;
-                if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(rectTransform, e.position, e.pressEventCamera, out local))
+                if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(rectTransform, screenPoint, cam, out local))
                 {
                     return -1;
                 }
                 Rect r = rectTransform.rect;
-                float gw = r.width - 2f * Pad;
-                float gh = r.height - 2f * Pad;
-                int best = -1;
-                float bestD = PickRadius * PickRadius;
-                for (int i = 0; i < curve.Count; i++)
-                {
-                    Vector2 p = ToLocal(curve.X(i), curve.Y(i), gw, gh, r.width * rectTransform.pivot.x, r.height * rectTransform.pivot.y);
-                    float dx = local.x - p.x;
-                    float dy = local.y - p.y;
-                    float d = dx * dx + dy * dy;
-                    if (d <= bestD)
-                    {
-                        bestD = d;
-                        best = i;
-                    }
-                }
-                return best;
+                return PickHandleAt(Owner.GetCurve(), local, r.width, r.height, rectTransform.pivot.x, rectTransform.pivot.y);
             }
 
             private ScrollRect ParentScroll()
@@ -447,7 +462,8 @@ namespace ApocalypterSteeringMod.Runtime
             public void OnBeginDrag(PointerEventData e)
             {
                 bool canEdit = Owner.CanEdit();
-                int handle = canEdit ? PickHandle(e) : -1;
+                // Where the drag STARTED (see PickHandleAt): e.position is past the drag threshold.
+                int handle = canEdit ? PickHandle(e.pressPosition, e.pressEventCamera) : -1;
                 _dragged = -1;
                 _scrolling = false;
                 switch (RouteDrag(canEdit, handle, ParentScroll() != null))
@@ -516,7 +532,7 @@ namespace ApocalypterSteeringMod.Runtime
             public void OnPointerClick(PointerEventData e)
             {
                 bool canEdit = Owner.CanEdit();
-                int handle = canEdit ? PickHandle(e) : -1;
+                int handle = canEdit ? PickHandle(e.position, e.pressEventCamera) : -1;
                 ClickAction action = RouteClick(canEdit, e.dragging,
                     e.button == PointerEventData.InputButton.Left, e.clickCount, handle);
                 if (action == ClickAction.None)

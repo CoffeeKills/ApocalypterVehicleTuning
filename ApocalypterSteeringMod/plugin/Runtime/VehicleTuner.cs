@@ -70,6 +70,7 @@ namespace ApocalypterSteeringMod.Runtime
             public DifferentialComponent.Type[] DiffModes;   // per differential index
             public float[] DiffBias, DiffStiff;
             public bool[] DiffCaptured;                      // false = slot was null at capture: never written
+            public LayoutData Layout;                        // 0.6.2 stock wiring + custom layout state (null: no transmission/wheels)
         }
 
         internal sealed class AeroData
@@ -394,6 +395,7 @@ namespace ApocalypterSteeringMod.Runtime
             }
 
             record.Drivetrain = CaptureDrivetrain(vc);
+            LogStockLayout(vc, record.Drivetrain.Layout);
             record.Aero = CaptureAero(vc);
             record.Gearbox = CaptureGearbox(vc);
             record.Assists = CreateAssistHandles(vc);
@@ -448,6 +450,7 @@ namespace ApocalypterSteeringMod.Runtime
                     dt.DiffCaptured[i] = true;
                 }
             }
+            dt.Layout = CaptureLayout(vc);
             return dt;
         }
 
@@ -957,6 +960,34 @@ namespace ApocalypterSteeringMod.Runtime
         /// category applied (idempotently) and their bit set; records that were
         /// applied but are no longer targets get restored and their bit cleared.
         /// </summary>
+        /// <summary>
+        /// TargetPass with the active preset passed through. 0.6.2: the per-category passes used
+        /// capturing lambdas (r => ApplyX(r, p)), a fresh closure + delegate on every ApplyLive,
+        /// i.e. every 2 s scan and every slider tick — the apply path was not allocation-free as
+        /// documented. Static method groups are cached by the compiler; the preset rides along.
+        /// </summary>
+        private void TargetPass<T>(AppliedCat cat, Action<VehicleRecord, T> apply, T preset, Action<VehicleRecord> restore)
+        {
+            foreach (KeyValuePair<VehicleController, VehicleRecord> kv in _records)
+            {
+                VehicleRecord r = kv.Value;
+                if (kv.Key == null || r == null || r.Vc == null)
+                {
+                    continue;
+                }
+                if (IsTarget(kv.Key))
+                {
+                    apply(r, preset);
+                    r.Applied |= cat;
+                }
+                else if ((r.Applied & cat) != 0)
+                {
+                    restore(r);
+                    r.Applied &= ~cat;
+                }
+            }
+        }
+
         private void TargetPass(AppliedCat cat, Action<VehicleRecord> apply, Action<VehicleRecord> restore)
         {
             foreach (KeyValuePair<VehicleController, VehicleRecord> kv in _records)

@@ -397,6 +397,7 @@ namespace UnityEngine.EventSystems
     {
         public enum InputButton { Left, Right, Middle }
         public Vector2 position { get; set; }
+        public Vector2 pressPosition { get; set; }   // PointerEventData.pressPosition (Unity 2020.3)
         public int clickCount { get; set; }
         private bool _used;
         public bool used { get { return _used; } }

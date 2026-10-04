@@ -66,6 +66,8 @@ namespace ApocalypterSteeringMod.Persistence
         private static ConfigEntry<float> _dtPower, _dtRevLimit, _dtLoss, _dtBoost, _dtFinalDrive,
             _dtUpshift, _dtDownshift, _dtShiftDur, _dtDiffStiff, _dtDiffBias;
         private static ConfigEntry<string> _dtDiffFront, _dtDiffRear;
+        private static ConfigEntry<bool> _dtLayoutEnabled;     // 0.6.2
+        private static ConfigEntry<string> _dtLayout;          // 0.6.2
 
         // Assists
         private static ConfigEntry<bool> _assistsEnabled;
@@ -307,6 +309,21 @@ namespace ApocalypterSteeringMod.Persistence
             _dtDiffBias = BindRange("Drivetrain.Custom", "DiffBiasScale", 1f, Limits.DiffScaleMin, Limits.DiffScaleMax, "Centre (AWD) differential front/rear bias factor; axle diffs keep their stock bias.");
             _dtDiffFront = _config.Bind("Drivetrain.Custom", "DiffFrontMode", "Stock", "Front-axle differential: Stock, Open, Locked, LimitedSlip (LSD accepted).");
             _dtDiffRear = _config.Bind("Drivetrain.Custom", "DiffRearMode", "Stock", "Rear-axle differential: Stock, Open, Locked, LimitedSlip (LSD accepted).");
+            _dtLayoutEnabled = _config.Bind("Drivetrain.Layout", "Enabled", false,
+                "Replace each vehicle's own drivetrain wiring with the Layout below (needs [Drivetrain] Enabled; follows the panel's Apply-to target). "
+                + "A vehicle the layout does not fit (missing axle/wheel) keeps its own drivetrain; the log says why.");
+            _dtLayout = _config.Bind("Drivetrain.Layout", "Layout", DrivetrainSettings.DefaultLayoutText,
+                "Where the gearbox, transfer cases and differentials send torque. Statements separated by ';':\n"
+                + "  gearbox -> X              what the gearbox drives (a node or one wheel)\n"
+                + "  name: Type [k=v ...] -> A, B   a differential/transfer case with two outputs\n"
+                + "Type: Open, Locked, LSD. Keys: split (0-1, share of torque to A; Open diffs), stiffness (0-1, Locked/LSD), "
+                + "slip (LSD slip torque N·m, 0-5000), power / coast (LSD ramps, 0-1).\n"
+                + "Outputs: node names or wheels FL FR RL RR (first/last axle), A<n>L / A<n>R / A<n> (axle n from the front, centre wheel).\n"
+                + "Every node must be reachable from the gearbox and every node/wheel fed once; wheels not named are undriven.\n"
+                + "Each vehicle's own layout is written to the BepInEx log on first sight, ready to copy.\n"
+                + "Examples: RWD 'gearbox -> rear; rear: LSD -> RL, RR'  |  "
+                + "6x6 'gearbox -> transfer; transfer: Locked -> front, bogie; front: Open -> FL, FR; bogie: Locked -> mid, rear; "
+                + "mid: Open -> A2L, A2R; rear: Open -> RL, RR'.");
         }
 
         private static void BindAssists()
@@ -416,6 +433,7 @@ namespace ApocalypterSteeringMod.Persistence
             Wire(_dtPower); Wire(_dtRevLimit); Wire(_dtLoss); Wire(_dtBoost); Wire(_dtFinalDrive);
             Wire(_dtUpshift); Wire(_dtDownshift); Wire(_dtShiftDur); Wire(_dtDiffStiff); Wire(_dtDiffBias);
             Wire(_dtDiffFront); Wire(_dtDiffRear);
+            Wire(_dtLayoutEnabled); Wire(_dtLayout);
             Wire(_assistsEnabled); Wire(_assistsPreset); Wire(_assistsBasedOn);
             Wire(_assistsAbsEnabled); Wire(_assistsAbsThr); Wire(_assistsAbsCut); Wire(_assistsAbsMult);
             Wire(_assistsTcsEnabled); Wire(_assistsTcsThr); Wire(_assistsTcsCut); Wire(_assistsTcsMult);
@@ -696,6 +714,8 @@ namespace ApocalypterSteeringMod.Persistence
                 _dtDiffBias.Value = dc.DiffBiasScale;
                 _dtDiffFront.Value = dc.DiffFrontMode.ToString();
                 _dtDiffRear.Value = dc.DiffRearMode.ToString();
+                _dtLayoutEnabled.Value = DrivetrainSettings.LayoutEnabled;
+                _dtLayout.Value = DrivetrainSettings.LayoutText;
 
                 _assistsEnabled.Value = AssistsSettings.Enabled;
                 _assistsPreset.Value = AssistsSettings.ActivePreset != null ? AssistsSettings.ActivePreset.Name : "Off";
@@ -906,6 +926,8 @@ namespace ApocalypterSteeringMod.Persistence
             dc.DiffBiasScale = _dtDiffBias.Value;
             dc.DiffFrontMode = ParseDiffMode(_dtDiffFront.Value);
             dc.DiffRearMode = ParseDiffMode(_dtDiffRear.Value);
+            DrivetrainSettings.LayoutEnabled = _dtLayoutEnabled.Value;
+            DrivetrainSettings.LayoutText = _dtLayout.Value;
 
             AssistsSettings.Enabled = _assistsEnabled.Value;
             AssistsSettings.SetPresetByName(_assistsPreset.Value);

@@ -1,8 +1,8 @@
-# Apocalypter Vehicle Tuning (v0.6.0-alpha)
+# Apocalypter Vehicle Tuning (v0.6.2-alpha)
 
 A BepInEx mod for **Apocalypter** (SawyerK Games, Unity 2020.3.49, BepInEx 5.4.23.5 + Harmony 2) that adds a full vehicle-tuning panel: steering, suspension, aero, brakes, tire grip, drivetrain, stability assists (ABS/TCS), wheel alignment and gearbox, all applied live to every vehicle in the game. Since 0.6.0 the panel docks to the right edge and you can keep driving while it is open.
 
-The repo contains the complete mod source (`plugin/`) plus a self-contained test harness (`verify/` — Unity/NWH compile stubs and a 373-test suite, needs only a .NET SDK 8+; `verify/refs/` carries the BepInEx 5 core DLLs it needs). The `gamecode/` excerpts used for audits are kept out of the public repo.
+The repo contains the complete mod source (`plugin/`) plus a self-contained test harness (`verify/` — Unity/NWH compile stubs and a 467-test suite, needs only a .NET SDK 8+; `verify/refs/` carries the BepInEx 5 core DLLs it needs). The `gamecode/` excerpts used for audits are kept out of the public repo.
 
 ## Changes in 0.2.0-alpha
 
@@ -216,6 +216,60 @@ All §2 facts are preserved. The hidden-runner survival architecture is unchange
 - **Negative control** (against the untouched 0.5.0 plugin, compiled against the new stubs): the 9 new checks that compile against 0.5.0 give 5 failures (the four audit bugs: destroyed-vehicle writes ×2, latched-handbrake ABS, TCS mid-shift, external edit reverting panel edits) and 4 passes (their positive controls). The other 126 new checks exercise 0.6.0 API and do not compile against 0.5.0. `run.sh` is unchanged.
 - **gamecode/ gap:** `PowertrainComponent` (base of Engine/Clutch/Transmission/Wheel/Differential, declares `OutputRPM`) is referenced through `ClutchComponent.cs:10/95/108` but its file is not in the bundle. Please copy `PowertrainComponent.cs` from the decompiled tree into `gamecode/`. The stub mirrors only the members the mod uses.
 
+## Changes in 0.6.2-alpha
+
+Scope of this pass: (1) verify the curve-editor fix from the playtest note, (2) a **custom drivetrain layout** — define in the config where the gearbox, transfer cases and differentials send torque, down to individual wheels (user request; config only, no panel UI yet). FEATURES.md (the 0.7.0 spec: own shift controller, Truck preset, telemetry pins, UI resize) is **not** implemented here; its §2 question is answered below. Suite: **467 tests (449 logic + 18 prefix), all passing — actually run** on .NET SDK 8.0.131 for this pass, with negative controls for every new hazard test (each one fails when its fix is reverted).
+
+**Not changed** (all §2 facts preserved): hidden-runner survival architecture, the InputBlocker recipe, one Graphic per GameObject, mouse-only panel, no `ES3.Save`, no `vc.input.*` writes, BepInEx config as the only persistence, the GUID, the steering prefix (byte-identical).
+
+### Curve editor (playtest note) — verified, plus one bug fixed
+
+Verified against the code: the graph uses full-area anchors (0,0)-(1,1) with insets (16, 10, 16, `GraphTop`), so its rect is exactly the graph area below the header band and can never invert or spill into neighbouring rows; title/readout/hint labels have `raycastTarget = false`, the row background is not a raycast target, and Reset sits in the header band above the graph. `Relayout` is wired for both curve editors and the gear graph. The 0.5.0 fixes (header band, scroll forwarding, no click-after-drag, inert while OFF/Vanilla) are intact.
+
+1. **Grabbing a curve point often scrolled the list instead of moving the point.** `OnBeginDrag` picked the handle at `e.position`, but uGUI calls `OnBeginDrag` only after the pointer has moved past the EventSystem drag threshold (10 px by default). With a 14 px pick radius, a normal grab-and-pull is already outside the radius at that moment, so the drag fell through to the ScrollRect: the point looked unchangeable. The drag now picks at `e.pressPosition` (clicks still use the click position). `GearGraph` had the same pattern (a quick downward pull from a short bar left the bar's hit column and scrolled) and got the same fix. The pick is a pure static (`CurveEditor.PickHandleAt`) with harness checks; the press-vs-current choice itself needs the in-game check (§10 item 29).
+   - Cosmetic, not changed: at the narrowest widths a long drag readout ("180 km/h · 100%") can overflow leftward into the title (horizontal overflow is on by design so text never truncates).
+
+### Custom drivetrain layout (new)
+
+**Is live rewiring safe?** Yes — verified in `gamecode/`, this answers FEATURES.md §2's "if a safe live axle-attach mechanism exists". NWH steps the powertrain every physics tick by recursing through each component's `_output`/`_outputB` object references (`PowertrainComponent.ForwardStep/QueryAngularVelocity/QueryInertia`, `DifferentialComponent.cs:192-234`), and the public `Output`/`OutputB` setters change them immediately. Name hashes are only zero-checked while stepping and resolved once in `VC_Initialize`. New fact §2.14.
+
+**Config** (`[Drivetrain.Layout]`, needs `[Drivetrain] Enabled`, follows the panel's Apply-to target):
+```
+Enabled = true
+Layout = gearbox -> transfer; transfer: Open split=0.4 -> front, rear; front: Open -> FL, FR; rear: LSD -> RL, RR
+```
+- `gearbox -> X` — what the gearbox drives: a node, or a single wheel.
+- `name: Type [key=value ...] -> A, B` — a differential / transfer case with two outputs. Type `Open`, `Locked`, `LSD` (`LimitedSlip`). Keys: `split` (0–1, share of torque to output A — Open diffs, and LSD in reverse, as NWH implements them), `stiffness` (0–1, Locked/LSD), `slip` (LSD slip torque N·m, 0–5000), `power`/`coast` (LSD ramps, 0–1). Defaults are NWH's (0.5 / 0.5 / 400 / 1 / 0.5).
+- Outputs: node names, or wheels `FL FR RL RR` (first/last axle) or `A<n>L`/`A<n>R`/`A<n>` (axle n from the front; no side = a centre wheel). Axles are grouped like NWH does it (0.2 m in z); side by the wheel's vehicle-local x (±0.01 m).
+- Must be a tree: every node reachable from the gearbox, every node and wheel fed once. Wheels not named are undriven. A driveshaft is just an edge, so "where the driveshafts go" is the `->` structure.
+- **Each vehicle's own layout is logged on first sight**, ready to copy and edit, e.g. `Drivetrain of 'Duke(Clone)': 2 axles, wheels FL FR RL RR. Stock layout: gearbox -> Center_Differential_1; ...`. Applying logs `Drivetrain layout applied to '…': 3 nodes, driven wheels FL FR RL RR.`; a layout that doesn't fit a vehicle (missing axle, dual wheels, `RL`/`A2L` naming the same wheel on a 2-axle car) logs why and that vehicle keeps its own drivetrain; an invalid text logs the parse error once and nothing changes.
+- Examples: RWD `gearbox -> rear; rear: LSD -> RL, RR` · part-time 4x4 `gearbox -> transfer; transfer: Locked -> front, rear; front: Open -> FL, FR; rear: Open -> RL, RR` · 6x6 `gearbox -> transfer; transfer: Locked -> front, bogie; front: Open -> FL, FR; bogie: Locked -> mid, rear; mid: Open -> A2L, A2R; rear: Open -> RL, RR`.
+
+**How it applies** (`Runtime/VehicleTuner.Layout.cs`, `Settings/DrivetrainLayout.cs`): the layout's nodes are mod-owned `DifferentialComponent`s ("AVT <name>"), one set per vehicle, built when the layout text changes. The gearbox's output is pointed at the root and each node at its outputs; the vehicle's own diffs are **bypassed, never edited** (so the existing diff-mode/bias/stiffness code keeps working on them, and has no audible effect while a layout is active). Re-applying is idempotent and allocation-free. OFF (layout, category, target switch, runner disable/destroy) restores the captured references and hashes exactly.
+
+**Hazards handled** (each with a harness test that fails without the fix):
+- A fresh `DifferentialComponent` has **no split delegate** until `DifferentialType` is assigned; Open is also the field default, so the usual assign-on-change rule would leave it null and `ForwardStep` would throw every tick. Nodes are always assigned.
+- `WheelComponent.ForwardStep` switches the wheel's `AutoSimulate` off (`:89`). A wheel that stops being driven would **never be simulated again** (no suspension or tyre forces). Released wheels get `AutoSimulate = true`, `MotorTorque = 0` and their own inertia back (`outputInertia − inputInertia`, captured, so the reflected drivetrain inertia doesn't stay on a free-rolling wheel).
+- **Cycles and double-fed wheels** (infinite recursion → game crash; a wheel stepped twice per tick) are rejected by the parser's tree check, and per-vehicle aliases are re-checked at resolve time.
+- **Saves:** the stock components keep their captured name hashes while a layout is applied (only object references move), and the nodes are never added to `powertrain.differentials`. If the game serialises powertrain fields, a save made while a layout is active therefore resolves to the stock wiring on load instead of a hash naming a node that no longer exists (which would be a null `_output` behind a non-zero hash → NullReferenceException every tick). *Whether Apocalypter serialises these fields is unverified; this is defensive.*
+
+**Limits (documented, not bugs):** no gear ratio on nodes (no low-range transfer case — NWH diffs have no ratio; the final drive is the gearbox's); dual-wheel axles can't be addressed per wheel; one global layout (the Apply-to selector picks vehicles; a per-vehicle-name layout would be the next step); the game's own diff-lock FSMs, if any vehicle has one, act on the bypassed diffs while a layout is active; no panel UI (the user asked for config only — Apocasetter's Mods window already edits the two keys live).
+
+### Bug fixed (audit)
+
+2. **The apply path was not allocation-free.** Six `ApplyAll*` passes built a capturing lambda (`r => ApplyX(r, p)`) on every `ApplyLive`, i.e. every 2 s scan and every slider tick (88 bytes per category per pass), contradicting §7.2. `TargetPass<T>` now takes the preset as an argument with static method groups (compiler-cached); the instance `ApplyGearbox` delegate is cached in a field. New harness check measures `GC.GetAllocatedBytesForCurrentThread` over 50 passes with six categories and a layout on: 0 bytes (4400 with one lambda put back).
+
+### Config keys and migration
+- **Added:** `[Drivetrain.Layout] Enabled` (bool, default false), `Layout` (string, default = the AWD example above). Nothing renamed, removed or default-changed; a 0.6.0 cfg loads as is. The layout text round-trips verbatim (never rewritten). "Reset all" on the Drivetrain tab turns the layout off and keeps the text.
+
+### Verification harness
+- Stubs now mirror the real wiring and stepping: `PowertrainComponent` (`name`, `inertia`, `Input`/`Output` setters, name hashes, `ForwardStep`/`QueryInertia`/`QueryAngularVelocity`), `DifferentialComponent` (`OutputB` setter verbatim incl. NWH's self-assignment quirk, the three split functions, `AssignDifferentialDelegate` — a fresh stub diff throws in `ForwardStep` exactly like the real one), `WheelComponent.ForwardStep`, `WheelUAPI` `MotorTorque/Inertia/AutoSimulate/Step/AngularVelocity/Mass/Radius/CounterTorque` (virtual, same reason as `Camber`), `PointerEventData.pressPosition`.
+- New tests (69): layout parser (valid forms, 23 rejected inputs with their messages, wheel tokens), runtime (rigs wired like NWH's auto-setup; one step below the gearbox counts per-wheel `Step()` calls and torque: RWD, AWD 40/60 split, single wheel, 6x6 1/2-1/4-1/4, stock-text round trip, hash hygiene, idempotence, unfit/alias/invalid layouts, layout OFF / category OFF / OnDisable / target-switch restores, wheel release), config (fresh defaults, verbatim round trip, cyclic hand edit), curve-editor pick, apply-path allocation. `run.sh` unchanged.
+- `gamecode/PowertrainComponent.cs` is now in the bundle (0.6.0 noted it was missing); the stub follows it.
+
+### Reviewed, not changed
+- `docs/crash-2026-10-04.md` (native crash during a save load, mod inert): read; its two hardening items are part of the 0.7.0 spec and not done in this pass. The layout adds one more read-only capture step at first sight of a vehicle and no writes while the category is off.
+
 ## 1. What the mod does
 
 Nine tuning categories (plus a Panel tab for the panel itself), each with: a master ON/OFF switch (all default OFF — every category is opt-in), a row of presets, and labelled sliders with live values, "changed" highlight, per-slider Reset and plain-language hints. Moving any slider while a built-in preset is active copies that preset into a "Custom (Base)" slot (BasedOn tracked) so presets are never mutated. Everything applies live; settings persist in a BepInEx config file; panel opens via F7 or a "Vehicle Tuning" button cloned into the game's menus, docked right; by default the game keeps running (driving input live), `[UI] FreezeWhileOpen` restores the old modal pause. A click-through telemetry strip shows speed/RPM/gear/front slip while driving.
@@ -252,6 +306,7 @@ These drove several unusual design decisions; treat them as load-bearing when re
 11. **Input routing (0.6.0)**: the game's driving FSM actions are HutongGames forks that read through `InsaneSystems.InputManager.InputController` by NAME (`GetButton → GetKeyActionIsActive(buttonName)`, `GetAxis → GetAnyAxisActionValue(axisName)`); `InputStorage.GetKeyByName/GetAxisByName` THROW on unknown names (InputStorage.cs:62-72); the renamed `GetAxisOrig` reads Unity's `Input.GetAxis` directly ("Mouse X/Y", scroll); `KeyAxisAction.GetValue` ramps with `Time.deltaTime` (KeyAxisAction.cs:36-47), so live driving needs timeScale untouched.
 12. **Gearbox (0.6.0)**: `gears = [reverse…, 0, forward…]`, counts recomputed every `ForwardStep`, `CalculateTotalGearRatio` indexes `gears[gearIndex]` unguarded; `ShiftInto` refuses during the post-shift ban / an in-flight shift / full damage (instant does not bypass the ban) — so the mod writes `Gear` directly and defers shrinks while `isShifting`; CVT needs exactly 3 gears; `transmissionType` is live-safe.
 13. **Geometry (0.6.0)**: `WheelGroup.CasterAngle/ToeAngle` setters call `ApplyGeometryValues` (euler X = −caster, Y = ∓toe by side of `localPosition.x`, Z kept; gated by `applyCasterAngle/applyToeAngle`); `CamberController` and solid axles (`WheelGroup.Update`) overwrite camber every tick; `vc.wheelbase`/`trackWidth` are computed at init only; NWH mirrors camber/toe by the sign of `localPosition.x`.
+14. **Powertrain wiring (0.6.2)**: NWH steps the powertrain by recursing through `_output`/`_outputB` object references every tick (`PowertrainComponent.cs:156-189`, `DifferentialComponent.cs:192-234`); the public `Output`/`OutputB` setters relink live (and clear the old target's `_input`); name hashes are only zero-checked while stepping and resolved by name once in `VC_Initialize`. A new `DifferentialComponent` has no split delegate until `DifferentialType` is assigned. `WheelComponent.ForwardStep` sets `AutoSimulate = false` — an undriven wheel must have it back on to be simulated at all. A cycle in the wiring recurses until the game crashes.
 
 ## 3. Architecture (file-by-file)
 
@@ -273,6 +328,7 @@ Settings/AlignmentPreset.cs     (0.6.0) WheelRole; Camber per wheel, Caster/Toe 
 Settings/AlignmentSettings.cs   (0.6.0) Book delegate; Enabled/PerWheel; axle helpers; LinkSides (fork-first).
 Settings/GearboxPreset.cs       (0.6.0) GearCount, GearScale[12], clutch grip/range/RPM offset, GearboxMode; ClutchTypes table (Stock/Street/Sport/Race); presets Stock/Comfort/Sport/Race/Custom.
 Settings/GearboxSettings.cs     (0.6.0) Book delegate; PerGearScale; ClutchTypeIndex.
+Settings/DrivetrainLayout.cs    (0.6.2) Layout text parser + tree validator (pure, NWH-free).
 Settings/UiSettings.cs          (0.6.0) Panel (freeze, scale, width, alpha, last tab) + telemetry preferences; name-only corner parse; tab clamp.
 Settings/PresetCodec.cs         (0.6.0) Pure static preset export/import ("AVT1|…"), per-category key tables, clamping, Custom-only import.
 Settings/Limits.cs              Single source of truth for every slider/config range.
@@ -283,6 +339,7 @@ Runtime/VehicleTuner.cs         The multi-system tuner (replaces SuspensionAppli
 Runtime/VehicleTuner.Systems.cs Suspension/Grip/Brakes/Drivetrain/Aero apply+restore. Aero: find module in vc.moduleManager.Components; onboard when absent AND the preset asks for more drag than stock (an onboarded module adds Cd × (DragScale − 1)); re-enable after restore; no downforce-point synthesis (Stock = exactly as shipped).
 Runtime/VehicleTuner.Assists.cs ABS/TCS delegate factory (allocated once per vehicle, reads live settings each tick) + registration/removal with flags.
 Runtime/VehicleTuner.Alignment.cs (0.6.0) camber/caster/toe/position apply+restore, gate handling, camber-lock skip, x=0 clamp, baseline refresh.
+Runtime/VehicleTuner.Layout.cs  (0.6.2) Custom drivetrain layout: stock-wiring capture (axles, sides, driven set, own wheel inertia), per-vehicle resolve, idempotent wiring with hash hygiene, wheel release, exact restore, stock-layout log text.
 Runtime/VehicleTuner.Gearbox.cs (0.6.0) gear capture/layout check/continuation, ratio+count write with the Gear re-shift guard and in-flight-shift deferral, clutch, mode, mid-shift restore + trim.
 Runtime/PanelLayout.cs          (0.6.0) Every panel size as a pure function of the width (wide = 0.5.0 geometry, narrow = stacked rows), scale factor, effective width, digit→tab.
 Runtime/GearGraph.cs            (0.6.0) Gear-ratio bar graph row (sibling of CurveEditor): bars vs stock outlines, click selects, bar drag edits, other drags scroll.
@@ -309,7 +366,7 @@ gamecode/, PROMPT.md            Audit-bundle files, now kept in the tree (gameco
 
 ## 5. Config schema and migration
 
-Sections: `Steering` (Enabled **false** by default, Preset, MatchGameSteeringSpeed) + `Steering.Custom.*` · `Suspension` (Enabled, Preset, SplitFrontRear) + `Suspension.Custom.*` (10 factor keys + BasedOn) · `Aero` / `Brakes` / `Grip` / `Drivetrain` / `Assists` (Enabled, Preset) + per-category `Custom.*` (incl. DiffFrontMode/DiffRearMode strings, Abs/Tcs keys) · `UI.ToggleKey`. 0.6.0 adds `Alignment` (Enabled, Preset, PerWheel) + `Alignment.Custom.*` (BasedOn + 20 offset keys), `Gearbox` (Enabled, Preset) + `Gearbox.Custom.*` (BasedOn, GearCount, Gear1..12Scale, clutch keys, TransmissionMode), `UI.FreezeWhileOpen/PanelScale/PanelWidth/PanelAlpha/LastTab`, `Telemetry.Enabled/Scale/Position`. All numeric entries carry AcceptableValueRanges from `Limits`. 0.6.0 needs no migration (additions + widened ranges only).
+Sections: `Steering` (Enabled **false** by default, Preset, MatchGameSteeringSpeed) + `Steering.Custom.*` · `Suspension` (Enabled, Preset, SplitFrontRear) + `Suspension.Custom.*` (10 factor keys + BasedOn) · `Aero` / `Brakes` / `Grip` / `Drivetrain` / `Assists` (Enabled, Preset) + per-category `Custom.*` (incl. DiffFrontMode/DiffRearMode strings, Abs/Tcs keys) · `UI.ToggleKey`. 0.6.0 adds `Alignment` (Enabled, Preset, PerWheel) + `Alignment.Custom.*` (BasedOn + 20 offset keys), `Gearbox` (Enabled, Preset) + `Gearbox.Custom.*` (BasedOn, GearCount, Gear1..12Scale, clutch keys, TransmissionMode), `UI.FreezeWhileOpen/PanelScale/PanelWidth/PanelAlpha/LastTab`, `Telemetry.Enabled/Scale/Position`. All numeric entries carry AcceptableValueRanges from `Limits`. 0.6.0 needs no migration (additions + widened ranges only). 0.6.2 adds `Drivetrain.Layout` (Enabled, Layout) — additions only.
 
 **v3.1 → v3.2 migration (one-time, in `ModConfig.MigrateLegacySuspension`)**: (1) `Suspension.Preset = "Street"` maps to "Stock"; (2) if any legacy `[Suspension.User]` multiplier ≠ 1.0, fold `Custom_i = Clamp(presetFactor_i × user_i, 0.5, 2)` into the Suspension.Custom entries with BasedOn set, ActivePreset = Custom; (3) the 10 legacy keys are `config.Remove`d every load so the fold can never run twice. Covered by tests.
 
@@ -321,7 +378,7 @@ Sections: `Steering` (Enabled **false** by default, Preset, MatchGameSteeringSpe
 
 ```
 cd plugin && dotnet build -c Release          # real DLL, references game DLLs at D:\SteamLibrary\...\Apocalypter_Data\Managed (adjust paths in the csproj; 0.6.0 adds UnityEngine.IMGUIModule for the clipboard)
-cd verify && bash run.sh                      # stubs compile + 373 tests (355 logic + 18 prefix); .NET SDK 8+; refs/ already populated
+cd verify && bash run.sh                      # stubs compile + 467 tests (449 logic + 18 prefix); .NET SDK 8+; refs/ already populated
 ```
 Install: copy the DLL to `BepInEx\plugins\` and `icon.png` next to it as `ApocalypterSteeringMod.png` (the Apocasetter Mods-window icon). Rebuild the install zip with both files at the zip root. **Never run it alongside an old `SteeringFix.dll`** (earlier assembly name) — both prefixes would double-process steering. The GUID is deliberately unchanged, so the existing config file migrates in place.
 
@@ -408,6 +465,12 @@ powershell Compress-Archive README.md,PROMPT.md,FEATURES.md,plugin,verify,gameco
 26. **0.6.0 — telemetry:** strip shows live speed/RPM/gear/slip, clicks pass through it, it hides while the panel is open, corner/size follow the Panel tab.
 27. **0.6.0 — copy/paste:** Suspension → Race → Copy preset → Reset all suspension → Paste preset: "Custom (Race)" with identical values; pasting it on the Aero tab is refused with a reason.
 28. **0.6.0 — config:** a 0.5.0 cfg loads with all legacy keys/values intact and gains `[Alignment]`, `[Gearbox]`, `[Telemetry]` and the new `[UI]` keys; Apocasetter lists the new sections as live editors; editing there while the panel is open does not undo slider changes made in the panel.
+
+29. **0.6.2 — curve point grab:** grab a curve point and pull it quickly (one fast flick): the point moves with the mouse; it must not scroll the list. Same on the gear graph: a quick downward pull from a short bar edits the bar. Dragging the empty graph area still scrolls.
+30. **0.6.2 — stock layout log:** after loading a save, the log has one `Drivetrain of '…': N axles, wheels … Stock layout: gearbox -> …` line per vehicle. Copy one into `[Drivetrain.Layout] Layout`, set `Enabled = true` and Drivetrain ON: the vehicle drives exactly as before (same driven wheels).
+31. **0.6.2 — RWD conversion:** on an AWD vehicle set `gearbox -> rear; rear: LSD -> RL, RR`: front wheels free-roll (no drive, but suspension and steering still work — if a front corner sinks or the front wheels stop turning, report it: that is the AutoSimulate hand-back), power oversteer is possible. Layout OFF: AWD again. No exceptions in the log.
+32. **0.6.2 — AWD conversion:** on a RWD vehicle use the default example: the car pulls with all four wheels (try a slope or mud), with the open transfer case one spinning axle stalls progress; `Locked` transfer case: it does not. A 6x6 (if any) with the 6x6 example drives all three axles.
+33. **0.6.2 — save while converted:** with a layout active, save, quit to menu, load: the vehicle loads driveable (stock wiring until the tuner re-applies a couple of seconds later), no NullReferenceException spam.
 
 ## 11. Translation (ApocaLanguage)
 

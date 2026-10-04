@@ -103,7 +103,7 @@ namespace ApocalypterSteeringMod.Runtime
         private void ApplyAllAssists()
         {
             AssistsPreset p = AssistsSettings.ActivePreset;
-            TargetPass(AppliedCat.Assists, r => ApplyAssists(r, p), RestoreAssists);
+            TargetPass(AppliedCat.Assists, ApplyAssists, p, RestoreAssists);
         }
 
         private void RestoreAllAssists()
