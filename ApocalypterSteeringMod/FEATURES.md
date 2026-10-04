@@ -1,10 +1,22 @@
 # FEATURES.md — Feature specification for v0.7.0-alpha
 
-**This file is the authoritative spec for the next version.** Implement everything below on top of the 0.6.0 code in this bundle. Where this file and PROMPT.md conflict, this file wins for *features*; PROMPT.md's hard constraints (no `ES3.Save`, no `vc.input.*` writes, allocation-free steering prefix, hidden-runner survival architecture, one Graphic per GameObject, mouse-only panel, BepInEx config the only persistence, unchanged GUID) always win.
+**This file is the authoritative spec for the next version.** Implement everything below on top of the **0.6.2** code in this bundle. Where this file and PROMPT.md conflict, this file wins for *features*; PROMPT.md's hard constraints (no `ES3.Save`, no `vc.input.*` writes, allocation-free steering prefix, hidden-runner survival architecture, one Graphic per GameObject, mouse-only panel, BepInEx config the only persistence, unchanged GUID) always win.
 
 You have no terminal. The user runs `bash verify/run.sh` (needs .NET SDK 8+; globs **all** `plugin/**/*.cs`, so every new file must compile against the stubs — extend them, §7). Reason through it carefully.
 
-Version: `plugin/PluginInfo.cs` → `"0.7.0"`. README title → "v0.7.0-alpha" + a new "## Changes in 0.7.0-alpha" section. Current suite: 380 logic + 18 prefix tests, all passing. Keep them green, add the §7 tests, and remove `GearboxSettings.ComingSoon` (release gate from 0.6.0) only when the §1 shifting subsystem is done — until then the gate stays.
+Version: `plugin/PluginInfo.cs` → `"0.7.0"`. README title → "v0.7.0-alpha" + a new "## Changes in 0.7.0-alpha" section. Current suite: **467 tests (449 logic + 18 prefix)**, all passing. Keep them green, add the §7 tests, and remove `GearboxSettings.ComingSoon` (release gate from 0.6.0) only when the §1 shifting subsystem is done — until then the gate stays.
+
+## Status after 0.6.2-alpha (what is already done, what remains)
+
+**Done in 0.6.2** (verified, harness-tested, negative controls): §2's core question — custom drivetrain layouts, config-only (`[Drivetrain.Layout]`, README "Changes in 0.6.2-alpha": RWD↔AWD conversion, transfer cases Open/Locked/LSD with split/stiffness, multi-axle trucks, exact restore). Plus: the curve-editor/gear-graph grab fix (`pressPosition` picking) and the allocation-free apply path.
+
+**Remaining for 0.7.0** (the scope of this spec):
+- §1 — the mod-owned gearbox subsystem (shift-write suppression + `ShiftController`) that unlocks the Gearbox tab; remove the `ComingSoon` gate only here.
+- §2 remainder — panel UI for the drivetrain layout (a layout editor/status row; the old RWD/FWD "disabled slider" note is obsolete — a layout can convert).
+- §3 — Truck 12-gear preset · §4 — telemetry pins · §5 — tighter UI.
+- §10 — crash-report hardening (scan pause during the spawn wave; per-category exception guards).
+- §11 — telemetry display fix (user-reported, still open).
+- Known unknowns to verify in-game: whether the game's saves serialise drivetrain wiring (the 0.6.2 hash hygiene is defensive), game diff-lock FSMs acting on bypassed diffs, no low-range transfer gearing (NWH diffs have no ratio).
 
 ## 1. Mod-owned gearbox subsystem (unlock Gearbox for every transmission)
 
