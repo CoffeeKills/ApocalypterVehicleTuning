@@ -147,6 +147,14 @@ Checked and not changed: brake normalisation (every NWH brake path goes through 
 
 Implements FEATURES.md (Alignment and Gearbox categories, live-driving panel with selective input blocking, docked/scalable/transparent panel, expert values and wider ranges, telemetry strip, preset copy/paste, small extras) on top of an audit of 0.5.0. Four of the spec's recipes would have crashed or broken the game as written; those are implemented differently and called out below under **Deviations from FEATURES.md**. Suite: **373 tests (355 logic + 18 prefix), all passing**. The steering-prefix suite and the prefix itself are unchanged.
 
+### Playtest fixes (post-audit, before release)
+
+1. **Steering stayed blocked in live mode.** The game's real steering action name is `Steering` (plus `ShiftInto1..8`/`ShiftIntoR1` for gears, `Change Camera`, `TrailerAttachDetach`), harvested from the blocker's discovery log and added to the driving whitelist. Throttle had worked; steering is now live too.
+2. **Telemetry never showed.** `Vehicle.ActiveVehicle` stays empty in Apocalypter — the game never sets NWH's `isPlayerControllable`. The strip now reads the driven vehicle from the tuner's own records (most live FSM input, else fastest, else first tracked).
+3. **Alignment "Height" (PosY) was inverted.** At a fixed resting spring length the body height is `ground + springLength − mountLocalY`, so the mount must move DOWN to raise the car. Positive PosY now = taller, as the presets intended (Off-road +5 raises, Stance −6 lowers).
+4. **More freedom**: alignment camber ±30° (beyond the engine's ±16 setter clamp the excess continues as a transform roll), wheel position ±60 cm.
+5. **Target selector (new)**: "Apply to" in the Panel tab — All vehicles / Last driven / Selected vehicle (picked from the tracked list by name). The tuner tracks per-vehicle applied state, so switching targets restores the old vehicle and tunes the new one exactly; OFF restores only what was applied. `[General] ApplyTarget` + `SelectedVehicle` config keys. Status lines now show the targeted count.
+
 ### Bugs fixed (audit of 0.5.0)
 
 1. **Writes into destroyed vehicles between scans.** Dead records were only purged by the 2 s scan, but `ApplyLive` runs on every slider tick. In that window a destroyed vehicle was still written to, and Aero could onboard a module into it. That throws inside NWH and aborts every later category in the same pass. `ApplyLive` and `RestoreAll` now purge dead records first (allocation-free).

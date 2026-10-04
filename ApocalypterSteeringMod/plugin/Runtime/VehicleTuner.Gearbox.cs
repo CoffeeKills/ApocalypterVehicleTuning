@@ -133,18 +133,12 @@ namespace ApocalypterSteeringMod.Runtime
         private void ApplyAllGearbox()
         {
             GearboxPreset p = GearboxSettings.ActivePreset ?? GearboxPreset.Stock;
-            foreach (KeyValuePair<VehicleController, VehicleRecord> kv in _records)
-            {
-                ApplyGearbox(kv.Value, p);
-            }
+            TargetPass(AppliedCat.Gearbox, r => ApplyGearbox(r, p), RestoreGearbox);
         }
 
         private void RestoreAllGearbox()
         {
-            foreach (KeyValuePair<VehicleController, VehicleRecord> kv in _records)
-            {
-                RestoreGearbox(kv.Value);
-            }
+            RestorePass(AppliedCat.Gearbox, RestoreGearbox);
         }
 
         private static bool GearsEditable(GearboxData d)

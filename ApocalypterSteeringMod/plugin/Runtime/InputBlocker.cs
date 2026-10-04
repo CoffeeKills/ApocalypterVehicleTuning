@@ -42,14 +42,18 @@ namespace ApocalypterSteeringMod.Runtime
 
         // ------------------------------------------------------------- whitelist
 
-        /// <summary>Key actions the game's driving FSMs read (from the FSM dump; verify in game).</summary>
+        /// <summary>Key actions the game's driving FSMs read (verified in-game from the discovery log).</summary>
         public static readonly string[] DrivingKeys =
         {
-            "Throttle", "Brakes", "Handbrake", "Clutch", "Horn", "Headlight", "ShiftUp", "ShiftDown", "Cruise Control"
+            "Throttle", "Brakes", "Handbrake", "Clutch", "Horn", "Headlight", "ShiftUp", "ShiftDown",
+            "Cruise Control", "Change Camera", "TrailerAttachDetach",
+            "ShiftIntoR1",
+            "ShiftInto1", "ShiftInto2", "ShiftInto3", "ShiftInto4",
+            "ShiftInto5", "ShiftInto6", "ShiftInto7", "ShiftInto8"
         };
 
-        /// <summary>Axis actions the game's driving FSMs read.</summary>
-        public static readonly string[] DrivingAxes = { "input", "Steering Keyboard" };
+        /// <summary>Axis actions the game's driving FSMs read ("Steering" verified in-game).</summary>
+        public static readonly string[] DrivingAxes = { "Steering", "input", "Steering Keyboard" };
 
         private static readonly HashSet<string> Whitelist = BuildWhitelist();
 

@@ -66,6 +66,8 @@ namespace NWH.VehiclePhysics2.Input
     public class VehicleInputHandler : NWH.VehiclePhysics2.VehicleComponent
     {
         public float Steering { get; set; }
+        public float Throttle { get; set; }     // VehicleInputHandler.cs:74 (0..1 clamp)
+        public float Brakes { get; set; }       // VehicleInputHandler.cs:88 (0..1 clamp)
         private float _handbrake;
         public float Handbrake
         {

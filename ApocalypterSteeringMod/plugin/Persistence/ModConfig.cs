@@ -99,6 +99,7 @@ namespace ApocalypterSteeringMod.Persistence
         private static ConfigEntry<string> _toggleKey;
         // Read by Apocasetter via Chainloader (not wired to OnSettingChanged — we never read it).
         private static ConfigEntry<bool> _apocasetter;
+        private static ConfigEntry<string> _targetMode, _targetVehicle;
 
         public static string ToggleKeyString
         {
@@ -157,6 +158,10 @@ namespace ApocalypterSteeringMod.Persistence
             _toggleKey = config.Bind("UI", "ToggleKey", "F7",
                 "Hotkey that opens/closes the tuning panel (a Unity KeyCode name, e.g. F7, F8, Home). Restart the game after changing.");
             BindUi();
+            _targetMode = config.Bind("General", "ApplyTarget", "All",
+                "What the tuning applies to: All, Last driven, or Selected vehicle.");
+            _targetVehicle = config.Bind("General", "SelectedVehicle", "",
+                "Vehicle name the tuning applies to when ApplyTarget = Selected (as shown in the panel list).");
             WireAll();
             _apocasetter = config.Bind("General", "Apocasetter", true,
                 "Show this mod in the Apocasetter Mods menu (requires Apocasetter installed).");
@@ -421,6 +426,7 @@ namespace ApocalypterSteeringMod.Persistence
             Wire(_gearClutchGrip); Wire(_gearClutchRange); Wire(_gearClutchRpm);
             Wire(_uiFreeze); Wire(_uiScale); Wire(_uiWidth); Wire(_uiAlpha); Wire(_uiLastTab);
             Wire(_telEnabled); Wire(_telScale); Wire(_telPosition);
+            Wire(_targetMode); Wire(_targetVehicle);
         }
 
         // ---------------------------------------------------------------- migration
@@ -733,6 +739,8 @@ namespace ApocalypterSteeringMod.Persistence
                 _telEnabled.Value = UiSettings.TelemetryEnabled;
                 _telScale.Value = UiSettings.TelemetryScale;
                 _telPosition.Value = UiSettings.TelemetryPosition.ToString();
+                _targetMode.Value = TargetSettings.Mode.ToString();
+                _targetVehicle.Value = TargetSettings.SelectedName ?? "";
             }
         }
 
@@ -941,6 +949,8 @@ namespace ApocalypterSteeringMod.Persistence
             UiSettings.TelemetryEnabled = _telEnabled.Value;
             UiSettings.TelemetryScale = _telScale.Value;
             UiSettings.TelemetryPosition = UiSettings.ParseCorner(_telPosition.Value);
+            TargetSettings.Mode = TargetSettings.Parse(_targetMode.Value);
+            TargetSettings.SelectedName = _targetVehicle.Value ?? "";
 
             SteeringSettings.UpdateGameSteeringSpeedFactor();
         }

@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using ApocalypterSteeringMod.Persistence;
 using ApocalypterSteeringMod.Settings;
@@ -113,6 +114,21 @@ namespace ApocalypterSteeringMod.Runtime
             public AssistHandles Assists;
             public bool HasTyreWear;
             public bool AlignmentMoved;     // wheel positions currently offset (wheelbase/trackWidth stale)
+            public AppliedCat Applied;      // categories THIS record currently has applied (targeting)
+        }
+
+        [Flags]
+        internal enum AppliedCat
+        {
+            None = 0,
+            Suspension = 1,
+            Aero = 2,
+            Brakes = 4,
+            Grip = 8,
+            Drivetrain = 16,
+            Assists = 32,
+            Alignment = 64,
+            Gearbox = 128
         }
 
         private readonly Dictionary<VehicleController, VehicleRecord> _records = new Dictionary<VehicleController, VehicleRecord>();
@@ -256,7 +272,7 @@ namespace ApocalypterSteeringMod.Runtime
             // record: re-capturing one later would read our own tuned values as "stock".
             PurgeDead();
 
-            VehicleController[] vehicles = Object.FindObjectsOfType<VehicleController>();
+            VehicleController[] vehicles = UnityEngine.Object.FindObjectsOfType<VehicleController>();
             for (int i = 0; i < vehicles.Length; i++)
             {
                 VehicleController vc = vehicles[i];
@@ -776,13 +792,18 @@ namespace ApocalypterSteeringMod.Runtime
         }
 
         /// <summary>
-        /// The active (player) vehicle's live numbers. False when there is no active vehicle.
+        /// The driven vehicle's live numbers. False when no vehicle is tracked.
         /// Read-only; called at 4 Hz by the telemetry strip (allocation there is fine).
+        /// NWH's Vehicle.ActiveVehicle is unreliable here: the game never sets
+        /// isPlayerControllable, so ActiveVehicles stays empty (Vehicle.cs:153-156).
+        /// The driven car is instead the tracked vehicle with the most live FSM input
+        /// (the game writes vc.input every frame for exactly one car), falling back to
+        /// the fastest, then the first tracked.
         /// </summary>
         public bool TryGetTelemetry(out TelemetrySample s)
         {
             s = new TelemetrySample();
-            VehicleController vc = Vehicle.ActiveVehicle as VehicleController;
+            VehicleController vc = FindDrivenVehicle();
             if (vc == null || vc.powertrain == null)
             {
                 return false;
@@ -806,6 +827,138 @@ namespace ApocalypterSteeringMod.Runtime
             }
             s.FrontSlip = n > 0 ? sum / n : 0f;
             return true;
+        }
+
+        /// <summary>
+        /// The vehicle the player is driving: most live FSM input, else fastest,
+        /// else first tracked. Allocation-free.
+        /// </summary>
+        public VehicleController FindDrivenVehicle()
+        {
+            VehicleController driven = null;    // most live input above the dead zone
+            float bestInput = 0.001f;
+            VehicleController fastest = null;
+            float bestSpeed = 0f;
+            VehicleController first = null;
+            foreach (KeyValuePair<VehicleController, VehicleRecord> kv in _records)
+            {
+                VehicleController vc = kv.Key;
+                if (vc == null || kv.Value.Vc == null)
+                {
+                    continue;
+                }
+                if (first == null)
+                {
+                    first = vc;
+                }
+                float input = Mathf.Abs(vc.input.Steering) + vc.input.Throttle + vc.input.Brakes + vc.input.Handbrake;
+                if (input > bestInput)
+                {
+                    bestInput = input;
+                    driven = vc;
+                }
+                if (vc.Speed > bestSpeed)
+                {
+                    bestSpeed = vc.Speed;
+                    fastest = vc;
+                }
+            }
+            return driven ?? (bestSpeed > 0.01f ? fastest : first);
+        }
+
+        // ---------------------------------------------------------------- targeting (0.6.1)
+
+        /// <summary>The stable identity a target selection stores (the GameObject name).</summary>
+        public static string VehicleName(VehicleController vc)
+        {
+            return vc != null && vc.gameObject != null ? vc.gameObject.name : "";
+        }
+
+        /// <summary>Does the current target selection cover this vehicle?</summary>
+        public bool IsTarget(VehicleController vc)
+        {
+            switch (TargetSettings.Mode)
+            {
+                case TargetMode.LastDriven:
+                    return vc != null && vc == FindDrivenVehicle();
+                case TargetMode.Selected:
+                    return vc != null && string.Equals(TargetSettings.SelectedName, VehicleName(vc), StringComparison.Ordinal);
+                default:
+                    return true;
+            }
+        }
+
+        /// <summary>Names of every tracked vehicle, in first-seen order (panel list; UI path).</summary>
+        public List<string> TrackedNames()
+        {
+            List<string> names = new List<string>(_order.Count);
+            for (int i = 0; i < _order.Count; i++)
+            {
+                VehicleRecord r = _order[i];
+                if (r != null && r.Vc != null && !names.Contains(VehicleName(r.Vc)))
+                {
+                    names.Add(VehicleName(r.Vc));
+                }
+            }
+            return names;
+        }
+
+        /// <summary>Vehicles the current target selection covers (the panel status lines).</summary>
+        public int TargetedCount
+        {
+            get
+            {
+                int n = 0;
+                foreach (KeyValuePair<VehicleController, VehicleRecord> kv in _records)
+                {
+                    if (kv.Key != null && kv.Value.Vc != null && IsTarget(kv.Key))
+                    {
+                        n++;
+                    }
+                }
+                return n;
+            }
+        }
+
+        /// <summary>
+        /// One category's per-record pass under the current target: targets get the
+        /// category applied (idempotently) and their bit set; records that were
+        /// applied but are no longer targets get restored and their bit cleared.
+        /// </summary>
+        private void TargetPass(AppliedCat cat, Action<VehicleRecord> apply, Action<VehicleRecord> restore)
+        {
+            foreach (KeyValuePair<VehicleController, VehicleRecord> kv in _records)
+            {
+                VehicleRecord r = kv.Value;
+                if (kv.Key == null || r == null || r.Vc == null)
+                {
+                    continue;
+                }
+                if (IsTarget(kv.Key))
+                {
+                    apply(r);
+                    r.Applied |= cat;
+                }
+                else if ((r.Applied & cat) != 0)
+                {
+                    restore(r);
+                    r.Applied &= ~cat;
+                }
+            }
+        }
+
+        /// <summary>Restore one category on every record that has it applied.</summary>
+        private void RestorePass(AppliedCat cat, Action<VehicleRecord> restore)
+        {
+            foreach (KeyValuePair<VehicleController, VehicleRecord> kv in _records)
+            {
+                VehicleRecord r = kv.Value;
+                if (r != null && (r.Applied & cat) != 0)
+                {
+                    restore(r);
+                    r.Applied &= ~cat;
+                }
+            }
         }
 
         /// <summary>

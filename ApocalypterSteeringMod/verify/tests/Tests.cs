@@ -225,6 +225,9 @@ public static class Tests
         Console.WriteLine("0.6.0 Gearbox");
         TestGearbox();
 
+        Console.WriteLine("0.6.1 targeting (apply-to selection)");
+        TestTargeting();
+
         Console.WriteLine("0.6.0 input blocker routing");
         TestInputBlocker();
 
@@ -1276,13 +1279,15 @@ public static class Tests
         Check(Near(w[0].transform.localEulerAngles.y, race.ToeF) && Near(w[1].transform.localEulerAngles.y, -race.ToeF),
             "toe mirrored L/R: left +toe, right -toe");
         Check(Near(w[0].transform.localEulerAngles.z, 5f) && Near(w[1].transform.localEulerAngles.z, 5f), "euler Z preserved");
-        Check(Near(w[0].transform.localPosition.y, 0.1f + race.PosYFL * 0.01f), "ride lowered through the wheel transform (cm -> m)");
+        Check(Near(w[0].transform.localPosition.y, 0.1f - race.PosYFL * 0.01f), "ride lowered through the wheel transform (cm -> m; + PosY = taller)");
 
         // Off-road: track widened OUTWARD on both sides.
         AlignmentSettings.SetPresetByName("Off-road");
         tuner.ApplyLive();
         Check(Near(w[0].transform.localPosition.x, -0.86f) && Near(w[1].transform.localPosition.x, 0.86f),
             "PosX is outward: left -6 cm, right +6 cm (symmetric preset)");
+        Check(Near(w[0].transform.localPosition.y, 0.1f - AlignmentSettings.ActivePreset.PosYFL * 0.01f),
+            "Off-road + PosY RAISES the car (mount moves down at fixed spring length)");
 
         // x = 0 crossing clamp.
         Check(Near(VehicleTuner.WheelX(0.1f, -0.3f), VehicleTuner.MinAbsWheelX) && Near(VehicleTuner.WheelX(-0.1f, -0.3f), -VehicleTuner.MinAbsWheelX),
@@ -1319,7 +1324,7 @@ public static class Tests
         front.CasterAngle = 0f;                                   // something resets the axle
         w[0].transform.localPosition = new Vector3(-0.8f, 0.1f, 1.3f);
         tuner.ReapplyNow();                                       // the 2 s scan path
-        Check(Near(front.CasterAngle, race.CasterF) && Near(w[0].transform.localPosition.y, 0.1f + race.PosYFL * 0.01f),
+        Check(Near(front.CasterAngle, race.CasterF) && Near(w[0].transform.localPosition.y, 0.1f - race.PosYFL * 0.01f),
             "the rescan re-applies clobbered caster and position");
         AlignmentSettings.Enabled = false;
         tuner.ApplyLive();
@@ -1351,6 +1356,131 @@ public static class Tests
         AlignmentSettings.Enabled = false;
         t2.ApplyLive();
         Check(Near(w2[1].Camber, -2f), "and restores to it");
+
+        // Camber beyond the setter's +-16 clamp continues through the transform roll
+        // (euler Z), matching UpdateWheelValues' side sign; euler X/Y stay untouched.
+        AlignmentSettings.Enabled = true;
+        AlignmentPreset big = AlignmentSettings.BeginEdit();
+        big.SetCamber(WheelRole.FR, 25f);
+        float stockCam = t2.ReferenceWheelStock(WheelRole.FR).Camber;   // refreshed earlier: -2
+        float baseZ = w2[1].transform.localEulerAngles.z;
+        t2.ApplyLive();
+        Check(Near(w2[1].Camber, 16f), "camber clamped at the engine's +16 in the setter");
+        Check(Near(w2[1].transform.localEulerAngles.z, baseZ + (25f + stockCam - 16f) * -1f),
+            "the excess continues as a transform roll (euler Z, right side -1)");
+        Check(Near(w2[1].transform.localEulerAngles.x, -big.CasterF) && Near(w2[1].transform.localEulerAngles.y, -big.ToeF),
+            "euler X/Y keep exactly the group's caster/toe values (the overflow only rolls Z)");
+        AlignmentSettings.Enabled = false;
+        t2.ApplyLive();
+        Check(Near(w2[1].Camber, stockCam) && Near(w2[1].transform.localEulerAngles.z, baseZ),
+            "OFF restores camber and the roll exactly");
+        ResetAllCategories();
+
+        // Telemetry: the driven vehicle is picked by live FSM input, not
+        // Vehicle.ActiveVehicle (the game never sets isPlayerControllable).
+        UnityEngine.Object.Registry.Clear();
+        VehicleController idle = MakeCar(out FakeWheel[] _, 0f);
+        VehicleController driving = MakeCar(out FakeWheel[] _, 0f);
+        idle.Speed = 3f;
+        driving.Speed = 25f;
+        driving.input.Steering = 0.6f;
+        driving.input.Throttle = 0.8f;
+        UnityEngine.Object.Registry.Add(idle);
+        UnityEngine.Object.Registry.Add(driving);
+        var t3 = new VehicleTuner();
+        t3.ReapplyNow();
+        VehicleTuner.TelemetrySample ts;
+        Check(t3.TryGetTelemetry(out ts) && Near(ts.SpeedKmh, 90f),
+            "telemetry reads the driven car (most live input), not the first tracked");
+        UnityEngine.Object.Registry.Clear();
+        var t4 = new VehicleTuner();
+        UnityEngine.Object.Registry.Add(idle);
+        t4.ReapplyNow();
+        Check(t4.TryGetTelemetry(out ts) && Near(ts.SpeedKmh, 10.8f), "no input anywhere: fastest car wins");
+        ResetAllCategories();
+    }
+
+    private static void TestTargeting()
+    {
+        UnityEngine.Object.Registry.Clear();
+        ResetAllCategories();
+        TargetSettings.Mode = TargetMode.All;
+        TargetSettings.SelectedName = "";
+
+        VehicleController a = MakeCar(out FakeWheel[] wa, 0f);
+        VehicleController b = MakeCar(out FakeWheel[] wb, 0f);
+        a.gameObject.name = "Rustallion(Clone)";
+        b.gameObject.name = "Junker(Clone)";
+        UnityEngine.Object.Registry.Add(a);
+        UnityEngine.Object.Registry.Add(b);
+        var tuner = new VehicleTuner();
+        tuner.ReapplyNow();
+        SuspensionSettings.Enabled = true;
+        SuspensionSettings.SetPresetByName("Race");
+
+        // Selected: only the named vehicle is tuned.
+        TargetSettings.Mode = TargetMode.Selected;
+        TargetSettings.SelectedName = "Rustallion(Clone)";
+        tuner.ApplyLive();
+        float raceSpring = wa[0].SpringMaxForce;
+        Check(!Near(raceSpring, 30000f) && Near(wb[0].SpringMaxForce, 30000f),
+            "Selected mode tunes only the named vehicle");
+        Check(tuner.TargetedCount == 1, "TargetedCount = 1 in Selected mode");
+
+        // Switching the selection restores A and tunes B.
+        TargetSettings.SelectedName = "Junker(Clone)";
+        tuner.ApplyLive();
+        Check(Near(wa[0].SpringMaxForce, 30000f) && !Near(wb[0].SpringMaxForce, 30000f),
+            "switching the selection restores the old vehicle and tunes the new one");
+
+        // OFF restores only what was applied (B), leaving A's own stock intact.
+        SuspensionSettings.Enabled = false;
+        tuner.ApplyLive();
+        Check(Near(wb[0].SpringMaxForce, 30000f) && Near(wa[0].SpringMaxForce, 30000f),
+            "OFF restores the applied record only");
+
+        // Last driven follows live FSM input.
+        SuspensionSettings.Enabled = true;
+        TargetSettings.Mode = TargetMode.LastDriven;
+        a.input.Throttle = 1f;
+        tuner.ApplyLive();
+        Check(!Near(wa[0].SpringMaxForce, 30000f) && Near(wb[0].SpringMaxForce, 30000f),
+            "Last driven tunes the vehicle with live input");
+        a.input.Throttle = 0f;
+        b.input.Brakes = 1f;
+        tuner.ApplyLive();
+        Check(Near(wa[0].SpringMaxForce, 30000f) && !Near(wb[0].SpringMaxForce, 30000f),
+            "the driven pick follows the input as it moves between vehicles");
+        b.input.Brakes = 0f;
+        SuspensionSettings.Enabled = false;
+        tuner.ApplyLive();
+
+        // All covers everything again.
+        SuspensionSettings.Enabled = true;
+        TargetSettings.Mode = TargetMode.All;
+        tuner.ApplyLive();
+        Check(!Near(wa[0].SpringMaxForce, 30000f) && !Near(wb[0].SpringMaxForce, 30000f)
+              && tuner.TargetedCount == 2, "All mode tunes every tracked vehicle");
+        SuspensionSettings.Enabled = false;
+        tuner.ApplyLive();
+        Check(Near(wa[0].SpringMaxForce, 30000f) && Near(wb[0].SpringMaxForce, 30000f), "All-mode OFF restores both");
+
+        // Parse fallback + config round-trip.
+        Check(TargetSettings.Parse("Selected Vehicle") == TargetMode.Selected
+              && TargetSettings.Parse("lastdriven") == TargetMode.LastDriven
+              && TargetSettings.Parse("bogus") == TargetMode.All && TargetSettings.Parse("") == TargetMode.All,
+            "mode parse: name-only, case tolerant, garbage falls back to All");
+        string path = Path.Combine(Path.GetTempPath(), "target-" + Guid.NewGuid().ToString("N") + ".cfg");
+        ModConfig.Load(new ConfigFile(path, true));
+        TargetSettings.Mode = TargetMode.Selected;
+        TargetSettings.SelectedName = "Junker(Clone)";
+        ModConfig.Save();
+        TargetSettings.Mode = TargetMode.All;
+        TargetSettings.SelectedName = "";
+        ModConfig.Load(new ConfigFile(path, true));
+        Check(TargetSettings.Mode == TargetMode.Selected && TargetSettings.SelectedName == "Junker(Clone)",
+            "ApplyTarget/SelectedVehicle persist through the config file");
+        try { File.Delete(path); } catch { }
         ResetAllCategories();
     }
 
@@ -1689,8 +1819,8 @@ public static class Tests
         Check(is_(RangeOf(cfg, "Drivetrain.Custom", "UpshiftScale"), 0.8f, 1.2f) && is_(RangeOf(cfg, "Drivetrain.Custom", "DiffStiffnessScale"), 0.5f, 2f)
               && is_(RangeOf(cfg, "Brakes.Custom", "ActuationScale"), 0.5f, 2f),
             "NOT widened: shift RPMs (lock-up guard), diff stiffness (wind-up), brake actuation");
-        Check(is_(RangeOf(cfg, "Alignment.Custom", "CamberFL"), -12f, 12f) && is_(RangeOf(cfg, "Alignment.Custom", "CasterFront"), -10f, 12f)
-              && is_(RangeOf(cfg, "Alignment.Custom", "ToeRear"), -5f, 5f) && is_(RangeOf(cfg, "Alignment.Custom", "PosZRR"), -30f, 30f)
+        Check(is_(RangeOf(cfg, "Alignment.Custom", "CamberFL"), -30f, 30f) && is_(RangeOf(cfg, "Alignment.Custom", "CasterFront"), -10f, 12f)
+              && is_(RangeOf(cfg, "Alignment.Custom", "ToeRear"), -5f, 5f) && is_(RangeOf(cfg, "Alignment.Custom", "PosZRR"), -60f, 60f)
               && is_(RangeOf(cfg, "Gearbox.Custom", "Gear12Scale"), 0.5f, 1.5f) && is_(RangeOf(cfg, "UI", "PanelWidth"), 400f, 800f),
             "new keys carry their Limits ranges");
         var gcRange = cfg[new ConfigDefinition("Gearbox.Custom", "GearCount")].Description.AcceptableValues as AcceptableValueRange<int>;
@@ -1726,7 +1856,7 @@ public static class Tests
             "[Alignment.Custom]\nCamberFL = 99\nPosXRR = -400\n\n[Gearbox.Custom]\nGearCount = 40\nGear3Scale = 0.1\nTransmissionMode = 7\n\n" +
             "[UI]\nPanelWidth = 5000\nPanelScale = 0\nLastTab = 42\n\n[Telemetry]\nPosition = Sideways\n");
         ModConfig.Load(new ConfigFile(bad, true));
-        Check(Near(AlignmentPreset.Custom.CamberFL, 12f) && Near(AlignmentPreset.Custom.PosXRR, -30f), "alignment values clamped to +-12 deg / +-30 cm");
+        Check(Near(AlignmentPreset.Custom.CamberFL, 30f) && Near(AlignmentPreset.Custom.PosXRR, -60f), "alignment values clamped to +-30 deg / +-60 cm");
         Check(GearboxPreset.Custom.GearCount == 12 && Near(GearboxPreset.Custom.Scale(3), 0.5f), "gear count clamped to 12, gear factor to 0.5");
         Check(GearboxPreset.Custom.TransmissionMode == GearboxMode.Stock && UiSettings.TelemetryPosition == TelemetryCorner.BottomLeft,
             "numeric / unknown enum names fall back (Stock, BottomLeft)");

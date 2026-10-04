@@ -50,7 +50,8 @@ namespace UnityEngine
 
     public class Component : Object
     {
-        public GameObject gameObject { get { return null; } }
+        private GameObject _go;
+        public GameObject gameObject { get { return _go ?? (_go = new GameObject("stub")); } }
         private Transform _t;
         public Transform transform { get { if (this is Transform self) return self; return _t ?? (_t = new Transform()); } }
         // Test hook: components "attached" to the same GameObject (GetComponent<T> finds them).

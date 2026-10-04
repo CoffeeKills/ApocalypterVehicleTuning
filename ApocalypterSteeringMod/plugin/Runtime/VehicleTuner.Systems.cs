@@ -16,18 +16,12 @@ namespace ApocalypterSteeringMod.Runtime
 
         private void ApplyAllSuspension()
         {
-            foreach (KeyValuePair<VehicleController, VehicleRecord> kv in _records)
-            {
-                ApplySuspension(kv.Value);
-            }
+            TargetPass(AppliedCat.Suspension, ApplySuspension, RestoreSuspension);
         }
 
         private void RestoreAllSuspension()
         {
-            foreach (KeyValuePair<VehicleController, VehicleRecord> kv in _records)
-            {
-                RestoreSuspension(kv.Value);
-            }
+            RestorePass(AppliedCat.Suspension, RestoreSuspension);
         }
 
         private static void ApplySuspension(VehicleRecord r)
@@ -127,18 +121,12 @@ namespace ApocalypterSteeringMod.Runtime
         private void ApplyAllAero()
         {
             AeroPreset p = AeroSettings.ActivePreset ?? AeroPreset.Stock;
-            foreach (KeyValuePair<VehicleController, VehicleRecord> kv in _records)
-            {
-                ApplyAero(kv.Value, p);
-            }
+            TargetPass(AppliedCat.Aero, r => ApplyAero(r, p), RestoreAero);
         }
 
         private void RestoreAllAero()
         {
-            foreach (KeyValuePair<VehicleController, VehicleRecord> kv in _records)
-            {
-                RestoreAero(kv.Value);
-            }
+            RestorePass(AppliedCat.Aero, RestoreAero);
         }
 
         /// <summary>
@@ -288,18 +276,12 @@ namespace ApocalypterSteeringMod.Runtime
         private void ApplyAllBrakes()
         {
             BrakesPreset p = BrakesSettings.ActivePreset ?? BrakesPreset.Stock;
-            foreach (KeyValuePair<VehicleController, VehicleRecord> kv in _records)
-            {
-                ApplyBrakes(kv.Value, p);
-            }
+            TargetPass(AppliedCat.Brakes, r => ApplyBrakes(r, p), RestoreBrakes);
         }
 
         private void RestoreAllBrakes()
         {
-            foreach (KeyValuePair<VehicleController, VehicleRecord> kv in _records)
-            {
-                RestoreBrakes(kv.Value);
-            }
+            RestorePass(AppliedCat.Brakes, RestoreBrakes);
         }
 
         /// <summary>
@@ -387,18 +369,12 @@ namespace ApocalypterSteeringMod.Runtime
         private void ApplyAllGrip()
         {
             GripPreset p = GripSettings.ActivePreset ?? GripPreset.Stock;
-            foreach (KeyValuePair<VehicleController, VehicleRecord> kv in _records)
-            {
-                ApplyGrip(kv.Value, p);
-            }
+            TargetPass(AppliedCat.Grip, r => ApplyGrip(r, p), RestoreGrip);
         }
 
         private void RestoreAllGrip()
         {
-            foreach (KeyValuePair<VehicleController, VehicleRecord> kv in _records)
-            {
-                RestoreGrip(kv.Value);
-            }
+            RestorePass(AppliedCat.Grip, RestoreGrip);
         }
 
         private static void ApplyGrip(VehicleRecord r, GripPreset p)
@@ -439,18 +415,12 @@ namespace ApocalypterSteeringMod.Runtime
         private void ApplyAllDrivetrain()
         {
             DrivetrainPreset p = DrivetrainSettings.ActivePreset ?? DrivetrainPreset.Stock;
-            foreach (KeyValuePair<VehicleController, VehicleRecord> kv in _records)
-            {
-                ApplyDrivetrain(kv.Value, p);
-            }
+            TargetPass(AppliedCat.Drivetrain, r => ApplyDrivetrain(r, p), RestoreDrivetrain);
         }
 
         private void RestoreAllDrivetrain()
         {
-            foreach (KeyValuePair<VehicleController, VehicleRecord> kv in _records)
-            {
-                RestoreDrivetrain(kv.Value);
-            }
+            RestorePass(AppliedCat.Drivetrain, RestoreDrivetrain);
         }
 
         // Shift-point guards (see ShiftPoints).

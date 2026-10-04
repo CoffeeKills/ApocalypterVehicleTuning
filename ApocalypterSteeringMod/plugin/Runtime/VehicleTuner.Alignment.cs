@@ -32,18 +32,12 @@ namespace ApocalypterSteeringMod.Runtime
         private void ApplyAllAlignment()
         {
             AlignmentPreset p = AlignmentSettings.ActivePreset ?? AlignmentPreset.Stock;
-            foreach (KeyValuePair<VehicleController, VehicleRecord> kv in _records)
-            {
-                ApplyAlignment(kv.Value, p);
-            }
+            TargetPass(AppliedCat.Alignment, r => ApplyAlignment(r, p), RestoreAlignment);
         }
 
         private void RestoreAllAlignment()
         {
-            foreach (KeyValuePair<VehicleController, VehicleRecord> kv in _records)
-            {
-                RestoreAlignment(kv.Value);
-            }
+            RestorePass(AppliedCat.Alignment, RestoreAlignment);
         }
 
         /// <summary>
@@ -86,11 +80,26 @@ namespace ApocalypterSteeringMod.Runtime
                 }
                 // Never Wheel.localPosition (the struct field is rebuilt at Wheel.Initialize):
                 // the WheelController's own transform is honoured live.
-                u.transform.localPosition = new Vector3(WheelX(d.LocalPos.x, ox), d.LocalPos.y + oy, d.LocalPos.z + oz);
+                // PosY is INVERTED on purpose: at a fixed resting spring length the
+                // body height is ground + springLength - mountLocalY, so lowering the
+                // mount (+ PosY) RAISES the car. Positive PosY = taller, as authored.
+                u.transform.localPosition = new Vector3(WheelX(d.LocalPos.x, ox), d.LocalPos.y - oy, d.LocalPos.z + oz);
 
                 if (!d.CamberLocked)
                 {
-                    u.Camber = d.Camber + p.Camber(d.Role);   // WheelController clamps to +-16
+                    float desired = d.Camber + p.Camber(d.Role);
+                    // The Camber setter clamps to +-16 (WheelController). The excess
+                    // rotates the wheel GO about its own forward (local Z on NWH
+                    // prefabs), continuing UpdateWheelValues' side sign convention.
+                    u.Camber = Mathf.Clamp(desired, -16f, 16f);
+                    float overflow = desired - Mathf.Clamp(desired, -16f, 16f);
+                    if (overflow > 0.0005f || overflow < -0.0005f)
+                    {
+                        float side = u.transform.localPosition.x < 0f ? 1f : -1f;
+                        Vector3 e = u.transform.localEulerAngles;
+                        e.z = d.LocalEuler.z + overflow * side;
+                        u.transform.localEulerAngles = e;   // X/Y stay as the group set them (caster/toe)
+                    }
                 }
             }
             r.AlignmentMoved = moved;

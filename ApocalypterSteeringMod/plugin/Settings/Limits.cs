@@ -48,10 +48,11 @@ namespace ApocalypterSteeringMod.Settings
         public const float CutMultMin = 0f, CutMultMax = 1f;
 
         // 0.6.0 Alignment (offsets from each vehicle's stock geometry).
-        public const float AlignmentCamberMin = -12f, AlignmentCamberMax = 12f;   // degrees
+        // Camber beyond +-16 deg continues through a transform roll (the setter clamps).
+        public const float AlignmentCamberMin = -30f, AlignmentCamberMax = 30f;  // degrees
         public const float AlignmentCasterMin = -10f, AlignmentCasterMax = 12f;   // degrees
         public const float AlignmentToeMin = -5f, AlignmentToeMax = 5f;           // degrees
-        public const float AlignmentPosMin = -30f, AlignmentPosMax = 30f;         // centimetres
+        public const float AlignmentPosMin = -60f, AlignmentPosMax = 60f;         // centimetres
 
         // 0.6.0 Gearbox.
         public const int GearCountMin = 0, GearCountMax = 12;                     // 0 = each vehicle's own count
