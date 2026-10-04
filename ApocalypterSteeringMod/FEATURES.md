@@ -15,7 +15,7 @@ Version: `plugin/PluginInfo.cs` → `"0.7.0"`. README title → "v0.7.0-alpha" +
 | §10 | Crash hardening: post-load quiet window + spawn-jump deferral; per-category exception guards (capture with retries, apply, restore, baseline refresh) | ✅ done 0.6.3, harness-tested, negative controls |
 | §11 | Telemetry "zeros until I steer" — root cause was the driven-vehicle pick (idling engines counted as input, above the last-driven memory); also fixed "Apply to: Last driven" mis-targeting | ✅ done 0.6.3, harness-tested, negative controls; in-game check README §10 item 34 |
 | §11b | Telemetry follow-up (user report): parked cars freeze their FSM-written input at exit (handbrake/brakes left on) and stole the pick again — only fresh input is live now (2 s hold), `[Telemetry] DebugPick` diagnostic added | ✅ done 0.6.4, harness-tested, negative control; in-game check README §10 item 37 |
-| §1 | Mod-owned gearbox subsystem (shift-write suppression + `ShiftController`); remove `ComingSoon` only here | ⏳ open — needs PlayMaker `SetProperty`/`CallMethod`/`FsmProperty` sources and the vehicle FSM dump (not in `gamecode/`; §1 says "inspect before patching") |
+| §1 | Mod-owned gearbox subsystem (shift-write suppression + `ShiftController`); remove `ComingSoon` only here | ⏳ open — **inputs attached**: PlayMaker sources in `gamecode/`, `docs/fsm-template-dump.md` (all 8128 FSMs decoded: the game shifts by `SetProperty` on `vc.input.ShiftInto`/`ShiftUp`/`ShiftDown`, never `transmission.Gear` — suppress those three writes) |
 | §2 rest | Panel UI for the drivetrain layout | ⏳ open |
 | §3 | Truck 12-gear preset (inert until §1) | ⏳ open |
 | §4 | Telemetry pins | ⏳ open |

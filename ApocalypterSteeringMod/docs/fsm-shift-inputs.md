@@ -37,20 +37,15 @@ source greps, answering the §1 question in CONTEXT.md: *does the game shift by
    `FsmTemplate`s the game runs via `RunFSM` on the vehicle (hence "Wrapper" naming from
    the live discovery log; no such name exists statically).
 
-## Consequences for §1 (for the next round)
+## Consequences for §1 (resolved — see `docs/fsm-template-dump.md`)
 
-- Patching PlayMaker's `SetProperty` may be **insufficient or unnecessary**: the static
-  data contains no SetProperty-on-Gear writes. The shift APPLICATION is compiled NWH code
-  (`TransmissionComponent.Gear` / input providers) and/or the game's own shift code around
-  them; the FSMs (templates) only produce shift REQUESTS from buttons.
-- What §1 must suppress and what it must intercept should be decided from the **live**
-  side, not the static dump: a discovery-log dump of one vehicle's FSM template instances
-  (names, per-state actions, target object/property/method) is still the missing input —
-  re-parse the `FsmTemplate` objects (the hand-rolled parser in `tools/fsm_extract.py`
-  currently fails on their layout; extend it) or dump them from a running game.
-- The compiled side is already auditable: the six input-provider files above and
-  `TransmissionComponent.cs` are in `ApocalypterSource/` and `gamecode/` carries the
-  excerpts the mod's patches touch.
+**Update (2026-10-05): the question is answered.** The 1295 failed parses were template-copies
+whose `FsmProperty` carries a trailing `setProperty` bool the parser missed; with `fsm_extract.py`
+fixed, all 8128 FSMs parse and the gear FSMs are decoded: the game shifts by `SetProperty`
+reflection on `VehicleController.input.ShiftInto` (int, R=-1/N=0/1..5) and
+`input.ShiftUp`/`input.ShiftDown` — never `transmission.Gear`. `docs/fsm-template-dump.md` has
+the full dump (per-vehicle FSM set, writer table, the exact FsmProperty shape, and the §1
+suppression target). The findings below (static survey, compiled NWH side) remain as background.
 
 ## Attached with this bundle
 
