@@ -45,24 +45,23 @@ namespace ApocalypterSteeringMod.Runtime
             if (t != null && t.gears != null)
             {
                 // Self-heal: a game save made while the gearbox was tuned bakes the
-                // extended gear list into the vehicle. Repair it: the game's own FSM
-                // gear count is authoritative, the geometric-continuation heuristic is
-                // the fallback, and the live car is fixed (list + gear state).
+                // extended gear list into the vehicle. Repair it — conservatively.
+                // The geometric-continuation detection is the ONLY trigger (it can
+                // never fire on a healthy car: it needs >= 7 forward gears AND an
+                // exact geometric tail). The game's FSM gear count is read for a
+                // log line only, until it is validated in-game.
                 int reverse, forward;
-                if (AnalyseLayout(t.gears.ToArray(), out reverse, out forward))
+                if (AnalyseLayout(t.gears.ToArray(), out reverse, out forward) && forward >= 7)
                 {
-                    int realCount = StockGearCountFromFsms(vc);
-                    if (realCount <= 0 && forward >= 7)
-                    {
-                        realCount = TryStripContinuation(t.gears, reverse);
-                    }
+                    int realCount = TryStripContinuation(t.gears, reverse);
+                    int fsmCount = StockGearCountFromFsms(vc);
                     if (realCount >= 1 && realCount < forward)
                     {
                         if (Plugin.Log != null)
                         {
                             Plugin.Log.LogWarning("Gearbox: vehicle '" + VehicleName(vc) + "' carries " + forward
                                 + " forward gears (a tuned save). Truncating the continuation tail back to "
-                                + realCount + " forward gears and fixing the gear state.");
+                                + realCount + " forward gears (game FSM says " + fsmCount + ") and fixing the gear state.");
                         }
                         int neutral = reverse;
                         t.gears.RemoveRange(neutral + 1 + realCount, forward - realCount);
