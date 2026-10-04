@@ -25,7 +25,6 @@ namespace ApocalypterSteeringMod.Runtime
         private RectTransform _strip;
         private readonly Text[] _cells = new Text[4];
         private VehicleTuner _tuner;
-        private SettingsPanelManager _manager;
         private float _next;
         private bool _buildFailed;
         private TelemetryCorner _corner = (TelemetryCorner)(-1);
@@ -33,7 +32,6 @@ namespace ApocalypterSteeringMod.Runtime
         private void Start()
         {
             _tuner = GetComponent<VehicleTuner>();
-            _manager = GetComponent<SettingsPanelManager>();
         }
 
         private void OnDestroy()
@@ -53,8 +51,9 @@ namespace ApocalypterSteeringMod.Runtime
             _next = Time.unscaledTime + UpdateInterval;
 
             VehicleTuner.TelemetrySample s = default(VehicleTuner.TelemetrySample);
-            bool panelOpen = _manager != null && _manager.Visible;
-            bool show = UiSettings.TelemetryEnabled && !panelOpen && _tuner != null && _tuner.TryGetTelemetry(out s);
+            // Visible while the panel is open too: the panel docks right and the strip's
+            // corners are out of its way, and live feedback while tuning is the point.
+            bool show = UiSettings.TelemetryEnabled && _tuner != null && _tuner.TryGetTelemetry(out s);
             if (!show)
             {
                 if (_canvasGo != null && _canvasGo.activeSelf)

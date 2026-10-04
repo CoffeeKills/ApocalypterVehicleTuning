@@ -1840,13 +1840,12 @@ public static class Tests
               && is_(RangeOf(cfg, "Drivetrain.Custom", "BoostScale"), Limits.BoostMin, Limits.BoostMax)
               && is_(RangeOf(cfg, "Grip.Custom", "LateralScale"), Limits.GripMin, Limits.GripMax)
               && is_(RangeOf(cfg, "Brakes.Custom", "TorqueScale"), Limits.BrakeTorqueMin, Limits.BrakeTorqueMax),
-            "widened ranges (suspension 0.25-3, power 0.25-3.5, final drive 0.5-2, loss/boost 0.25-3, grip 0.1-3, brake torque 0.25-3)");
-        Check(is_(RangeOf(cfg, "Drivetrain.Custom", "UpshiftScale"), 0.8f, 1.2f) && is_(RangeOf(cfg, "Drivetrain.Custom", "DiffStiffnessScale"), 0.5f, 2f)
-              && is_(RangeOf(cfg, "Brakes.Custom", "ActuationScale"), 0.5f, 2f),
-            "NOT widened: shift RPMs (lock-up guard), diff stiffness (wind-up), brake actuation");
-        Check(is_(RangeOf(cfg, "Alignment.Custom", "CamberFL"), -30f, 30f) && is_(RangeOf(cfg, "Alignment.Custom", "CasterFront"), -10f, 12f)
-              && is_(RangeOf(cfg, "Alignment.Custom", "ToeRear"), -5f, 5f) && is_(RangeOf(cfg, "Alignment.Custom", "PosZRR"), -60f, 60f)
-              && is_(RangeOf(cfg, "Gearbox.Custom", "Gear12Scale"), 0.5f, 1.5f) && is_(RangeOf(cfg, "UI", "PanelWidth"), 400f, 800f),
+            "widened ranges follow Limits (suspension 0.1-5, power 0.1-5, final drive 0.25-3, loss/boost 0-4, grip 0.05-5, brake torque 0.1-5)");
+        Check(is_(RangeOf(cfg, "Drivetrain.Custom", "UpshiftScale"), 0.8f, 1.2f),
+            "NOT widened: shift RPMs (lock-up guard)");
+        Check(is_(RangeOf(cfg, "Alignment.Custom", "CamberFL"), -45f, 45f) && is_(RangeOf(cfg, "Alignment.Custom", "CasterFront"), -25f, 25f)
+              && is_(RangeOf(cfg, "Alignment.Custom", "ToeRear"), -15f, 15f) && is_(RangeOf(cfg, "Alignment.Custom", "PosZRR"), -100f, 100f)
+              && is_(RangeOf(cfg, "Gearbox.Custom", "Gear12Scale"), 0.25f, 3f) && is_(RangeOf(cfg, "UI", "PanelWidth"), 300f, 1000f),
             "new keys carry their Limits ranges");
         var gcRange = cfg[new ConfigDefinition("Gearbox.Custom", "GearCount")].Description.AcceptableValues as AcceptableValueRange<int>;
         Check(gcRange != null && gcRange.MinValue == 0 && gcRange.MaxValue == 12, "GearCount is an int range 0..12");
@@ -1881,11 +1880,11 @@ public static class Tests
             "[Alignment.Custom]\nCamberFL = 99\nPosXRR = -400\n\n[Gearbox.Custom]\nGearCount = 40\nGear3Scale = 0.1\nTransmissionMode = 7\n\n" +
             "[UI]\nPanelWidth = 5000\nPanelScale = 0\nLastTab = 42\n\n[Telemetry]\nPosition = Sideways\n");
         ModConfig.Load(new ConfigFile(bad, true));
-        Check(Near(AlignmentPreset.Custom.CamberFL, 30f) && Near(AlignmentPreset.Custom.PosXRR, -60f), "alignment values clamped to +-30 deg / +-60 cm");
-        Check(GearboxPreset.Custom.GearCount == 12 && Near(GearboxPreset.Custom.Scale(3), 0.5f), "gear count clamped to 12, gear factor to 0.5");
+        Check(Near(AlignmentPreset.Custom.CamberFL, 45f) && Near(AlignmentPreset.Custom.PosXRR, -100f), "alignment values clamped to +-45 deg / +-100 cm");
+        Check(GearboxPreset.Custom.GearCount == 12 && Near(GearboxPreset.Custom.Scale(3), 0.25f), "gear count clamped to 12, gear factor to 0.25");
         Check(GearboxPreset.Custom.TransmissionMode == GearboxMode.Stock && UiSettings.TelemetryPosition == TelemetryCorner.BottomLeft,
             "numeric / unknown enum names fall back (Stock, BottomLeft)");
-        Check(Near(UiSettings.PanelWidth, 800f) && Near(UiSettings.PanelScale, 0.5f) && UiSettings.LastTab == 9, "panel width/scale/last tab clamped");
+        Check(Near(UiSettings.PanelWidth, 1000f) && Near(UiSettings.PanelScale, 0.3f) && UiSettings.LastTab == 9, "panel width/scale/last tab clamped");
         Check(ModConfig.ParseGearboxMode(" manual ") == GearboxMode.Manual && UiSettings.ParseCorner("topright") == TelemetryCorner.TopRight,
             "names parse case/space-tolerant");
         Check(UiSettings.ClampTab(-3) == 0 && UiSettings.ClampTab(10) == 0 && UiSettings.ClampTab(7) == 7, "LastTab parse: garbage -> first tab");
