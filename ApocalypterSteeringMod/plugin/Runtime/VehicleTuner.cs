@@ -837,9 +837,12 @@ namespace ApocalypterSteeringMod.Runtime
         }
 
         /// <summary>
-        /// The vehicle the player is driving: most live FSM input, else fastest,
-        /// else first tracked. Allocation-free.
+        /// The vehicle the player is driving: most live FSM input, else the last
+        /// vehicle that had input (a stalled/off engine keeps the pick), else the
+        /// fastest, else the first tracked. Allocation-free.
         /// </summary>
+        private VehicleController _lastDriven;
+
         public VehicleController FindDrivenVehicle()
         {
             VehicleController driven = null;    // most live activity above the dead zone
@@ -876,7 +879,23 @@ namespace ApocalypterSteeringMod.Runtime
                     fastest = vc;
                 }
             }
-            return driven ?? (bestSpeed > 0.01f ? fastest : first);
+            if (driven != null)
+            {
+                _lastDriven = driven;
+                return driven;
+            }
+            // No input anywhere: stay on the last car the player drove (its engine may
+            // have stalled, or the panel is open and hands are on the mouse).
+            if (_lastDriven != null)
+            {
+                VehicleRecord r;
+                if (_records.TryGetValue(_lastDriven, out r) && r != null && r.Vc != null)
+                {
+                    return _lastDriven;
+                }
+                _lastDriven = null;
+            }
+            return bestSpeed > 0.01f ? fastest : first;
         }
 
         // ---------------------------------------------------------------- targeting (0.6.1)

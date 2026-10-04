@@ -1392,6 +1392,13 @@ public static class Tests
         VehicleTuner.TelemetrySample ts;
         Check(t3.TryGetTelemetry(out ts) && Near(ts.SpeedKmh, 90f),
             "telemetry reads the driven car (most live input), not the first tracked");
+        // Input stops and the engine stalls: the last driven car stays picked.
+        driving.input.Steering = 0f;
+        driving.input.Throttle = 0f;
+        driving.Speed = 0f;
+        driving.powertrain.engine.OutputRPM = 0f;
+        Check(t3.TryGetTelemetry(out ts) && Near(ts.SpeedKmh, 0f),
+            "no input + stalled engine: the last driven car stays picked (not an NPC fallback)");
         UnityEngine.Object.Registry.Clear();
         var t4 = new VehicleTuner();
         UnityEngine.Object.Registry.Add(idle);
