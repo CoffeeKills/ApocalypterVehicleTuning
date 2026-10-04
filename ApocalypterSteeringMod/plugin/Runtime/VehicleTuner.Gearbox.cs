@@ -1,5 +1,8 @@
+using System;
 using System.Collections.Generic;
+using System.Reflection;
 using ApocalypterSteeringMod.Settings;
+using HutongGames.PlayMaker;
 using NWH.VehiclePhysics2;
 using NWH.VehiclePhysics2.Powertrain;
 using UnityEngine;
@@ -41,11 +44,39 @@ namespace ApocalypterSteeringMod.Runtime
             TransmissionComponent t = vc.powertrain.transmission;
             if (t != null && t.gears != null)
             {
+                // Self-heal: a game save made while the gearbox was tuned bakes the
+                // extended gear list into the vehicle. Repair it: the game's own FSM
+                // gear count is authoritative, the geometric-continuation heuristic is
+                // the fallback, and the live car is fixed (list + gear state).
+                int reverse, forward;
+                if (AnalyseLayout(t.gears.ToArray(), out reverse, out forward))
+                {
+                    int realCount = StockGearCountFromFsms(vc);
+                    if (realCount <= 0 && forward >= 7)
+                    {
+                        realCount = TryStripContinuation(t.gears, reverse);
+                    }
+                    if (realCount >= 1 && realCount < forward)
+                    {
+                        if (Plugin.Log != null)
+                        {
+                            Plugin.Log.LogWarning("Gearbox: vehicle '" + VehicleName(vc) + "' carries " + forward
+                                + " forward gears (a tuned save). Truncating the continuation tail back to "
+                                + realCount + " forward gears and fixing the gear state.");
+                        }
+                        int neutral = reverse;
+                        t.gears.RemoveRange(neutral + 1 + realCount, forward - realCount);
+                        if (t.Gear > realCount)
+                        {
+                            t.Gear = realCount;
+                        }
+                        forward = realCount;
+                    }
+                }
                 d.HasTransmission = true;
                 d.Gears = t.gears.ToArray();
                 d.Type = t.transmissionType;
                 d.IsCvt = t.transmissionType == TransmissionComponent.TransmissionShiftType.CVT;
-                int reverse, forward;
                 d.Standard = AnalyseLayout(d.Gears, out reverse, out forward);
                 d.Reverse = reverse;
                 d.Forward = forward;
@@ -60,6 +91,133 @@ namespace ApocalypterSteeringMod.Runtime
                 d.EngagementRpm = c.engagementRPM;
             }
             return d;
+        }
+
+        /// <summary>
+        /// The continuation the mod adds is exactly geometric (r[n] = r[n-1]^2 / r[n-2]).
+        /// The first continuation gear satisfies the relation BY CONSTRUCTION with the
+        /// stock's last two, so the smallest index whose suffix is geometric is one LESS
+        /// than the real stock count; hence the returned count is that index + 1 (gears
+        /// 1..count are kept). 0 = no continuation found (leave the list alone). Real
+        /// gearboxes are not exact geometric continuations, so a false positive needs a
+        /// long exact tail; the caller additionally requires forward >= 7 and prefers the
+        /// game's own FSM gear count when readable.
+        /// </summary>
+        public static int TryStripContinuation(List<float> gears, int reverseCount)
+        {
+            int first = 1 + reverseCount;   // index of forward gear 1
+            int n = gears.Count - first;
+            if (n < 4)
+            {
+                return 0;
+            }
+            float[] r = new float[n];
+            for (int i = 0; i < n; i++)
+            {
+                r[i] = Mathf.Abs(gears[first + i]);
+            }
+            for (int a = 2; a <= n - 3; a++)   // the stripped tail is at least 3 gears
+            {
+                bool ok = true;
+                for (int j = a + 1; j < n && ok; j++)
+                {
+                    float expected = r[j - 1] * r[j - 1] / Mathf.Max(r[j - 2], 1e-6f);
+                    // Tight: the mod's continuation is exact in float arithmetic, and
+                    // survives ES3's float round-trip well within 1e-4 relative.
+                    // Real stock ratios that are merely similar do not pass.
+                    ok = Mathf.Abs(r[j] - expected) <= expected * 1e-4f;
+                }
+                if (ok)
+                {
+                    return a + 1;   // the geometric suffix starts at the first added gear (index a); keep gears 1..a
+                }
+            }
+            return 0;
+        }
+
+        // ---------------------------------------------------------------- FSM stock-gear detection
+
+        private static readonly Dictionary<Type, FieldInfo> ButtonNameFields = new Dictionary<Type, FieldInfo>();
+
+        /// <summary>
+        /// The vehicle's real forward gear count from the game's own shift-into
+        /// actions: each INPUT FSM carries one GetButtonDown("ShiftIntoN") per stock
+        /// gear (the InputManager names, research-verified). 0 = not readable.
+        /// </summary>
+        private static int StockGearCountFromFsms(VehicleController vc)
+        {
+            int max = 0;
+            PlayMakerFSM[] fsms = vc != null ? vc.GetComponentsInChildren<PlayMakerFSM>(true) : null;
+            if (fsms == null)
+            {
+                return 0;
+            }
+            for (int i = 0; i < fsms.Length; i++)
+            {
+                if (fsms[i] == null || fsms[i].Fsm == null || fsms[i].Fsm.States == null)
+                {
+                    continue;
+                }
+                FsmState[] states = fsms[i].Fsm.States;
+                for (int s = 0; s < states.Length; s++)
+                {
+                    if (states[s] == null)
+                    {
+                        continue;
+                    }
+                    int n = CountShiftIntos(states[s].Actions);
+                    if (n > max)
+                    {
+                        max = n;
+                    }
+                }
+            }
+            return max;
+        }
+
+        /// <summary>The highest ShiftIntoN button among these actions, or 0.</summary>
+        public static int CountShiftIntos(FsmStateAction[] actions)
+        {
+            if (actions == null)
+            {
+                return 0;
+            }
+            int max = 0;
+            for (int i = 0; i < actions.Length; i++)
+            {
+                FsmStateAction a = actions[i];
+                if (a == null)
+                {
+                    continue;
+                }
+                string name = GetButtonName(a);
+                if (name != null && name.StartsWith("ShiftInto", StringComparison.Ordinal))
+                {
+                    int n;
+                    if (name.Length > 9 && int.TryParse(name.Substring(9), out n) && n > max)
+                    {
+                        max = n;
+                    }
+                }
+            }
+            return max;
+        }
+
+        private static string GetButtonName(FsmStateAction a)
+        {
+            Type t = a.GetType();
+            FieldInfo f;
+            if (!ButtonNameFields.TryGetValue(t, out f))
+            {
+                f = t.GetField("buttonName");
+                ButtonNameFields[t] = f;
+            }
+            if (f == null)
+            {
+                return null;
+            }
+            FsmString s = f.GetValue(a) as FsmString;
+            return s != null ? s.Value : null;
         }
 
         /// <summary>

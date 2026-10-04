@@ -1731,6 +1731,10 @@ namespace ApocalypterSteeringMod.Runtime
                 {
                     s += " CVT vehicles keep their gears and mode; only the clutch applies to them.";
                 }
+                if (GearboxSettings.Enabled)
+                {
+                    s += " Saving the game while tuned bakes the changed gears into that save (fixed automatically on load).";
+                }
                 status.text = s;
             });
         }

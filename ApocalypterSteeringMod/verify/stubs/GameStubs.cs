@@ -615,7 +615,24 @@ namespace InsaneSystems.InputManager
     }
 }
 
-public class PlayMakerFSM : MonoBehaviour { }
+namespace HutongGames.PlayMaker
+{
+    public class PlayMakerFSM : MonoBehaviour
+    {
+        public Fsm Fsm;
+    }
+
+    /// <summary>Minimal FSM containers: states hold actions (real PlayMaker shape).</summary>
+    public class Fsm
+    {
+        public FsmState[] States = new FsmState[0];
+    }
+
+    public class FsmState
+    {
+        public FsmStateAction[] Actions = new FsmStateAction[0];
+    }
+}
 
 public class PlayMakerArrayListProxy : MonoBehaviour { }
 

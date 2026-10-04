@@ -154,6 +154,7 @@ Implements FEATURES.md (Alignment and Gearbox categories, live-driving panel wit
 3. **Alignment "Height" (PosY) was inverted.** At a fixed resting spring length the body height is `ground + springLength − mountLocalY`, so the mount must move DOWN to raise the car. Positive PosY now = taller, as the presets intended (Off-road +5 raises, Stance −6 lowers).
 4. **More freedom**: alignment camber ±30° (beyond the engine's ±16 setter clamp the excess continues as a transform roll), wheel position ±60 cm.
 5. **Target selector (new)**: "Apply to" in the Panel tab — All vehicles / Last driven / Selected vehicle (picked from the tracked list by name). The tuner tracks per-vehicle applied state, so switching targets restores the old vehicle and tunes the new one exactly; OFF restores only what was applied. `[General] ApplyTarget` + `SelectedVehicle` config keys. Status lines now show the targeted count.
+6. **Gearbox save self-heal**: a game save made while the gearbox was tuned bakes the extended gear list into the vehicle, which made the car undrivable (the game's shift logic fought the extra gears; the ultra-tall continuation gears barely moved it). On first sight of such a vehicle the tuner now repairs it: the stock gear count comes from the game's own `ShiftIntoN` input actions (with a geometric-continuation fallback), the tail is truncated, and the gear state is clamped back into range. The Gearbox tab notes that saving while tuned bakes changes into that save.
 
 ### Bugs fixed (audit of 0.5.0)
 

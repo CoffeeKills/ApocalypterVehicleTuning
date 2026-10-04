@@ -1611,6 +1611,31 @@ public static class Tests
         Check(Near(cvt.powertrain.clutch.slipTorque, 750f) && t3.AnyCvt && t3.ReferenceIsCvt, "CVT: clutch still applies; flagged for the panel");
         GearboxSettings.Enabled = false;
         t3.ApplyLive();
+
+        // Self-heal (0.6.1): a save made while tuned bakes the continuation into the vehicle.
+        float[] ext12 = VehicleTuner.ExtendRatios(stock, 1, 5);   // 12 forward ratios: 5 stock + 7 continuation
+        List<float> poisonedList = new List<float> { stock[0], 0f };
+        poisonedList.AddRange(ext12);
+        Check(VehicleTuner.TryStripContinuation(poisonedList, 1) == 5,
+            "a 12-gear poisoned list strips back to the 5 real gears (the first continuation gear is exact by construction, hence +1)");
+        Check(VehicleTuner.TryStripContinuation(new List<float>(stock), 1) == 0,
+            "a stock 5-gear list has nothing to strip (its near-geometric top is not exact enough)");
+        HutongGames.PlayMaker.FsmStateAction[] shiftActions =
+        {
+            new HutongGames.PlayMaker.Actions.GetButtonDown { buttonName = new HutongGames.PlayMaker.FsmString("ShiftInto1") },
+            new HutongGames.PlayMaker.Actions.GetButtonDown { buttonName = new HutongGames.PlayMaker.FsmString("ShiftInto5") },
+            new HutongGames.PlayMaker.Actions.GetButtonDown { buttonName = new HutongGames.PlayMaker.FsmString("ShiftIntoR1") },
+            new HutongGames.PlayMaker.Actions.GetButtonDown { buttonName = new HutongGames.PlayMaker.FsmString("Horn") }
+        };
+        Check(VehicleTuner.CountShiftIntos(shiftActions) == 5, "the game's ShiftIntoN actions give the stock gear count (reverse and others ignored)");
+        VehicleController poisoned = MakeCar(out FakeWheel[] _, 0f);
+        poisoned.powertrain.transmission.gears = new List<float>(poisonedList);
+        poisoned.powertrain.transmission.Gear = 9;
+        UnityEngine.Object.Registry.Add(poisoned);
+        var tp = new VehicleTuner();
+        tp.ReapplyNow();
+        Check(poisoned.powertrain.transmission.gears.Count == 7 && poisoned.powertrain.transmission.Gear <= 5,
+            "capture truncates a baked-in continuation and fixes the live gear");
         ResetAllCategories();
     }
 
