@@ -34,6 +34,8 @@ namespace ApocalypterSteeringMod.Runtime
     {
         public const float MinContinuedRatio = 0.05f;
 
+        private static readonly HashSet<string> LoggedGearboxCapture = new HashSet<string>();
+
         private static GearboxData CaptureGearbox(VehicleController vc)
         {
             var d = new GearboxData();
@@ -80,6 +82,15 @@ namespace ApocalypterSteeringMod.Runtime
                 d.Reverse = reverse;
                 d.Forward = forward;
                 d.Extended = ExtendRatios(d.Gears, reverse, forward);
+
+                // One diagnostic line per vehicle per session: the save-file contents
+                // as the tuner sees them (used to hunt poisoned saves).
+                if (Plugin.Log != null && !LoggedGearboxCapture.Contains(VehicleName(vc)))
+                {
+                    LoggedGearboxCapture.Add(VehicleName(vc));
+                    Plugin.Log.LogInfo("Gearbox capture: '" + VehicleName(vc) + "' gears=" + string.Join(",", t.gears)
+                        + " gear=" + t.Gear + " shifting=" + t.isShifting + " layout=" + (d.Standard ? "ok" : "NON-STANDARD"));
+                }
             }
             ClutchComponent c = vc.powertrain.clutch;
             if (c != null)
