@@ -195,7 +195,7 @@ namespace ApocalypterSteeringMod.Runtime
             {
                 SetVisible(false);
             }
-            else if (_visible && _panel != null)
+            else if (_visible && _panel != null && DigitsSwitchTabs(Settings.UiSettings.FreezeWhileOpen, _panel.PointerOverWindow()))
             {
                 for (int d = 0; d < DigitKeys.Length; d++)
                 {
@@ -217,6 +217,18 @@ namespace ApocalypterSteeringMod.Runtime
             }
 
             TickMenuButton();
+        }
+
+        /// <summary>
+        /// 0.7.0: the digit tab hotkeys only act while the mouse is over the panel in live mode.
+        /// The game's shift-into keys (ShiftInto1..8 / R / N) may sit on the number row, and since
+        /// 0.7.0 the mod's own manual shifting answers them: a driver shifting with the panel open
+        /// must not flip tabs (README §10 item 36, the 0.6.3 note). Freeze mode blocks driving, so
+        /// digits always switch tabs there. Pure (harness).
+        /// </summary>
+        public static bool DigitsSwitchTabs(bool frozen, bool pointerOverPanel)
+        {
+            return frozen || pointerOverPanel;
         }
 
         private void LateUpdate()

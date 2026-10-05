@@ -460,6 +460,112 @@ namespace ApocalypterSteeringMod.Runtime
             return DescribeStockLayout(r.Drivetrain.Layout);
         }
 
+        // ------------------------------------------------------------------ torque split (0.7.0 panel readout)
+
+        public const int MaxAxles = 8;
+
+        /// <summary>
+        /// Nominal share of the gearbox torque each axle receives (index 0 = front axle), walking the
+        /// LIVE wiring from the gearbox (so a custom layout shows its own split): an Open diff splits
+        /// by its bias (A gets 1 - biasAB, DifferentialComponent.cs OpenDiffTorqueSplit), a Locked/LSD
+        /// diff nominally 50/50 (it moves torque with wheel speed), any other component passes it on.
+        /// A diff with an unset output drives nothing (NWH steps it as a dead end). Allocation-free.
+        /// Returns the number of driven axles.
+        /// </summary>
+        internal static int NominalAxleShares(LayoutData d, float[] shares)
+        {
+            for (int i = 0; i < shares.Length; i++)
+            {
+                shares[i] = 0f;
+            }
+            if (d == null || d.Transmission == null)
+            {
+                return 0;
+            }
+            Accumulate(d, d.Transmission.Output, d.Transmission.outputNameHash, 1f, shares, 0);
+            int n = 0;
+            for (int i = 0; i < shares.Length; i++)
+            {
+                if (shares[i] > 1e-4f)
+                {
+                    n++;
+                }
+            }
+            return n;
+        }
+
+        private static void Accumulate(LayoutData d, PowertrainComponent c, int hashToC, float share, float[] shares, int depth)
+        {
+            if (c == null || hashToC == 0 || depth > 32 || share <= 0f)
+            {
+                return;
+            }
+            var wheel = c as WheelComponent;
+            if (wheel != null)
+            {
+                int i = WheelIndex(d, wheel);
+                int axle = i >= 0 ? d.WheelAxle[i] - 1 : -1;
+                if (axle >= 0 && axle < shares.Length)
+                {
+                    shares[axle] += share;
+                }
+                return;
+            }
+            var diff = c as DifferentialComponent;
+            if (diff != null)
+            {
+                if (diff.outputNameHash == 0 || diff.outputBNameHash == 0)
+                {
+                    return;
+                }
+                float a = diff.DifferentialType == DifferentialComponent.Type.Open ? 1f - diff.biasAB : 0.5f;
+                Accumulate(d, diff.Output, diff.outputNameHash, share * a, shares, depth + 1);
+                Accumulate(d, diff.OutputB, diff.outputBNameHash, share * (1f - a), shares, depth + 1);
+                return;
+            }
+            Accumulate(d, c.Output, c.outputNameHash, share, shares, depth + 1);
+        }
+
+        private readonly float[] _shareScratch = new float[MaxAxles];
+
+        /// <summary>The panel's drive summary for a vehicle: axle count, driven axles, nominal shares (copied into <paramref name="shares"/>).</summary>
+        public bool TryGetDriveSplit(VehicleController vc, float[] shares, out int axleCount, out int drivenAxles)
+        {
+            axleCount = 0;
+            drivenAxles = 0;
+            VehicleRecord r;
+            if (vc == null || !_records.TryGetValue(vc, out r) || r.Drivetrain == null || r.Drivetrain.Layout == null)
+            {
+                return false;
+            }
+            axleCount = r.Drivetrain.Layout.AxleCount;
+            drivenAxles = NominalAxleShares(r.Drivetrain.Layout, _shareScratch);
+            for (int i = 0; i < shares.Length && i < _shareScratch.Length; i++)
+            {
+                shares[i] = _shareScratch[i];
+            }
+            return true;
+        }
+
+        /// <summary>Does this vehicle have a centre (AWD/transfer) differential of its own?</summary>
+        public bool HasCentreDiff(VehicleController vc)
+        {
+            VehicleRecord r;
+            if (vc == null || !_records.TryGetValue(vc, out r) || vc.powertrain == null || vc.powertrain.differentials == null)
+            {
+                return false;
+            }
+            List<DifferentialComponent> diffs = vc.powertrain.differentials;
+            for (int i = 0; i < diffs.Count; i++)
+            {
+                if (diffs[i] != null && ClassifyDiff(r, diffs[i], i) == DiffRole.Center)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
         /// <summary>Why the active layout is not applied to this vehicle (null = applied, or no layout active).</summary>
         public string LayoutProblem(VehicleController vc)
         {

@@ -118,10 +118,59 @@ namespace ApocalypterSteeringMod.Runtime
 
         // ---- telemetry strip (0.6.0) ------------------------------------------------
 
+        public static readonly string TargetMissingFmt = "{0} (not here)";
+
+        // 0.7.0 drivetrain tab (centre diff, torque split, layout).
+        public static readonly string CenterDiffFmt = "Centre (AWD) differential: {0}. Vehicles without one ignore it.";
+        public static readonly string SplitNoVehicle = "Torque split: no vehicle found yet.";
+        public static readonly string SplitOneAxleFmt = "{0} drives one axle. A custom layout below can make it AWD.";
+        public static readonly string SplitFmt = "Torque split of the car you drive (nominal): {0}";
+        public static readonly string AxleFrontFmt = "front {0}%";
+        public static readonly string AxleRearFmt = "rear {0}%";
+        public static readonly string AxleNFmt = "axle {0}";
+        public static readonly string LayoutOffFmt = "Custom layout is off. Layout text: {0}";
+        public static readonly string LayoutInvalidFmt = "Layout ignored: {0}";
+        public static readonly string LayoutNeedsDrivetrainFmt = "Turn Drivetrain tuning on to use the layout: {0}";
+        public static readonly string LayoutActiveFmt = "Layout active: {0}";
+        public static readonly string LayoutUnfitFmt = "This vehicle keeps its own drivetrain: {0}.";
+        public static readonly string LayoutTextFmt = "Layout: {0}";
+        public static readonly string LayoutCopied = "This vehicle's layout copied to the clipboard.";
+        public static readonly string LayoutCopyNone = "This vehicle's layout cannot be written as layout text.";
+        public static readonly string LayoutPasted = "Layout pasted.";
+        public static readonly string LayoutPasteFailedFmt = "Not a layout: {0}";
+
+        // 0.7.0 telemetry pins.
+        public static readonly string PinnedFmt = "{0} pinned to the telemetry strip.";
+        public static readonly string PinnedTelemetryOnFmt = "{0} pinned; the telemetry strip is now on.";
+        public static readonly string UnpinnedFmt = "{0} removed from the telemetry strip.";
+        public static readonly string PinsFullFmt = "The telemetry strip holds {0} pinned values. Unpin one first.";
+
+        // 0.7.0 gearbox shift controller.
+        public static readonly string ShiftedOneFmt = "The mod shifts {0} vehicle (the game's gear display may lag a moment).";
+        public static readonly string ShiftedManyFmt = "The mod shifts {0} vehicles (the game's gear display may lag a moment).";
+
         public static readonly string TelemetrySpeedFmt = "{0} km/h";
         public static readonly string TelemetryRpmFmt = "{0} rpm";
         public static readonly string TelemetryGearFmt = "Gear {0}";
         public static readonly string TelemetrySlipFmt = "Slip {0}°";
+
+        /// <summary>A pinned slider value in its slider's own units (0.7.0 telemetry pins).</summary>
+        public static string PinValue(ApocalypterSteeringMod.Settings.TelemetryPins.Unit unit, float v)
+        {
+            switch (unit)
+            {
+                case ApocalypterSteeringMod.Settings.TelemetryPins.Unit.Degrees: return Deg(v);
+                case ApocalypterSteeringMod.Settings.TelemetryPins.Unit.DegSigned: return DegSigned(v);
+                case ApocalypterSteeringMod.Settings.TelemetryPins.Unit.CmSigned: return CmSigned(v);
+                case ApocalypterSteeringMod.Settings.TelemetryPins.Unit.Rpm: return string.Format(TelemetryRpmFmt, v.ToString("+0;-0;0"));
+                case ApocalypterSteeringMod.Settings.TelemetryPins.Unit.Count:
+                    return v < 0.5f ? "Own" : string.Format(GearCountFmt, UnityEngine.Mathf.RoundToInt(v));
+                case ApocalypterSteeringMod.Settings.TelemetryPins.Unit.Plain: return v.ToString("0.00");
+                case ApocalypterSteeringMod.Settings.TelemetryPins.Unit.Speed: return SpeedMps(v);
+                case ApocalypterSteeringMod.Settings.TelemetryPins.Unit.Percent: return Percent(v);
+                default: return Times(v);
+            }
+        }
 
         public static string TelemetrySpeed(float kmh) { return string.Format(TelemetrySpeedFmt, UnityEngine.Mathf.RoundToInt(kmh < 0f ? -kmh : kmh)); }
         public static string TelemetryRpm(float rpm) { return string.Format(TelemetryRpmFmt, UnityEngine.Mathf.RoundToInt(rpm < 0f ? 0f : rpm)); }

@@ -43,6 +43,14 @@ namespace ApocalypterSteeringMod.Settings
             PanelAlpha = DefaultAlpha;
         }
 
+        /// <summary>The telemetry defaults: off, x1, top-left (the config defaults). Pins are kept.</summary>
+        public static void ResetTelemetry()
+        {
+            TelemetryEnabled = false;
+            TelemetryScale = 1f;
+            TelemetryPosition = TelemetryCorner.TopLeft;
+        }
+
         /// <summary>Names only (case/space-tolerant); anything else falls back to the default corner.</summary>
         public static TelemetryCorner ParseCorner(string value)
         {

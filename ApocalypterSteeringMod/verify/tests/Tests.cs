@@ -303,6 +303,30 @@ public static class Tests
         Console.WriteLine("0.6.4 parked-car frozen input (telemetry pick)");
         TestFrozenInputPick();
 
+        Console.WriteLine("0.7.0 shift controller: pure shift-point math");
+        TestShiftMath();
+
+        Console.WriteLine("0.7.0 shift controller: hook, shifting, restore");
+        TestShiftController();
+
+        Console.WriteLine("0.7.0 Truck gearbox preset");
+        TestTruckPreset();
+
+        Console.WriteLine("0.7.0 game-changed values (drift) + centre diff + torque split");
+        TestDriftAndCentre();
+
+        Console.WriteLine("0.7.0 telemetry pins");
+        TestTelemetryPins(dir);
+
+        Console.WriteLine("0.7.0 tighter panel layout (300 / 400 / 460 / 800 / 1000 px)");
+        TestLayout070();
+
+        Console.WriteLine("0.7.0 config: a real 0.6.4 file + new keys");
+        TestConfig070(dir);
+
+        Console.WriteLine("0.7.0 audit fixes (UI)");
+        TestAudit070();
+
         Console.WriteLine();
         Console.WriteLine(_pass + " passed, " + _fail + " failed");
         return _fail == 0 ? 0 : 1;
@@ -1566,7 +1590,6 @@ public static class Tests
     {
         UnityEngine.Object.Registry.Clear();
         ResetAllCategories();
-        GearboxSettings.ComingSoon = false;   // the harness exercises the gated code
         TransmissionComponent.DeferShifts = false;
 
         float[] stock = { -2.216f, 0f, 3.274f, 2.093f, 1.439f, 1.084f, 0.817f };
@@ -1586,17 +1609,17 @@ public static class Tests
         tuner.ReapplyNow();
         Check(tuner.ReferenceGearCount == 5 && Near(tuner.ReferenceGearStock(6), ext[5]), "reference vehicle: 5 gears, continued 6th for the readouts");
 
-        // Resize is a manual-transmission feature: an automatic keeps its stock count
-        // (the game's shift logic expects it — resizing makes the car undrivable).
+        // 0.7.0: automatics are tunable — the mod's shift controller owns the box while ON
+        // (0.6.x skipped them entirely; ShiftController tests cover the shifting itself).
         GearboxSettings.Enabled = true;
         GearboxPreset autoP = GearboxSettings.BeginEdit();
         autoP.GearCount = 6;
         tuner.ApplyLive();
-        Check(t.gears.Count == 7 && tuner.AnyGearboxSkipped,
-            "automatic transmission: gearbox tuning skipped entirely (stock count kept), flagged for the panel");
-        Check(Near(t.gears[2], 3.274f), "automatic skip still applies nothing else either (no ratio factors set)");
+        Check(t.gears.Count == 8 && tuner.ShiftControlledCount == 1 && t.transmissionType == TransmissionComponent.TransmissionShiftType.Automatic,
+            "automatic transmission: resized to 6 gears and shifted by the mod (its type is never written)");
         GearboxSettings.Enabled = false;
         tuner.ApplyLive();
+        Check(t.gears.Count == 7 && t.HasNwhDelegate && tuner.ShiftControlledCount == 0, "OFF: stock list and NWH's own delegate back");
 
         // 5 -> 6 gears (manual transmission opts in).
         t.transmissionType = TransmissionComponent.TransmissionShiftType.Manual;
@@ -1666,14 +1689,15 @@ public static class Tests
         Check(Near(VehicleTuner.EngagementRpm(1200f, -500f, 900f), 990f), "engagement never pushed below 1.1 x idle");
         Check(Near(VehicleTuner.EngagementRpm(800f, -100f, 900f), 800f), "... unless the stock point is already below it (kept as shipped)");
         p = GearboxSettings.BeginEdit();
-        p.TransmissionMode = GearboxMode.Manual;
+        p.TransmissionMode = GearboxMode.Automatic;
         tuner.ApplyLive();
-        Check(t.transmissionType == TransmissionComponent.TransmissionShiftType.Manual, "transmission mode Manual applied");
+        Check(t.transmissionType == TransmissionComponent.TransmissionShiftType.Manual && !t.HasNwhDelegate,
+            "0.7.0: transmission mode Automatic is the controller's logic; the vehicle's type is never written");
         GearboxSettings.Enabled = false;
         tuner.ApplyLive();
         Check(Near(cl.slipTorque, 500f) && Near(cl.engagementRange, 400f) && Near(cl.engagementRPM, 1200f)
-              && t.transmissionType == TransmissionComponent.TransmissionShiftType.Manual,
-            "OFF restores clutch; the type stays Manual (the OFF->ON refresh captured it as the new stock)");
+              && t.transmissionType == TransmissionComponent.TransmissionShiftType.Manual && t.HasNwhDelegate,
+            "OFF restores clutch; the type is still the vehicle's own Manual with NWH's delegate");
 
         // Clamp: slip torque >= 1, range >= 1 even from a zero stock value.
         cl.slipTorque = 0f;
@@ -1730,7 +1754,6 @@ public static class Tests
         Check(poisoned.powertrain.transmission.gears.Count == 7 && poisoned.powertrain.transmission.Gear <= 5,
             "capture truncates a baked-in continuation and fixes the live gear");
         ResetAllCategories();
-        GearboxSettings.ComingSoon = true;   // release gate back on
     }
 
     private static void TestInputBlocker()
@@ -1872,8 +1895,8 @@ public static class Tests
             ResetAllCategories();
         }
         Check(allRoundTrip, "Serialize -> Import -> Serialize is byte-identical for all nine books");
-        Check(PresetCodec.KeyCount(PresetCategory.Alignment) == 20 && PresetCodec.KeyCount(PresetCategory.Gearbox) == 17,
-            "alignment carries 4 camber + caster/toe + 12 position keys; gearbox 12 gear + 5 keys");
+        Check(PresetCodec.KeyCount(PresetCategory.Alignment) == 20 && PresetCodec.KeyCount(PresetCategory.Gearbox) == 21,
+            "alignment carries 4 camber + caster/toe + 12 position keys; gearbox 12 gear + 9 keys (0.7.0: + Spread/ShiftUp/ShiftDown/Kickdown)");
 
         // A built-in exports with BasedOn = its name; import forks Custom(Name), the built-in stays.
         SuspensionPreset race = SuspensionSettings.Book.FindBuiltIn("Race");
@@ -2052,8 +2075,9 @@ public static class Tests
             Check(ok, "layout at " + W + " px: rows, switches, tabs, curve editors and gear graph fit without overlap");
         }
         PanelLayout.SliderGeom wide = PanelLayout.SliderRow(748f, true);
-        Check(!wide.Stacked && Near(wide.RowHeight, 58f) && Near(wide.Slider.X, 328f) && Near(wide.Slider.W, 748f - 328f - 236f)
-              && Near(wide.Value.X, 748f - 82f - 150f) && Near(wide.Reset.X, 748f - 78f), "wide rows reproduce 0.5.0's geometry exactly");
+        Check(!wide.Stacked && Near(wide.RowHeight, 50f) && Near(wide.Slider.X, 328f) && Near(wide.Reset.X, 748f - 74f)
+              && Near(wide.Value.Right, wide.Reset.X - 4f) && Near(wide.Slider.Right, wide.Value.X - 4f),
+            "0.7.0 wide rows: 50 px tall, slider from 328, value then Reset at the right (no pin)");
         Check(PanelLayout.SliderRow(PanelLayout.ContentWidth(460f), true).Stacked, "the default 460 px width stacks the rows");
 
         Check(Near(PanelLayout.EffectiveWidth(800f, 1920f, 1080f, 1f), 800f), "800 px fits a 1080p screen at x1");
@@ -2507,6 +2531,7 @@ public static class Tests
         DrivetrainSettings.Enabled = true; DrivetrainSettings.SetPresetByName("Race");
         AssistsSettings.Enabled = true; AssistsSettings.SetPresetByName("Standard");
         AlignmentSettings.Enabled = true; AlignmentSettings.SetPresetByName("Race");
+        GearboxSettings.Enabled = true; GearboxSettings.SetPresetByName("Truck");   // 0.7.0: spread + shift controller hook
         DrivetrainSettings.LayoutEnabled = true;
         DrivetrainSettings.LayoutText = DrivetrainSettings.DefaultLayoutText;
         tuner.ApplyLive();   // first apply: baseline refresh + layout resolve (allocates by design)
@@ -2517,7 +2542,7 @@ public static class Tests
             tuner.ApplyLive();
         }
         long bytes = GC.GetAllocatedBytesForCurrentThread() - before;
-        Check(bytes == 0, "steady-state ApplyLive with six categories + a layout allocates nothing (" + bytes + " bytes over 50 passes; "
+        Check(bytes == 0, "steady-state ApplyLive with seven categories (0.7.0: + Gearbox Truck) + a layout allocates nothing (" + bytes + " bytes over 50 passes; "
             + "0.6.0 built a closure per category per pass)");
         ResetAllCategories();
         tuner.ApplyLive();
@@ -2813,5 +2838,659 @@ public static class Tests
         ResetAllCategories();
         UnityEngine.Object.Registry.Clear();
         Time.unscaledTime = 0f;
+    }
+
+    // ================================================================ 0.7.0
+
+    private static VehicleController MakeShiftCar(TransmissionComponent.TransmissionShiftType type, string name)
+    {
+        VehicleController vc = MakeCar(out FakeWheel[] _, 0f);
+        vc.gameObject.name = name;
+        TransmissionComponent t = vc.powertrain.transmission;
+        t.vehicleController = vc;
+        vc.input.vehicleController = vc;
+        t.transmissionType = type;
+        vc.Speed = 0f;
+        t.SimulateForwardStep();   // NWH assigns the delegate for the type (stub mirrors :403-405)
+        t.TestRpmPerMps = 27.3f;    // wheel rpm per m/s on a 0.35 m wheel
+        return vc;
+    }
+
+    /// <summary>Ramp the speed, one physics tick per step; returns the number of gear reversals (up then down or v.v.).</summary>
+    private static int Ramp(VehicleController vc, float from, float to, float dv, float throttle, List<int> gears)
+    {
+        TransmissionComponent t = vc.powertrain.transmission;
+        vc.input.Throttle = throttle;
+        int reversals = 0, lastDir = 0, last = t.Gear;
+        float step = to >= from ? Math.Abs(dv) : -Math.Abs(dv);
+        for (float v = from; step > 0f ? v <= to : v >= to; v += step)
+        {
+            vc.Speed = v;
+            t.SimulateForwardStep();
+            int g = t.Gear;
+            if (gears != null) gears.Add(g);
+            if (g != last)
+            {
+                int dir = g > last ? 1 : -1;
+                if (lastDir != 0 && dir != lastDir) reversals++;
+                lastDir = dir;
+                last = g;
+            }
+        }
+        return reversals;
+    }
+
+    private static void TestShiftMath()
+    {
+        Check(Near(ShiftController.KickdownFactor(0.5f, 1f), 1f) && Near(ShiftController.KickdownFactor(0.9f, 1f), 1.15f)
+              && Near(ShiftController.KickdownFactor(0.9f, 2f), 1.3f), "kickdown: x1 below 80% throttle, +15% x scale above");
+        Check(Near(ShiftController.UpshiftPoint(2800f, 1f, 0.7f, 900f, 5000f, 1f), 2800f), "upshift = the vehicle's own point on a normal ratio step");
+        Check(Near(ShiftController.UpshiftPoint(2800f, 0.9f, 0.7f, 900f, 5000f, 1f), 2520f), "ShiftUpFactor scales it (0.9 -> earlier)");
+        Check(Near(ShiftController.UpshiftPoint(2800f, 1f, 0.7f, 900f, 5000f, 1.15f), 3220f), "kickdown raises it (shifts later at full throttle)");
+        float wide = ShiftController.UpshiftPoint(2800f, 1f, 0.3f, 900f, 5000f, 1f);
+        Check(Near(wide, 990f / (0.9f * 0.3f), 0.5f), "wide step (x0.3): upshift raised so the next gear lands above its downshift floor (" + wide.ToString("0") + ")");
+        Check(float.IsPositiveInfinity(ShiftController.UpshiftPoint(2800f, 1f, 0.15f, 900f, 5000f, 1f)), "unreachable next gear (even the limiter lands below idle x1.1): no upshift");
+        Check(Near(ShiftController.UpshiftPoint(6000f, 1f, 0.7f, 900f, 5000f, 1f), 4850f), "capped at 97% of the rev limiter");
+        Check(Near(ShiftController.UpshiftPoint(500f, 1f, 1f, 900f, 5000f, 1f), 1125f), "never below 1.25 x idle");
+        Check(Near(ShiftController.DownshiftPoint(1400f, 1f, 2800f, 0.7f, 900f, 1f), 1400f), "downshift = the vehicle's own point when it is clear of the landing RPM");
+        Check(Near(ShiftController.DownshiftPoint(1400f, 1.5f, 2800f, 0.7f, 900f, 1f), 2800f * 0.7f * 0.9f), "downshift capped at 90% of the RPM an upshift lands on");
+        Check(Near(ShiftController.DownshiftPoint(500f, 1f, 2800f, 0.7f, 900f, 1f), 990f), "downshift never below 1.1 x idle (NWH's own floor)");
+
+        // The no-hunting property over a grid: every upshift lands above the next gear's downshift
+        // point, every downshift lands below the lower gear's upshift point.
+        bool ok = true;
+        float[] steps = { 0.2f, 0.3f, 0.45f, 0.6f, 0.75f, 0.9f, 0.97f };
+        float[] factors = { 0.5f, 0.8f, 1f, 1.2f, 1.5f };
+        float[] kicks = { 1f, 1.15f, 1.3f };
+        foreach (float st in steps)
+            foreach (float uf in factors)
+                foreach (float df in factors)
+                    foreach (float k in kicks)
+                    {
+                        float up = ShiftController.UpshiftPoint(2800f, uf, st, 900f, 4700f, k);
+                        if (float.IsInfinity(up)) continue;
+                        float down = ShiftController.DownshiftPoint(1400f, df, up, st, 900f, k);
+                        ok &= up * st > down && down / st < up && up <= 4700f * 0.97f + 0.01f;
+                    }
+        Check(ok, "no hunting anywhere on a grid of ratio steps x factors x kickdown (land above down, below up)");
+
+        Check(ShiftController.AutoForwardTarget(4, 6, 2000f, 1.5f, 2800f, 1400f) == 1, "creep hold: below 2 m/s a higher gear drops to 1st");
+        Check(ShiftController.AutoForwardTarget(1, 6, 9000f, 1.5f, 2800f, 1400f) == 1, "creep hold: no upshift out of 1st below 2 m/s");
+        Check(ShiftController.AutoForwardTarget(3, 6, 2900f, 20f, 2800f, 1400f) == 4, "above the upshift point: one gear up");
+        Check(ShiftController.AutoForwardTarget(6, 6, 9000f, 20f, 2800f, 1400f) == 6, "top gear never upshifts");
+        Check(ShiftController.AutoForwardTarget(3, 6, 1300f, 20f, 2800f, 1400f) == 2, "below the downshift point: one gear down");
+        Check(ShiftController.AutoForwardTarget(3, 6, 2000f, 20f, 2800f, 1400f) == 3, "in between: stay (hysteresis band)");
+        Check(ShiftController.DnrFromForward(1, 0.2f, 0f, false, false, -999, 0.4f) == 0 && ShiftController.DnrFromForward(1, 0.2f, 0.5f, false, false, -999, 0.4f) == 1
+              && ShiftController.DnrFromForward(2, 1f, 0f, false, false, -999, 0.4f) == 2, "drive -> neutral like NWH: stopped and off the throttle");
+        Check(ShiftController.DnrFromForward(1, 0.2f, 0f, true, false, -999, 0.4f) == 1 && ShiftController.DnrFromForward(1, 0.2f, 0f, true, true, -999, 0.4f) == 0
+              && ShiftController.DnrFromForward(1, 0.2f, 0f, true, false, -1, 0.4f) == -1, "RequireShiftInput: N / R only on the game's shift request");
+        Check(ShiftController.DnrFromNeutralOrReverse(0, 0f, 0.3f, 0f, 0.4f) == 1 && ShiftController.DnrFromNeutralOrReverse(0, 0f, 0f, 0.3f, 0.4f) == -1
+              && ShiftController.DnrFromNeutralOrReverse(-1, 0.1f, 0f, 0.3f, 0.4f) == 0 && ShiftController.DnrFromNeutralOrReverse(0, 0f, 0f, 0f, 0.4f) == 0,
+            "neutral/reverse (Manual-type car in Automatic mode): NWH's Auto DNR rules");
+        Check(ShiftController.ManualTarget(3, true, false, -999, 12, 1) == 4 && ShiftController.ManualTarget(12, true, false, -999, 12, 1) == 12
+              && ShiftController.ManualTarget(-1, false, true, -999, 12, 1) == -1 && ShiftController.ManualTarget(2, false, false, 9, 5, 1) == 5
+              && ShiftController.ManualTarget(2, false, false, -999, 5, 1) == 2 && ShiftController.ManualTarget(4, false, false, 0, 5, 1) == 0,
+            "manual requests: up / down / ShiftInto, clamped to the tuned box; no request = stay");
+        Check(ShiftController.IsAutomatic(GearboxMode.Stock, TransmissionComponent.TransmissionShiftType.Automatic)
+              && !ShiftController.IsAutomatic(GearboxMode.Stock, TransmissionComponent.TransmissionShiftType.Manual)
+              && ShiftController.IsAutomatic(GearboxMode.Automatic, TransmissionComponent.TransmissionShiftType.Manual)
+              && !ShiftController.IsAutomatic(GearboxMode.Manual, TransmissionComponent.TransmissionShiftType.Automatic),
+            "mode Stock follows the vehicle's own type; Manual/Automatic override it");
+    }
+
+    private static void TestShiftController()
+    {
+        UnityEngine.Object.Registry.Clear();
+        ResetAllCategories();
+        TargetSettings.Mode = TargetMode.All;
+        TransmissionComponent.DeferShifts = false;
+
+        // 1. The 0.6.x "stuck automatic": NWH's own automatic on a wide-step box hunts.
+        VehicleController hv = MakeShiftCar(TransmissionComponent.TransmissionShiftType.Automatic, "Hunter");
+        TransmissionComponent ht = hv.powertrain.transmission;
+        ht.gears = new List<float> { -2.216f, 0f, 3.274f, 0.98f, 0.7f, 0.5f, 0.4f };
+        ht.Gear = 1;
+        hv.Speed = 2900f / (27.3f * 3.274f * 6f);   // 2900 rpm in 1st
+        for (int i = 0; i < 100; i++) { ht.SimulateForwardStep(); hv.Speed = 2900f / (27.3f * 3.274f * 6f); }
+        Check(ht.NwhAutoShifts > 50, "control: NWH's raw automatic on a x0.3 ratio step hunts 1<->2 (" + ht.NwhAutoShifts + " shifts in 100 ticks; each shift opens the clutch = revs, no drive)");
+
+        UnityEngine.Object.Registry.Add(hv);
+        var tuner = new VehicleTuner();
+        tuner.ReapplyNow();
+        ht.gears = new List<float> { -2.216f, 0f, 3.274f, 2.093f, 1.439f, 1.084f, 0.817f };   // back to stock before capture matters
+        UnityEngine.Object.Registry.Clear();
+        hv = MakeShiftCar(TransmissionComponent.TransmissionShiftType.Automatic, "Hunter");
+        ht = hv.powertrain.transmission;
+        UnityEngine.Object.Registry.Add(hv);
+        tuner = new VehicleTuner();
+        tuner.ReapplyNow();
+        TransmissionComponent.Shift nwh = ht.shiftDelegate;
+        var gearsBefore = new List<float>(ht.gears);
+        GearboxSettings.Enabled = true;
+        GearboxPreset p = GearboxSettings.BeginEdit();
+        p.SetScale(2, 0.98f / 2.093f);   // the same x0.3 step 1st -> 2nd
+        tuner.ApplyLive();
+        Check(!ReferenceEquals(ht.shiftDelegate, nwh) && tuner.ShiftControlledCount == 1, "Gearbox ON: the mod's controller is the shift delegate");
+        ht.Gear = 1;
+        ht.NwhAutoShifts = 0;
+        float v1 = 2900f / (27.3f * 3.274f * 6f);
+        for (int i = 0; i < 100; i++) { hv.Speed = v1; ht.SimulateForwardStep(); }
+        Check(ht.Gear == 1 && ht.NwhAutoShifts == 0, "same box under the controller: holds 1st at 2900 rpm (the 2nd-gear landing would be below idle x1.1)");
+        float v2 = 3800f / (27.3f * 3.274f * 6f);
+        for (int i = 0; i < 100; i++) { hv.Speed = v2; ht.SimulateForwardStep(); }
+        Check(ht.Gear == 2, "at 3800 rpm it upshifts once and stays in 2nd (" + ht.Gear + ")");
+
+        // 2. Restore byte-for-byte.
+        GearboxSettings.Enabled = false;
+        tuner.ApplyLive();
+        bool same = ht.gears.Count == gearsBefore.Count;
+        for (int i = 0; same && i < gearsBefore.Count; i++) same &= ht.gears[i] == gearsBefore[i];
+        Check(ReferenceEquals(ht.shiftDelegate, nwh) && same && ht.transmissionType == TransmissionComponent.TransmissionShiftType.Automatic,
+            "Gearbox OFF: the very same NWH delegate instance, the stock gear list and the type are back");
+        Check(ht.Gear >= 0 && ht.Gear <= 5, "OFF leaves the transmission in a valid gear");
+
+        // 3. A 12-gear Truck box on an AUTOMATIC car drives through every gear without hunting.
+        UnityEngine.Object.Registry.Clear();
+        VehicleController tv = MakeShiftCar(TransmissionComponent.TransmissionShiftType.Automatic, "Rustliner(Clone)2360");
+        TransmissionComponent tt = tv.powertrain.transmission;
+        UnityEngine.Object.Registry.Add(tv);
+        tuner = new VehicleTuner();
+        tuner.ReapplyNow();
+        GearboxSettings.Enabled = true;
+        GearboxSettings.SetPresetByName("Truck");
+        tuner.ApplyLive();
+        Check(tt.gears.Count == 14 && tuner.ShiftControlledCount == 1, "Truck: 12 forward gears on a 5-speed automatic, controller hooked");
+        var seq = new List<int>();
+        tv.input.Throttle = 0.6f;
+        tv.Speed = 0f;
+        tt.SimulateForwardStep();   // N -> 1 through NWH's own drive engagement (stock delegate in N)
+        int rev = Ramp(tv, 0f, 60f, 0.02f, 0.6f, seq);
+        int maxGear = 0;
+        foreach (int g in seq) if (g > maxGear) maxGear = g;
+        Check(maxGear == 12 && rev == 0, "accelerating 0-60 m/s: shifts up through all 12 gears in order, never back (" + maxGear + " reached, " + rev + " reversals)");
+        var down = new List<int>();
+        int rev2 = Ramp(tv, 60f, 0f, 0.02f, 0f, down);
+        Check(rev2 == 0 && tt.Gear == 0, "coasting to a stop: downshifts only, then neutral like NWH (gear " + tt.Gear + ", " + rev2 + " reversals)");
+
+        // 4. Manual mode on an automatic car: the game's shift requests, clamped to the tuned box.
+        GearboxPreset mp = GearboxSettings.BeginEdit();
+        mp.TransmissionMode = GearboxMode.Manual;
+        tuner.ApplyLive();
+        tv.Speed = 10f;
+        tv.input.ShiftInto = 3; tt.SimulateForwardStep();
+        bool s3 = tt.Gear == 3;
+        tv.input.ShiftUp = true; tt.SimulateForwardStep();
+        bool s4 = tt.Gear == 4;
+        tv.input.ShiftInto = 11; tt.SimulateForwardStep();
+        bool s11 = tt.Gear == 11;
+        tv.input.ShiftInto = 40; tt.SimulateForwardStep();
+        bool s12 = tt.Gear == 12;
+        tt.SimulateForwardStep();
+        Check(s3 && s4 && s11 && s12 && tt.Gear == 12, "manual: ShiftInto 3, ShiftUp -> 4, ShiftInto 11 (a gear the game's keys don't have), 40 clamps to 12; no request = stay");
+        Check(tv.input.ShiftInto == -999 && !tv.input.ShiftUp, "the requests are consumed by NWH's ResetShiftFlags (the mod never writes vc.input)");
+
+        // 5. The game changes the type while we own the box (CheckTag): NWH re-assigns, we re-hook.
+        tt.transmissionType = TransmissionComponent.TransmissionShiftType.Manual;
+        tt.SimulateForwardStep();
+        Check(tt.HasNwhDelegate, "(stub mirrors NWH) a type change re-assigns NWH's own delegate on the next tick");
+        tuner.ApplyLive();
+        Check(!tt.HasNwhDelegate && tuner.ShiftControlledCount == 1, "the next pass hooks the controller again");
+        GearboxSettings.Enabled = false;
+        tuner.ApplyLive();
+        Check(tt.HasNwhDelegate && tt.transmissionType == TransmissionComponent.TransmissionShiftType.Manual && tt.gears.Count == 7,
+            "OFF after the change: the game's new type and NWH's delegate for it stay (no stale restore)");
+
+        // 6. Manual-type car, mode Stock: the vehicle's own ManualShift does the shifting.
+        GearboxSettings.Enabled = true;
+        GearboxSettings.BeginEdit().TransmissionMode = GearboxMode.Stock;
+        GearboxSettings.Shown.GearCount = 12;
+        tuner.ApplyLive();
+        tt.Gear = 12;
+        tv.input.ShiftUp = true; tt.SimulateForwardStep();
+        bool topStays = tt.Gear == 12;
+        tv.input.ShiftInto = 2; tt.SimulateForwardStep();
+        Check(topStays && tt.Gear == 2 && !tt.HasNwhDelegate, "Manual type + mode Stock: NWH's ManualShift via the controller (12th + ShiftUp stays, ShiftInto 2 works)");
+
+        // 7. A fault inside the controller never escapes into NWH's ForwardStep.
+        tt.Gear = 30;   // out of the list: the controller's ratio lookup throws
+        bool threw = false;
+        try { tt.shiftDelegate(tv); tt.shiftDelegate(tv); } catch (Exception) { threw = true; }
+        Check(!threw, "a throwing controller is caught, logged once, and hands shifting to the vehicle's own delegate");
+        tt.Gear = 2;
+
+        // 8. A controller left behind by a dead runner is never captured as "stock".
+        UnityEngine.Object.Registry.Clear();
+        VehicleController sv = MakeShiftCar(TransmissionComponent.TransmissionShiftType.Automatic, "Stale");
+        TransmissionComponent st = sv.powertrain.transmission;
+        TransmissionComponent.Shift own = st.shiftDelegate;
+        UnityEngine.Object.Registry.Add(sv);
+        var a = new VehicleTuner();
+        GearboxSettings.Enabled = true;
+        GearboxSettings.SetPresetByName("Truck");
+        a.ReapplyNow();
+        // runner A dies without its OnDestroy restore (the worst case); runner B takes over.
+        var b = new VehicleTuner();
+        b.ReapplyNow();
+        GearboxSettings.Enabled = false;
+        b.ApplyLive();
+        Check(ReferenceEquals(st.shiftDelegate, own), "a stale controller's own captured stock is used: OFF restores NWH's delegate, not the dead runner's");
+
+        // 9. Stock and clutch-only presets keep NWH's own shifting (exactly as shipped).
+        UnityEngine.Object.Registry.Clear();
+        VehicleController nv = MakeShiftCar(TransmissionComponent.TransmissionShiftType.Automatic, "Plain");
+        UnityEngine.Object.Registry.Add(nv);
+        var tn = new VehicleTuner();
+        GearboxSettings.Enabled = true;
+        GearboxSettings.SetPresetByName("Stock");
+        tn.ReapplyNow();
+        bool stockNwh = nv.powertrain.transmission.HasNwhDelegate;
+        GearboxSettings.SetPresetByName("Race");
+        tn.ApplyLive();
+        bool raceNwh = nv.powertrain.transmission.HasNwhDelegate && Near(nv.powertrain.clutch.slipTorque, 900f);
+        GearboxSettings.BeginEdit().ShiftUpFactor = 0.9f;
+        tn.ApplyLive();
+        bool knobHooks = !nv.powertrain.transmission.HasNwhDelegate;
+        GearboxSettings.SetPresetByName("Comfort");
+        tn.ApplyLive();
+        Check(stockNwh && raceNwh && knobHooks && nv.powertrain.transmission.HasNwhDelegate,
+            "Stock / clutch-only presets keep NWH's own shifting; a shift knob, gear change or forced mode hands it to the mod (and back)");
+        GearboxSettings.Enabled = false;
+        tn.ApplyLive();
+
+        // 10. CVT: never hooked.
+        UnityEngine.Object.Registry.Clear();
+        VehicleController cv = MakeShiftCar(TransmissionComponent.TransmissionShiftType.CVT, "Cvt");
+        cv.powertrain.transmission.gears = new List<float> { -3f, 0f, 2f };
+        UnityEngine.Object.Registry.Add(cv);
+        var tc = new VehicleTuner();
+        GearboxSettings.Enabled = true;
+        tc.ReapplyNow();
+        Check(cv.powertrain.transmission.HasNwhDelegate && tc.ShiftControlledCount == 0, "CVT boxes keep their own shifting (never hooked)");
+        GearboxSettings.Enabled = false;
+        tc.ApplyLive();
+
+        // 11. The per-tick path allocates nothing.
+        UnityEngine.Object.Registry.Clear();
+        VehicleController av = MakeShiftCar(TransmissionComponent.TransmissionShiftType.Automatic, "Alloc");
+        TransmissionComponent at = av.powertrain.transmission;
+        UnityEngine.Object.Registry.Add(av);
+        var tA = new VehicleTuner();
+        GearboxSettings.Enabled = true;
+        GearboxSettings.SetPresetByName("Truck");
+        tA.ReapplyNow();
+        at.Gear = 3;
+        av.Speed = 15f;
+        av.input.Throttle = 0.9f;
+        TransmissionComponent.Shift del = at.shiftDelegate;
+        del(av);
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 500; i++) { av.Speed = 10f + (i % 50) * 0.5f; del(av); }
+        long bytes = GC.GetAllocatedBytesForCurrentThread() - before;
+        Check(bytes == 0, "the controller's per-tick path allocates nothing (" + bytes + " bytes over 500 ticks)");
+        ResetAllCategories();
+        tA.ApplyLive();
+        UnityEngine.Object.Registry.Clear();
+    }
+
+    private static void TestTruckPreset()
+    {
+        GearboxPreset tr = GearboxSettings.Book.FindBuiltIn("Truck");
+        Check(tr != null && tr == GearboxPreset.Truck && GearboxPreset.Presets.Length == 6 && GearboxPreset.Presets[4] == tr
+              && GearboxPreset.Presets[5] == GearboxPreset.Custom, "Truck preset: sixth button before Custom (3 + 3 grid)");
+        bool scales = Near(tr.Scale(1), 1.2f) && Near(tr.Scale(11), 0.9f) && Near(tr.Scale(12), 0.85f);
+        for (int g = 2; g <= 6; g++) scales &= Near(tr.Scale(g), 1.1f);
+        for (int g = 7; g <= 10; g++) scales &= Near(tr.Scale(g), 1f);
+        Check(tr.GearCount == 12 && scales, "Truck: 12 gears, 1st +20%, 2-6 +10%, 7-10 stock, 11-12 -10/-15%");
+        Check(Near(tr.ClutchGripScale, 1.1f) && Near(tr.ClutchRangeScale, 1.15f) && Near(tr.ShiftUpFactor, 0.9f) && tr.TransmissionMode == GearboxMode.Stock,
+            "Truck: heavy-duty clutch (x1.1 / x1.15), earlier upshifts (x0.9), mode Stock");
+        float[] stock = { -2.216f, 0f, 3.274f, 2.093f, 1.439f, 1.084f, 0.817f };
+        float[] ext = VehicleTuner.ExtendRatios(stock, 1, 5);
+        Check(ext[11] / ext[0] < 0.04f, "control: continuing a 5-speed to 12 gears spans " + (ext[0] / ext[11]).ToString("0") + ":1 (12th gear absurdly tall)");
+        bool falling = true;
+        var spread = new List<float> { stock[0], 0f };
+        for (int g = 1; g <= 12; g++)
+        {
+            float r = VehicleTuner.SpreadRatio(3.274f, 0.817f, g - 1, 12) * tr.Scale(g);
+            if (g > 1) falling &= r < spread[spread.Count - 1];
+            spread.Add(r);
+        }
+        float span = spread[2] / spread[13];
+        Check(tr.SpreadRatios && falling && span > 4f && span < 8f && Near(spread[2], 3.274f * 1.2f) && Near(spread[13], 0.817f * 0.85f),
+            "Truck spreads its 12 gears over the stock 1st..top range: strictly falling, " + span.ToString("0.0") + ":1 overall");
+        Check(VehicleTuner.TryStripContinuation(spread, 1) == 0 && VehicleTuner.SpreadRatio(3f, 1f, 0, 12) == 3f && Near(VehicleTuner.SpreadRatio(3f, 1f, 11, 12), 1f),
+            "spread ratios are progressive, not geometric: a save baked with them is never mistaken for a continuation by the self-heal");
+        GearboxPreset copy = new GearboxPreset { Name = "x" };
+        copy.CopyValuesFrom(tr);
+        Check(Near(copy.ShiftUpFactor, 0.9f) && copy.GearCount == 12, "CopyValuesFrom carries the shift knobs (preset fork)");
+    }
+
+    private static void TestDriftAndCentre()
+    {
+        UnityEngine.Object.Registry.Clear();
+        ResetAllCategories();
+        TargetSettings.Mode = TargetMode.All;
+        VehicleController vc = MakeCar(out FakeWheel[] _, 0f);
+        UnityEngine.Object.Registry.Add(vc);
+        var tuner = new VehicleTuner();
+        tuner.ReapplyNow();
+        DrivetrainSettings.Enabled = true;
+        DrivetrainPreset dp = DrivetrainSettings.BeginEdit();
+        dp.PowerScale = 2f;
+        dp.FinalDriveScale = 1.5f;
+        tuner.ApplyLive();
+        Check(Near(vc.powertrain.engine.maxPower, 240f) && Near(vc.powertrain.transmission.finalGearRatio, 9f), "drivetrain applied (x2 power, x1.5 final drive)");
+        vc.powertrain.engine.maxPower = 150f;                 // an engine swap while tuned
+        vc.powertrain.transmission.finalGearRatio = 4f;       // the game's CheckTag FSM
+        tuner.ApplyLive();
+        Check(Near(vc.powertrain.engine.maxPower, 300f) && Near(vc.powertrain.transmission.finalGearRatio, 6f),
+            "a value the game changed while tuned becomes the new stock (x2 of 150, x1.5 of 4), not overwritten from the stale baseline");
+        DrivetrainSettings.Enabled = false;
+        tuner.ApplyLive();
+        Check(Near(vc.powertrain.engine.maxPower, 150f) && Near(vc.powertrain.transmission.finalGearRatio, 4f),
+            "OFF restores the game's new values (150 / 4), not the first-sight ones (120 / 6)");
+        DrivetrainSettings.Enabled = true;
+        tuner.ApplyLive();
+        vc.powertrain.transmission.UpshiftRPM = 3300f;        // CheckTag again
+        tuner.ApplyLive();
+        DrivetrainSettings.Enabled = false;
+        tuner.ApplyLive();
+        Check(Near(vc.powertrain.transmission.UpshiftRPM, 3300f), "shift RPMs written by the game survive OFF too");
+
+        ClutchComponent cl = vc.powertrain.clutch;
+        GearboxSettings.Enabled = true;
+        GearboxSettings.SetPresetByName("Race");
+        tuner.ApplyLive();
+        cl.slipTorque = 800f;                                  // engine swap re-sizes the clutch
+        tuner.ApplyLive();
+        Check(Near(cl.slipTorque, 800f * 1.8f), "clutch: a game-changed slip torque becomes the new stock (x1.8 of 800)");
+        GearboxSettings.Enabled = false;
+        tuner.ApplyLive();
+        Check(Near(cl.slipTorque, 800f), "clutch OFF restores the game's 800, not the first-sight 500");
+
+        // Centre diff mode + torque split (layout rigs: NWH-style wiring).
+        UnityEngine.Object.Registry.Clear();
+        ResetAllCategories();
+        LayoutRig awd = MakeLayoutCar(2, true, "Awd");
+        LayoutRig rwd = MakeLayoutCar(2, false, "Rwd");
+        UnityEngine.Object.Registry.Add(awd.Vc);
+        UnityEngine.Object.Registry.Add(rwd.Vc);
+        var t2 = new VehicleTuner();
+        t2.ReapplyNow();
+        Check(t2.HasCentreDiff(awd.Vc) && !t2.HasCentreDiff(rwd.Vc), "centre diff detected on the AWD car only (the panel enables the bias slider for it)");
+        float[] shares = new float[VehicleTuner.MaxAxles];
+        int axles, driven;
+        Check(t2.TryGetDriveSplit(awd.Vc, shares, out axles, out driven) && axles == 2 && driven == 2 && Near(shares[0], 0.5f) && Near(shares[1], 0.5f),
+            "AWD with an LSD centre: nominal 50 / 50");
+        Check(t2.TryGetDriveSplit(rwd.Vc, shares, out axles, out driven) && driven == 1 && Near(shares[1], 1f) && Near(shares[0], 0f),
+            "RWD: one driven axle (the panel shows the 'drives one axle - use a layout' note)");
+        DrivetrainSettings.Enabled = true;
+        DrivetrainPreset cp = DrivetrainSettings.BeginEdit();
+        cp.DiffCenterMode = DiffMode.Locked;
+        t2.ApplyLive();
+        Check(awd.Centre.DifferentialType == DifferentialComponent.Type.Locked && awd.AxleDiffs[0].DifferentialType == DifferentialComponent.Type.Open
+              && awd.AxleDiffs[1].DifferentialType == DifferentialComponent.Type.Open, "DiffCenterMode Locked: the centre diff locks, axle diffs keep Stock");
+        cp.DiffCenterMode = DiffMode.Open;
+        cp.DiffBiasScale = 1.5f;
+        t2.ApplyLive();
+        t2.TryGetDriveSplit(awd.Vc, shares, out axles, out driven);
+        Check(awd.Centre.DifferentialType == DifferentialComponent.Type.Open && Near(awd.Centre.biasAB, 0.6f) && Near(shares[0], 0.4f) && Near(shares[1], 0.6f),
+            "Open centre with bias x1.5 (0.4 -> 0.6): readout front 40% / rear 60%");
+        DrivetrainSettings.LayoutEnabled = true;
+        DrivetrainSettings.LayoutText = DrivetrainSettings.LayoutTemplates[2];   // AWD template (split 0.4 to the front)
+        t2.ApplyLive();
+        t2.TryGetDriveSplit(rwd.Vc, shares, out axles, out driven);
+        Check(driven == 2 && Near(shares[0], 0.4f) && Near(shares[1], 0.6f), "RWD car with the AWD layout template: the readout follows the live wiring (40 / 60)");
+        DrivetrainSettings.Enabled = false;
+        t2.ApplyLive();
+        Check(awd.Centre.DifferentialType == DifferentialComponent.Type.LimitedSlip && Near(awd.Centre.biasAB, 0.4f), "OFF restores the centre diff (LSD, bias 0.4)");
+        bool templatesOk = DrivetrainSettings.LayoutTemplates.Length == DrivetrainSettings.LayoutTemplateNames.Length;
+        foreach (string text in DrivetrainSettings.LayoutTemplates)
+        {
+            DrivetrainLayout l; string err;
+            templatesOk &= DrivetrainLayout.TryParse(text, out l, out err);
+        }
+        DrivetrainSettings.LayoutText = DrivetrainSettings.LayoutTemplates[3];
+        Check(templatesOk && DrivetrainSettings.LayoutTemplateIndex() == 3, "every panel layout template parses; the active one is recognised");
+        DrivetrainSettings.LayoutText = DrivetrainSettings.DefaultLayoutText;
+        ResetAllCategories();
+        UnityEngine.Object.Registry.Clear();
+    }
+
+    private static void TestTelemetryPins(string dir)
+    {
+        ResetAllCategories();
+        TelemetryPins.Clear();
+        Check(TelemetryPins.IsKnown("Steering.RateMultiplier") && TelemetryPins.IsKnown("Suspension.SpringFront") && TelemetryPins.IsKnown("Gearbox.Gear3Scale")
+              && TelemetryPins.IsKnown("Gearbox.ShiftUpFactor") && TelemetryPins.IsKnown("Alignment.PosXFL") && TelemetryPins.IsKnown("Gearbox.GearCount"),
+            "pin keys = Category.ConfigKey of every slider (spec examples resolve)");
+        Check(!TelemetryPins.IsKnown("Steering.LockCurve") && !TelemetryPins.IsKnown("Assists.AbsEnabled") && !TelemetryPins.IsKnown("Gearbox.SpreadRatios") && !TelemetryPins.IsKnown("Bogus.Key")
+              && !TelemetryPins.IsKnown("Steering.") && !TelemetryPins.IsKnown("RateMultiplier") && !TelemetryPins.IsKnown("Panel.Width"),
+            "curves, switches, unknown categories/keys are not pinnable");
+        int dropped = TelemetryPins.Load("Steering.RateMultiplier; Bogus.Key ;Suspension.SpringFront;Steering.RateMultiplier;;Gearbox.Gear12Scale");
+        Check(TelemetryPins.Count == 3 && dropped == 2 && TelemetryPins.Serialize() == "Steering.RateMultiplier;Suspension.SpringFront;Gearbox.Gear12Scale",
+            "load drops unknown keys and duplicates, keeps order; serialize round-trips");
+        TelemetryPins.Clear();
+        string[] many = { "Steering.RateMultiplier", "Steering.SmoothingScale", "Steering.SlipAngleDeg", "Steering.OppositeLockBoost", "Steering.LinearityExponent",
+            "Aero.DragScale", "Aero.DownforceScale", "Brakes.TorqueScale", "Grip.LateralScale", "Grip.LongitudinalScale", "Drivetrain.PowerScale",
+            "Drivetrain.FinalDriveScale", "Gearbox.Gear1Scale" };
+        bool okToggle = true;
+        for (int i = 0; i < 12; i++) okToggle &= TelemetryPins.Toggle(many[i]);
+        Check(okToggle && !TelemetryPins.Toggle(many[12]) && TelemetryPins.Count == TelemetryPins.MaxPins, "at most 12 pins: the 13th is refused");
+        Check(TelemetryPins.Toggle(many[0]) && !TelemetryPins.IsPinned(many[0]) && TelemetryPins.Count == 11, "toggle again unpins");
+        Check(TelemetryPins.Load(string.Join(";", many)) == 1 && TelemetryPins.Count == 12, "an over-long config list keeps the first 12");
+
+        SuspensionSettings.SetPresetByName("Race");
+        float v;
+        Check(TelemetryPins.TryGetValue("Suspension.SpringFront", out v) && Near(v, SuspensionSettings.Book.FindBuiltIn("Race").SpringFront),
+            "a pin shows the value of the preset the tab shows (Race)");
+        SuspensionSettings.BeginEdit().SpringFront = 2.25f;
+        Check(TelemetryPins.TryGetValue("Suspension.SpringFront", out v) && Near(v, 2.25f), "... and follows a slider edit (Custom)");
+        Check(TelemetryPins.UnitOf("Alignment.CamberFL") == TelemetryPins.Unit.DegSigned && TelemetryPins.UnitOf("Alignment.PosYRR") == TelemetryPins.Unit.CmSigned
+              && TelemetryPins.UnitOf("Gearbox.GearCount") == TelemetryPins.Unit.Count && TelemetryPins.UnitOf("Assists.TcsCutoffSpeed") == TelemetryPins.Unit.Speed
+              && TelemetryPins.UnitOf("Brakes.TorqueScale") == TelemetryPins.Unit.Factor, "pins use their slider's units");
+        Check(UiStrings.PinValue(TelemetryPins.Unit.Factor, 1.4f) == UiStrings.Times(1.4f) && UiStrings.PinValue(TelemetryPins.Unit.Count, 0f) == "Own"
+              && UiStrings.PinValue(TelemetryPins.Unit.Rpm, 200f) == "+200 rpm", "pin value formatting");
+        Check(TelemetryPins.Label("Suspension.SpringFront") == "Spring front" && TelemetryPins.Humanize("Gear3Scale") == "Gear 3 scale"
+              && TelemetryPins.Humanize("CamberFL") == "Camber FL", "labels: the key in words until the panel registers the slider title");
+        TelemetryPins.SetLabel("Suspension.SpringFront", "Stiffness (front)");
+        Check(TelemetryPins.Label("Suspension.SpringFront") == "Stiffness (front)", "the panel's slider title wins once registered");
+
+        // Strip geometry: fixed row + two pins per 26 px row, inside the 440 px strip, no overlaps.
+        bool geo = Near(TelemetryStrip.StripHeight(0), 32f) && Near(TelemetryStrip.StripHeight(12), 32f + 2f + 6f * 26f) && Near(TelemetryStrip.StripHeight(3), 32f + 2f + 52f);
+        for (int i = 0; i < 4 + 12; i++)
+        {
+            PanelLayout.Band bi = TelemetryStrip.CellBand(i);
+            geo &= bi.Inside(TelemetryStrip.Width, TelemetryStrip.StripHeight(12));
+            for (int j = 0; j < i; j++) geo &= !bi.Overlaps(TelemetryStrip.CellBand(j));
+        }
+        Check(geo, "strip grows by one 26 px row per two pins; every cell inside the strip, none overlapping");
+
+        // Config round trip.
+        string path = Path.Combine(dir, "pins.cfg");
+        ModConfig.Load(new ConfigFile(path, true));
+        TelemetryPins.Load("Steering.RateMultiplier;Gearbox.KickdownScale");
+        ModConfig.Save();
+        TelemetryPins.Clear();
+        ModConfig.Load(new ConfigFile(path, true));
+        Check(TelemetryPins.Serialize() == "Steering.RateMultiplier;Gearbox.KickdownScale", "[Telemetry] Pins round-trips through the config");
+        File.WriteAllText(path, File.ReadAllText(path).Replace("Pins = Steering.RateMultiplier;Gearbox.KickdownScale", "Pins = Nope.Nothing;Steering.RateMultiplier"));
+        ModConfig.Load(new ConfigFile(path, true));
+        Check(TelemetryPins.Serialize() == "Steering.RateMultiplier" && File.ReadAllText(path).Contains("Pins = Steering.RateMultiplier")
+              && !File.ReadAllText(path).Contains("Nope.Nothing"), "unknown pin keys are dropped on load (runtime and file)");
+        TelemetryPins.Clear();
+        ResetAllCategories();
+    }
+
+    private static void TestLayout070()
+    {
+        bool ok = true;
+        foreach (float W in new[] { 300f, 400f, 460f, 800f, 1000f })
+        {
+            float c = PanelLayout.ContentWidth(W);
+            bool rowOk = true;
+            foreach (bool readout in new[] { false, true })
+                foreach (bool pin in new[] { false, true })
+                {
+                    PanelLayout.SliderGeom g = PanelLayout.SliderRow(c, readout, pin);
+                    rowOk &= g.Title.Inside(c, g.RowHeight) && g.Hint.Inside(c, g.RowHeight) && g.Slider.Inside(c, g.RowHeight)
+                             && g.Value.Inside(c, g.RowHeight) && g.Reset.Inside(c, g.RowHeight);
+                    rowOk &= NoOverlap(g.Title, g.Slider, g.Value, g.Reset) && NoOverlap(g.Hint, g.Slider, g.Value, g.Reset);
+                    if (pin)
+                    {
+                        rowOk &= g.Pin.Inside(c, g.RowHeight) && NoOverlap(g.Pin, g.Title, g.Hint, g.Slider) && !g.Pin.Overlaps(g.Value) && !g.Pin.Overlaps(g.Reset)
+                                 && Near(g.Pin.W, 26f) && Near(g.Pin.H, 26f);
+                    }
+                    rowOk &= g.Slider.W >= 80f && g.Title.W >= 100f;
+                }
+            PanelLayout.SwitchRowGeom o = PanelLayout.OptionRow(c), m = PanelLayout.MasterRow(c);
+            rowOk &= o.Title.Right <= c - o.SwitchRight - o.SwitchW && o.Hint.Right <= c - o.SwitchRight - o.SwitchW && o.Hint.Bottom <= o.RowHeight;
+            rowOk &= m.Title.Right <= c - m.SwitchRight - m.SwitchW && m.Hint.Right <= c - m.SwitchRight - m.SwitchW && m.Hint.Bottom <= m.RowHeight;
+            rowOk &= o.SwitchH <= o.RowHeight && m.SwitchH <= m.RowHeight;
+            // Tabs: every (bold) name fits its tab at the chosen font; the strip ends above the page.
+            int tf = PanelLayout.TabFont(W, SettingsPanel.TabNames);
+            float tabW = PanelLayout.TabWidth(W);
+            foreach (string n in SettingsPanel.TabNames) rowOk &= PanelLayout.TextWidth(n, tf, true) <= tabW - 2f;
+            rowOk &= tf >= 10 && PanelLayout.PageTop(W, SettingsPanel.TabCount) >= PanelLayout.TabsTop + PanelLayout.TabsHeight(W, SettingsPanel.TabCount);
+            // Footer bands inside the 110 px footer and apart.
+            var st = new PanelLayout.Band(0f, PanelLayout.FooterHeight - PanelLayout.FooterStatusBottom - PanelLayout.FooterStatusHeight, 10f, PanelLayout.FooterStatusHeight);
+            var r1 = new PanelLayout.Band(0f, PanelLayout.FooterHeight - PanelLayout.FooterRow1Bottom - PanelLayout.FooterRow1Height, 10f, PanelLayout.FooterRow1Height);
+            var r2 = new PanelLayout.Band(0f, PanelLayout.FooterHeight - PanelLayout.FooterRow2Bottom - PanelLayout.FooterRow2Height, 10f, PanelLayout.FooterRow2Height);
+            rowOk &= st.Inside(10f, PanelLayout.FooterHeight) && r1.Inside(10f, PanelLayout.FooterHeight) && r2.Inside(10f, PanelLayout.FooterHeight)
+                     && !st.Overlaps(r1) && !r1.Overlaps(r2);
+            // Preset buttons: the longest label of every book fits half a narrow row at its fitted font (>= 11 px).
+            int perRow = PanelLayout.PresetsPerRow(c);
+            float btnW = (c - (perRow - 1) * PanelLayout.PresetGap) / perRow - 8f;
+            foreach (string label in new[] { "Custom (Euro Truck)", "Custom (Off-road)", "Custom (Comfort)", "Custom (Standard)" })
+                rowOk &= PanelLayout.TextWidth(label, PanelLayout.FitFont(label, PanelLayout.PresetFont(c), btnW, true), true) <= btnW;
+            CurveEditor.Bands cb = CurveEditor.ComputeBands(c, 330);
+            rowOk &= CurveEditor.HintTop + cb.HintHeight <= cb.GraphTop && cb.ReadoutWidth >= CurveEditor.ReadoutMinWidth;
+            GearGraph.Bands gb = GearGraph.ComputeBands(c, 110);
+            rowOk &= GearGraph.HintTop + gb.HintHeight <= gb.GraphTop && gb.ReadoutWidth >= GearGraph.ReadoutMinWidth;
+            Check(rowOk, "layout at " + W + " px (with pins): rows, switches, tabs (font " + tf + "), footer, presets, curve editors and gear graph fit");
+            ok &= rowOk;
+        }
+        Check(Near(PanelLayout.RowHeight, 50f) && Near(PanelLayout.PresetButtonHeight, 40f) && Near(PanelLayout.MasterRowHeight, 66f)
+              && Near(PanelLayout.SectionTitleHeight, 32f) && Near(PanelLayout.FooterHeight, 110f), "§5 tighter blocks: 50 / 40 / 66 / 32 / 110 (0.6.x 58 / 44 / 76 / 38 / 124)");
+        Check(PanelLayout.TitleFontWide == 19 && PanelLayout.HintFont == 14 && PanelLayout.MasterTitleFontWide == 23 && PanelLayout.MasterHintFontWide == 17
+              && PanelLayout.NoteFont(13) == 14, "§5 bigger text: 17->19, 13->14, 21->23, 15->17, notes +1");
+        Check(PanelLayout.SliderRow(PanelLayout.ContentWidth(460f), true).RowHeight < 100f && PanelLayout.SliderRow(PanelLayout.ContentWidth(800f), false).RowHeight < 58f,
+            "rows are visibly tighter at the same widths (stacked 86 < 100, wide 50 < 58)");
+        Check(Near(PanelLayout.EffectiveWidth(300f, 1920f, 1080f, 1f), 300f), "a 300 px PanelWidth renders 300 px (0.6.x silently used 320)");
+        Check(PanelLayout.TabsPerRow(300f) == 4 && PanelLayout.TabsPerRow(460f) == 5, "three tab rows below 360 px, two above");
+        Check(PanelLayout.TabFont(460f, SettingsPanel.TabNames) <= 14, "the default 460 px window does not use a tab font that overflows 'Suspension'");
+        Check(PanelLayout.FitFont("Track (outward) front right", 18, 120f, true) < 18 && PanelLayout.FitFont("Grip", 18, 120f, true) == 18,
+            "long slider titles shrink to their band, short ones keep the full size");
+        Check(Near(PanelLayout.TextWidth("Suspension", 10, true), 56.68f, 0.05f), "Arial Bold metrics (Suspension = 5.668 em)");
+    }
+
+    private static void TestConfig070(string dir)
+    {
+        string src = Path.Combine("tests", "fixtures", "v064.cfg");
+        string path = Path.Combine(dir, "v064.cfg");
+        File.Copy(src, path, true);
+        var oldKeys = ReadKeys(File.ReadAllText(path));
+        ModConfig.Load(new ConfigFile(path, true));
+        Check(SteeringSettings.Enabled && SteeringSettings.ActivePreset.Name == "Euro Truck", "0.6.4 cfg: steering kept");
+        Check(SuspensionSettings.Enabled && SuspensionSettings.ActivePreset == SuspensionPreset.Custom && Near(SuspensionPreset.Custom.SpringFront, 1.7f),
+            "0.6.4 cfg: suspension Custom kept");
+        Check(DrivetrainSettings.Enabled && Near(DrivetrainPreset.Custom.PowerScale, 1.4f) && DrivetrainPreset.Custom.DiffRearMode == DiffMode.Locked
+              && DrivetrainPreset.Custom.DiffCenterMode == DiffMode.Stock && DrivetrainSettings.LayoutEnabled
+              && DrivetrainSettings.LayoutText == "gearbox -> rear; rear: LSD -> RL, RR", "0.6.4 cfg: drivetrain + layout kept, new centre mode = Stock");
+        GearboxPreset gc = GearboxPreset.Custom;
+        Check(GearboxSettings.Enabled && GearboxSettings.ActivePreset == gc && gc.GearCount == 7 && Near(gc.Scale(2), 1.1f) && gc.TransmissionMode == GearboxMode.Manual
+              && Near(gc.ShiftUpFactor, 1f) && Near(gc.ShiftDownFactor, 1f) && Near(gc.KickdownScale, 1f) && !gc.SpreadRatios,
+            "0.6.4 cfg: gearbox kept (now live: the gate is gone), new shift knobs at their neutral 1");
+        Check(AlignmentSettings.Enabled && UiSettings.TelemetryEnabled && Near(UiSettings.PanelWidth, 300f) && UiSettings.LastTab == 8
+              && TargetSettings.Mode == TargetMode.Selected && TargetSettings.SelectedName == "Duke(Clone)6792" && TelemetryPins.Count == 0,
+            "0.6.4 cfg: alignment, UI, telemetry, target kept; no pins");
+        ModConfig.Save();
+        string after = File.ReadAllText(path);
+        var newKeys = ReadKeys(after);
+        bool kept = true;
+        foreach (KeyValuePair<string, string> kv in oldKeys)
+        {
+            string nv;
+            if (!newKeys.TryGetValue(kv.Key, out nv) || nv != kv.Value)
+            {
+                kept = false;
+                Console.WriteLine("  changed/missing: " + kv.Key + " = " + kv.Value + " -> " + (nv ?? "(missing)"));
+            }
+        }
+        Check(kept && oldKeys.Count == 133, "all 133 keys of a real 0.6.4 file survive load + save with their values (no rename, removal or default change)");
+        string[] added = { "Drivetrain.Custom|DiffCenterMode", "Gearbox.Custom|SpreadRatios", "Gearbox.Custom|ShiftUpFactor", "Gearbox.Custom|ShiftDownFactor",
+            "Gearbox.Custom|KickdownScale", "Telemetry|Pins" };
+        bool all = newKeys.Count == oldKeys.Count + added.Length;
+        foreach (string k in added) all &= newKeys.ContainsKey(k);
+        if (!all) foreach (string k in newKeys.Keys) if (!oldKeys.ContainsKey(k)) Console.WriteLine("  new key: " + k);
+        Check(all, "exactly six keys added: DiffCenterMode, SpreadRatios, ShiftUpFactor, ShiftDownFactor, KickdownScale, Pins");
+        File.WriteAllText(path, after.Replace("ShiftUpFactor = 1", "ShiftUpFactor = 9").Replace("KickdownScale = 1", "KickdownScale = 0.1").Replace("DiffCenterMode = Stock", "DiffCenterMode = 7"));
+        ModConfig.Load(new ConfigFile(path, true));
+        Check(Near(GearboxPreset.Custom.ShiftUpFactor, Limits.ShiftFactorMax) && Near(GearboxPreset.Custom.KickdownScale, Limits.KickdownMin)
+              && DrivetrainPreset.Custom.DiffCenterMode == DiffMode.Stock, "new keys clamp to Limits; a numeric DiffCenterMode falls back to Stock");
+        GearboxPreset tmp = new GearboxPreset { Name = "t" };
+        string based;
+        PresetCodec.Result r = PresetCodec.ParseInto(PresetCategory.Gearbox, "AVT1|Gearbox|Custom|BasedOn=Truck|ShiftUpFactor=0.7|KickdownScale=1.5", tmp, out based);
+        Check(r.Ok && r.Applied == 2 && Near(tmp.ShiftUpFactor, 0.7f) && Near(tmp.KickdownScale, 1.5f), "copy/paste carries the new gearbox keys");
+        ResetAllCategories();
+        TargetSettings.Mode = TargetMode.All;
+        UiSettings.TelemetryEnabled = false;
+        UiSettings.PanelWidth = Limits.PanelWidthDefault;
+        DrivetrainSettings.LayoutText = DrivetrainSettings.DefaultLayoutText;
+    }
+
+    private static Dictionary<string, string> ReadKeys(string text)
+    {
+        var d = new Dictionary<string, string>();
+        string section = "";
+        foreach (string raw in text.Split('\n'))
+        {
+            string line = raw.Trim();
+            if (line.StartsWith("[") && line.EndsWith("]")) { section = line.Substring(1, line.Length - 2); continue; }
+            if (line.Length == 0 || line.StartsWith("#")) continue;
+            int eq = line.IndexOf(" =", StringComparison.Ordinal);
+            if (eq > 0) d[section + "|" + line.Substring(0, eq)] = line.Substring(eq + 2).Trim();
+        }
+        return d;
+    }
+
+    private static void TestAudit070()
+    {
+        UiSettings.TelemetryEnabled = true;
+        UiSettings.TelemetryScale = 2f;
+        UiSettings.TelemetryPosition = TelemetryCorner.BottomRight;
+        UiSettings.ResetTelemetry();
+        Check(!UiSettings.TelemetryEnabled && Near(UiSettings.TelemetryScale, 1f) && UiSettings.TelemetryPosition == TelemetryCorner.TopLeft,
+            "'Reset panel settings' resets telemetry to the shipped defaults (off, x1, top-left), not on / bottom-left");
+        var names = new List<string> { "Duke(Clone)6792", "Outrider(Clone)6749" };
+        Check(TargetSettings.ResolveSelection("Rustliner(Clone)2360", names, 0) == "Rustliner(Clone)2360",
+            "a selected vehicle that has not spawned yet stays selected (0.6.x re-targeted to the first car)");
+        Check(TargetSettings.ResolveSelection("", names, 1) == "Outrider(Clone)6749" && TargetSettings.ResolveSelection("", new List<string>(), 0) == "",
+            "an empty selection is filled from the cycle position");
+        Check(!SettingsPanelManager.DigitsSwitchTabs(false, false) && SettingsPanelManager.DigitsSwitchTabs(false, true) && SettingsPanelManager.DigitsSwitchTabs(true, false),
+            "live mode: digits switch tabs only with the mouse over the panel (shift keys stay the game's); Freeze: always");
+
+        // Last-driven targeting resolves the driven car once per pass.
+        UnityEngine.Object.Registry.Clear();
+        ResetAllCategories();
+        VehicleController a = MakeCar(out FakeWheel[] _, 0f);
+        VehicleController b = MakeCar(out FakeWheel[] _, 0f);
+        a.gameObject.name = "A"; b.gameObject.name = "B";
+        UnityEngine.Object.Registry.Add(a);
+        UnityEngine.Object.Registry.Add(b);
+        var t = new VehicleTuner();
+        t.ReapplyNow();
+        TargetSettings.Mode = TargetMode.LastDriven;
+        b.input.Throttle = 0.8f;
+        Time.unscaledTime += 1f;
+        SuspensionSettings.Enabled = true;
+        SuspensionSettings.SetPresetByName("Race");
+        t.ApplyLive();
+        Check(t.TargetedCount == 1 && !Near(((FakeWheel)b.powertrain.wheels[0].wheelUAPI).SpringMaxForce, 30000f)
+              && Near(((FakeWheel)a.powertrain.wheels[0].wheelUAPI).SpringMaxForce, 30000f), "Last driven (per-pass pick): only the driven car is tuned");
+        ResetAllCategories();
+        t.ApplyLive();
+        TargetSettings.Mode = TargetMode.All;
+        b.input.Throttle = 0f;
+        UnityEngine.Object.Registry.Clear();
     }
 }

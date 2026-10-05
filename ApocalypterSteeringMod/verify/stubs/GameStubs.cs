@@ -83,6 +83,29 @@ namespace NWH.VehiclePhysics2.Input
         public float Steering { get; set; }
         public float Throttle { get; set; }     // VehicleInputHandler.cs:74 (0..1 clamp)
         public float Brakes { get; set; }       // VehicleInputHandler.cs:88 (0..1 clamp)
+        public float Clutch { get; set; }
+
+        // 0.7.0 shift requests (VehicleInputHandler.cs:231-266), written by the game's FSMs.
+        public bool ShiftUp { get; set; }
+        public bool ShiftDown { get; set; }
+        public int ShiftInto { get; set; } = -999;
+        public bool swapInputInReverse = true;   // :26
+
+        // :315-325 / :371-376 (computed on read here instead of cached per update).
+        public bool IsInputSwapped
+        {
+            get { return swapInputInReverse && vehicleController != null && vehicleController.powertrain.transmission.Gear < 0; }
+        }
+        public float InputSwappedThrottle { get { return IsInputSwapped ? Brakes : Throttle; } }
+        public float InputSwappedBrakes { get { return IsInputSwapped ? Throttle : Brakes; } }
+
+        // :408-413
+        public void ResetShiftFlags()
+        {
+            ShiftUp = false;
+            ShiftDown = false;
+            ShiftInto = -999;
+        }
         private float _handbrake;
         public float Handbrake
         {
@@ -257,6 +280,19 @@ namespace NWH.VehiclePhysics2.Powertrain
     {
         // TransmissionComponent.cs:25
         public enum TransmissionShiftType { Manual, Automatic, AutomaticSequential_Obsolete, CVT, External }
+        public enum AutomaticTransmissionDNRShiftType { Auto, RequireShiftInput, RepeatInput }   // :20
+        public delegate void Shift(NWH.VehiclePhysics2.VehicleController vc);                    // :17
+
+        public Shift shiftDelegate;                                                               // :94
+        public AutomaticTransmissionDNRShiftType automaticTransmissionDNRShiftType;              // :82
+        public float dnrSpeedThreshold = 0.4f;                                                    // :84
+        private TransmissionShiftType _prevTransmissionType;
+        private float _referenceShiftRPM;
+        public float ReferenceShiftRPM { get { return _referenceShiftRPM; } }                    // :170
+        // Test hooks: the no-slip RPM (:330-339) = speed x TestRpmPerMps x current total ratio,
+        // or a fixed TestReferenceRpm when TestRpmPerMps is 0.
+        public float TestRpmPerMps;
+        public float TestReferenceRpm;
 
         public float finalGearRatio = 6f;
         public float shiftDuration = 0.2f;
@@ -278,6 +314,47 @@ namespace NWH.VehiclePhysics2.Powertrain
         {
             UpdateGearCounts();
             Gear = 0;   // VC_Initialize, :221
+            AssignShiftDelegate();
+            _prevTransmissionType = transmissionType;
+        }
+
+        // :366-380 (External keeps whatever delegate is there).
+        private void AssignShiftDelegate()
+        {
+            if (transmissionType == TransmissionShiftType.Manual) shiftDelegate = ManualShift;
+            else if (transmissionType == TransmissionShiftType.Automatic) shiftDelegate = AutomaticShift;
+            else if (transmissionType == TransmissionShiftType.CVT) shiftDelegate = AutomaticShift;
+        }
+
+        /// <summary>Test visibility: is the vehicle's own NWH delegate installed?</summary>
+        public bool HasNwhDelegate
+        {
+            get { return shiftDelegate != null && shiftDelegate.Target == this; }
+        }
+
+        // :711-735 (holdToKeepInGear omitted).
+        private void ManualShift(NWH.VehiclePhysics2.VehicleController vc)
+        {
+            if (vc.input.ShiftUp) { ShiftInto(Gear + 1); return; }
+            if (vc.input.ShiftDown) { ShiftInto(Gear - 1); return; }
+            int shiftInto = vc.input.ShiftInto;
+            if (shiftInto > -100) ShiftInto(shiftInto);
+        }
+
+        public int NwhAutoShifts;   // test hook: shifts NWH's own automatic attempted
+        // Reduced AutomaticShift (:590-700): Auto DNR from neutral, then the sequential
+        // non-variable branch (raw UpshiftRPM / DownshiftRPM on the reference RPM).
+        private void AutomaticShift(NWH.VehiclePhysics2.VehicleController vc)
+        {
+            int gear = Gear;
+            if (gear == 0)
+            {
+                if (vc.input.InputSwappedThrottle > 0.05f) ShiftInto(1);
+                return;
+            }
+            if (gear < 0) return;
+            if (gear < forwardGearCount && _referenceShiftRPM > _upshiftRPM) { NwhAutoShifts++; ShiftInto(gear + 1); }
+            else if (_referenceShiftRPM < _downshiftRPM && gear != 1) { NwhAutoShifts++; ShiftInto(gear - 1); }
         }
 
         public float UpshiftRPM
@@ -372,8 +449,25 @@ namespace NWH.VehiclePhysics2.Powertrain
         /// </summary>
         public float SimulateForwardStep()
         {
+            // :403-420: re-assign the delegate on a type change, recount, ratio (unguarded
+            // gears[gearIndex]), reference RPM, shiftDelegate(vc), ResetShiftFlags.
+            if (_prevTransmissionType != transmissionType)
+            {
+                AssignShiftDelegate();
+            }
+            _prevTransmissionType = transmissionType;
             UpdateGearCounts();
-            return gears[gearIndex] * finalGearRatio;
+            float ratio = gears[gearIndex] * finalGearRatio;
+            if (vehicleController != null)
+            {
+                _referenceShiftRPM = TestRpmPerMps > 0f ? Math.Abs(vehicleController.Speed * TestRpmPerMps * ratio) : TestReferenceRpm;
+                if (shiftDelegate != null)
+                {
+                    shiftDelegate(vehicleController);
+                }
+                vehicleController.input.ResetShiftFlags();
+            }
+            return ratio;
         }
     }
 

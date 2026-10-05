@@ -10,18 +10,21 @@ formatting rules dynamic strings follow.
 
 Every display string lives in `SettingsPanel.cs`, `SettingsPanelManager.cs`, `GearGraph.cs`
 and the `Settings/*Preset.cs` files (0.6.0 adds `AlignmentPreset.cs` and `GearboxPreset.cs`,
-already covered by the glob), plus the templates in `Runtime/UiStrings.cs`:
+already covered by the glob), 0.7.0's layout template names in `Settings/DrivetrainSettings.cs`,
+plus the templates in `Runtime/UiStrings.cs`:
 
 ```bash
-grep -o '"[^"]\{3,\}"' plugin/Runtime/SettingsPanel.cs plugin/Runtime/SettingsPanelManager.cs plugin/Runtime/GearGraph.cs plugin/Settings/*Preset.cs | sed 's/^[^:]*://' | sort -u
+grep -o '"[^"]\{3,\}"' plugin/Runtime/SettingsPanel.cs plugin/Runtime/SettingsPanelManager.cs plugin/Runtime/GearGraph.cs plugin/Settings/*Preset.cs plugin/Settings/DrivetrainSettings.cs | sed 's/^[^:]*://' | sort -u
 ```
+
+(0.7.0 sweep: 508 unique quoted strings across those files, display and internal together.)
 
 Not every hit is a display string: internal object names (`AeroPage`, `ApocalypterSettingsCanvas`,
 `ApocalypterSteeringMod_Button`, `Dim`, `Footer`, `Body`, `Description`, `Default*`) and format
 specifiers (`"0.00"`) appear in the sweep but are never shown. Display strings break down as:
 
 1. **UI chrome** — tab names (`Steering`, `Suspension`, `Aero`, `Brakes`, `Grip`, `Drivetrain`,
-   `Assists`, and since 0.6.0 `Alignment`, `Gearbox`, `Panel`), footer buttons (`Copy preset`,
+   `Assists`, and since 0.6.0 `Alignment`, `Gearbox`, `Settings` — "Panel" until the 0.6.0 release prep), footer buttons (`Copy preset`,
    `Paste preset`, `Turn everything off`, `Click again`), the transmission-mode labels
    (`Stock`, `Manual`, `Automatic`), the clutch-type labels (`Stock`, `Street`, `Sport`, `Race`,
    `Custom`), the telemetry corner labels (`Top left` …), the gear-count value `Own`, `ON`, `OFF`, `Reset`, `Done`, `Close`, `X`, `Click again to confirm`,
@@ -51,6 +54,20 @@ specifiers (`"0.00"`) appear in the sweep but are never shown. Display strings b
 8. **Alignment slider titles (0.6.0)** are concatenated from fixed parts: `Camber` / `Track
    (outward)` / `Height` / `Fore/aft` + ` front` / ` rear` or ` front left` … ` rear right`.
    Translate the parts as exact-match entries or the whole titles as collected.
+
+9. **0.7.0 additions** — static labels: the per-slider `Pin` button; Gearbox `Shifting`
+   section (`Upshift point`, `Downshift point`, `Kickdown`, `Spread gears over the stock range`,
+   its note) and the `Truck` preset (Name = Label = `Truck`, plus its Description); Drivetrain
+   centre-diff buttons (the same `Stock` / `Open` / `Locked` / `LSD` labels), `Drivetrain layout`
+   section (`Custom layout`, the template buttons `RWD`, `FWD`, `AWD`, `4x4 locked`, `6x6`,
+   `Copy this vehicle's layout`, `Paste layout`); Settings tab `Pinned values` option.
+   **Telemetry pin cells** show two texts: the label (the slider's own title once the panel was
+   built — the same string as in the panel, so one translation covers both — else the config key
+   in words, e.g. `Spring front`) and the value in the slider's units (the existing `Times`,
+   `Deg`, `DegSigned`, `CmSigned`, `Percent`, `SpeedMps`, `GearCountFmt` templates, `Own`, and
+   `TelemetryRpmFmt` for the clutch offset). The layout status line concatenates
+   `LayoutUnfitFmt` + a space + `LayoutTextFmt`; the torque split joins `AxleFrontFmt` /
+   `AxleRearFmt` (or `AxleNFmt` + a space + `PercentFmt`) parts with ` · ` inside `SplitFmt`.
 
 ## Dynamic templates (UiStrings.cs)
 
@@ -95,6 +112,20 @@ Every dynamic string is a `string.Format` template using only `{0}` (repeated `{
 | `PresetPasteSkippedFmt` | number of skipped values | appended to the pasted status (0.6.0) |
 | `PresetPasteFailedFmt` | one of the `PasteReason*` strings | footer status (0.6.0) |
 | `PasteReasonEmpty` / `PasteReasonWrongTag` / `PasteReasonWrongCategory` / `PasteReasonMalformed` / `PasteReasonNoClipboard` | — | no placeholder (0.6.0) |
+| `ShiftedOneFmt` / `ShiftedManyFmt` | vehicle count | gearbox status: vehicles the mod shifts (0.7.0) |
+| `CenterDiffFmt` | a diff-mode label | drivetrain centre-diff note (0.7.0) |
+| `SplitNoVehicle` | — | no placeholder (0.7.0) |
+| `SplitOneAxleFmt` | a vehicle name | "… drives one axle …" (0.7.0) |
+| `SplitFmt` | the joined per-axle parts | torque split readout (0.7.0) |
+| `AxleFrontFmt` / `AxleRearFmt` | percent, integer | "front 40%" / "rear 60%" (0.7.0) |
+| `AxleNFmt` | axle number | vehicles with 3+ axles, followed by `PercentFmt` (0.7.0) |
+| `LayoutOffFmt` / `LayoutNeedsDrivetrainFmt` / `LayoutActiveFmt` / `LayoutTextFmt` | the layout text (config syntax, never translate it inside a pack) | layout status (0.7.0) |
+| `LayoutInvalidFmt` / `LayoutPasteFailedFmt` | the parser's English error message | layout status / footer (0.7.0) |
+| `LayoutUnfitFmt` | why the vehicle keeps its own drivetrain (English) | layout status (0.7.0) |
+| `LayoutCopied` / `LayoutCopyNone` / `LayoutPasted` | — | no placeholder; footer status (0.7.0) |
+| `TargetMissingFmt` | the selected vehicle's name | "… (not here)" while it has not spawned (0.7.0) |
+| `PinnedFmt` / `PinnedTelemetryOnFmt` / `UnpinnedFmt` | a slider title | footer status after a pin click (0.7.0) |
+| `PinsFullFmt` | the pin cap (12) | footer status (0.7.0) |
 
 **Conventions**
 

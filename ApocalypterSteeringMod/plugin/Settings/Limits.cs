@@ -61,6 +61,9 @@ namespace ApocalypterSteeringMod.Settings
         public const float ClutchGripMin = 0.1f, ClutchGripMax = 4f;             // x slipTorque
         public const float ClutchRangeMin = 0.1f, ClutchRangeMax = 4f;           // x engagementRange
         public const float ClutchRpmMin = -1500f, ClutchRpmMax = 1500f;          // + engagementRPM
+        // 0.7.0 shift controller (FEATURES §1): factors on the computed shift points.
+        public const float ShiftFactorMin = 0.5f, ShiftFactorMax = 1.5f;         // x upshift / downshift RPM
+        public const float KickdownMin = 0.5f, KickdownMax = 2f;                 // x the 15 % kickdown raise
 
         // Panel / telemetry (0.6.1 widened).
         public const float PanelScaleMin = 0.3f, PanelScaleMax = 3f;

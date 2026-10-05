@@ -28,7 +28,8 @@ namespace ApocalypterSteeringMod.Runtime
     ///    restore during a shift keeps placeholder copies of the top gear until it lands.
     ///  - CVT needs exactly 3 gears (VC_Validate :277): counts/ratios are never touched on
     ///    CVT (or External) boxes; the clutch still applies.
-    ///  - transmissionType is live-safe (ForwardStep re-assigns the shift delegate, :405).
+    ///  - transmissionType changes make ForwardStep re-assign the shift delegate (:405), so 0.7.0
+    ///    never writes the type: the ShiftController is installed as the delegate instead.
     /// </summary>
     public sealed partial class VehicleTuner
     {
@@ -77,6 +78,7 @@ namespace ApocalypterSteeringMod.Runtime
                 d.HasTransmission = true;
                 d.Gears = t.gears.ToArray();
                 d.Type = t.transmissionType;
+                d.StockShift = t.shiftDelegate;
                 d.IsCvt = t.transmissionType == TransmissionComponent.TransmissionShiftType.CVT;
                 d.Standard = AnalyseLayout(d.Gears, out reverse, out forward);
                 d.Reverse = reverse;
@@ -292,6 +294,34 @@ namespace ApocalypterSteeringMod.Runtime
             return want < floor ? floor : want;
         }
 
+        /// <summary>Progressive spacing exponent for spread gears (&lt; 1 = bigger steps low, smaller high).</summary>
+        public const float SpreadCurve = 0.85f;
+
+        /// <summary>
+        /// Gear k (0-based) of n spread over [first, top]: log-interpolated with progressive spacing,
+        /// r_k = first x (top / first)^((k / (n-1))^0.85). Deliberately not geometric: a geometric
+        /// list would look like the 0.6.0 continuation to the save self-heal (TryStripContinuation).
+        /// </summary>
+        public static float SpreadRatio(float first, float top, int k, int n)
+        {
+            if (n <= 1 || first <= 0f || top <= 0f)
+            {
+                return first;
+            }
+            double t = Math.Pow((double)k / (n - 1), SpreadCurve);
+            return (float)(first * Math.Pow(top / first, t));
+        }
+
+        /// <summary>The base ratio (before the per-gear factor) of forward gear k (0-based) in an n-gear box.</summary>
+        internal static float BaseRatio(GearboxData d, GearboxPreset p, int k, int n)
+        {
+            if (p != null && p.SpreadRatios && d.Forward >= 1)
+            {
+                return SpreadRatio(d.Extended[0], d.Extended[d.Forward - 1], k, n);
+            }
+            return k < d.Extended.Length ? d.Extended[k] : d.Extended[d.Extended.Length - 1];
+        }
+
         /// <summary>Target forward count: the preset's, or the vehicle's own for 0.</summary>
         internal static int TargetForward(GearboxData d, GearboxPreset p)
         {
@@ -301,13 +331,7 @@ namespace ApocalypterSteeringMod.Runtime
         private void ApplyAllGearbox()
         {
             GearboxPreset p = GearboxSettings.ActivePreset ?? GearboxPreset.Stock;
-            AnyGearboxSkipped = false;
-            // ApplyGearbox is an instance method (it sets AnyGearboxSkipped): cache its delegate once.
-            if (_applyGearbox == null)
-            {
-                _applyGearbox = ApplyGearbox;
-            }
-            TargetPass(AppliedCat.Gearbox, _applyGearbox, p, RestoreGearbox);
+            TargetPass(AppliedCat.Gearbox, ApplyGearbox, p, RestoreGearbox);
         }
 
         private void RestoreAllGearbox()
@@ -321,9 +345,14 @@ namespace ApocalypterSteeringMod.Runtime
                 && d.Type != TransmissionComponent.TransmissionShiftType.External;
         }
 
-        private Action<VehicleRecord, GearboxPreset> _applyGearbox;
+        /// <summary>CVT / External boxes run their own shifting; the controller never takes them over.</summary>
+        private static bool OwnShiftingType(TransmissionComponent.TransmissionShiftType type)
+        {
+            return type == TransmissionComponent.TransmissionShiftType.CVT
+                || type == TransmissionComponent.TransmissionShiftType.External;
+        }
 
-        private void ApplyGearbox(VehicleRecord r, GearboxPreset p)
+        private static void ApplyGearbox(VehicleRecord r, GearboxPreset p)
         {
             GearboxData d = r.Gearbox;
             if (d == null || r.Vc.powertrain == null)
@@ -332,64 +361,93 @@ namespace ApocalypterSteeringMod.Runtime
             }
             TransmissionComponent t = r.Vc.powertrain.transmission;
 
-            // 1. Transmission mode first (CVT / External: Stock only). Manual is the
-            // gate for everything else on this vehicle: the game's shift logic owns
-            // automatic transmissions, and ANY gearbox change there can leave the car
-            // stuck (engine revs, wheels don't turn). Only an explicit Manual mode
-            // opts the vehicle into tuning.
-            if (t != null && d.HasTransmission)
+            // 0.7.0: the mod owns shifting on every tunable box (FEATURES §1). The 0.6.x
+            // "automatic transmissions are skipped" gate and the transmissionType writes are gone:
+            // the mode only selects the controller's logic (writing the type would make NWH
+            // re-assign its own delegate on the next tick, TransmissionComponent.cs:405).
+            if (t != null && t.gears != null && GearsEditable(d) && !OwnShiftingType(t.transmissionType))
             {
-                TransmissionComponent.TransmissionShiftType want = ModeFor(d, p.TransmissionMode);
-                if (t.transmissionType != want)
-                {
-                    t.transmissionType = want;
-                }
-            }
-
-            bool manual = t != null && t.transmissionType == TransmissionComponent.TransmissionShiftType.Manual;
-            bool tunable = d.IsCvt || manual;   // CVT keeps its clutch-only design
-            if (!tunable)
-            {
-                AnyGearboxSkipped = true;
-                return;
-            }
-
-            // 2. Ratios, then the count (manual only; CVT keeps its own list).
-            if (t != null && t.gears != null && GearsEditable(d))
-            {
+                // 1. Ratios, then the count (CVT keeps its own list).
                 int n = TargetForward(d, p);
                 int current = t.gears.Count - d.Reverse - 1;
                 if (!(n < current && t.isShifting))   // shrinking under an in-flight shift: retry next pass
                 {
-                    WriteGears(t, d.Gears, d.Reverse, d.Extended, n, p);
+                    WriteGears(t, d, n, p);
                     d.PendingTrim = false;
                     ClampGear(t, n);
                 }
+                // 2. The shift controller (idempotent; re-hooks when NWH re-assigned its delegate),
+                // only for presets that change shifting — Stock / clutch-only keep NWH's own.
+                if (p.NeedsShiftController())
+                {
+                    HookShifter(d, t);
+                }
+                else if (d.Hooked)
+                {
+                    UnhookShifter(d, t);
+                }
+            }
+            else if (t != null && d.Hooked)
+            {
+                UnhookShifter(d, t);   // the game turned the box into CVT/External while we owned it
             }
 
-            // 3. Clutch.
+            // 3. Clutch (CVT included). 0.7.0: a value the game changed since our last write
+            // (e.g. an engine swap re-sizing the clutch) becomes the new stock first.
             ClutchComponent c = r.Vc.powertrain.clutch;
             if (d.HasClutch && c != null)
             {
+                if (d.ClutchWritten)
+                {
+                    d.SlipTorque = Drift.Adopt(d.SlipTorque, d.LastSlipTorque, c.slipTorque);
+                    d.EngagementRange = Drift.Adopt(d.EngagementRange, d.LastEngagementRange, c.engagementRange);
+                    d.EngagementRpm = Drift.Adopt(d.EngagementRpm, d.LastEngagementRpm, c.engagementRPM);
+                }
                 c.slipTorque = Mathf.Max(1f, d.SlipTorque * p.ClutchGripScale);
                 c.engagementRange = Mathf.Max(1f, d.EngagementRange * p.ClutchRangeScale);
                 float idle = r.Vc.powertrain.engine != null ? r.Vc.powertrain.engine.idleRPM : 0f;
                 c.engagementRPM = EngagementRpm(d.EngagementRpm, p.ClutchRpmOffset, idle);
+                d.LastSlipTorque = c.slipTorque;
+                d.LastEngagementRange = c.engagementRange;
+                d.LastEngagementRpm = c.engagementRPM;
+                d.ClutchWritten = true;
             }
         }
 
-        internal static TransmissionComponent.TransmissionShiftType ModeFor(GearboxData d, GearboxMode mode)
+        /// <summary>
+        /// Install the vehicle's ShiftController as its transmission's shift delegate. The delegate
+        /// found there is captured as the stock one — unless it is a ShiftController's own (left by
+        /// a runner that died without restoring), whose captured stock is taken instead. When NWH
+        /// has replaced our delegate (the game changed transmissionType, NWH re-assigned on the
+        /// next tick) the new one is the game's intent: it becomes the stock and we hook again.
+        /// </summary>
+        internal static void HookShifter(GearboxData d, TransmissionComponent t)
         {
-            if (d.IsCvt || d.Type == TransmissionComponent.TransmissionShiftType.External)
+            if (d.Shifter == null)
             {
-                return d.Type;
+                d.Shifter = new ShiftController();
             }
-            switch (mode)
+            if (d.Hooked && t.shiftDelegate == d.Shifter.Delegate)
             {
-                case GearboxMode.Manual: return TransmissionComponent.TransmissionShiftType.Manual;
-                case GearboxMode.Automatic: return TransmissionComponent.TransmissionShiftType.Automatic;
-                default: return d.Type;
+                return;
             }
+            TransmissionComponent.Shift current = t.shiftDelegate;
+            var stale = current != null ? current.Target as ShiftController : null;
+            d.Shifter.StockDelegate = stale != null ? stale.StockDelegate : current;
+            d.Shifter.StockType = t.transmissionType;
+            d.Type = t.transmissionType;
+            t.shiftDelegate = d.Shifter.Delegate;
+            d.Hooked = true;
+        }
+
+        /// <summary>Put the captured delegate back (only if ours is still installed).</summary>
+        internal static void UnhookShifter(GearboxData d, TransmissionComponent t)
+        {
+            if (d.Hooked && d.Shifter != null && t.shiftDelegate == d.Shifter.Delegate)
+            {
+                t.shiftDelegate = d.Shifter.StockDelegate;
+            }
+            d.Hooked = false;
         }
 
         /// <summary>
@@ -397,8 +455,10 @@ namespace ApocalypterSteeringMod.Runtime
         /// then n forward gears = stock (or continued) ratio x factor. Allocation-free except
         /// when the list has to grow past its capacity (only on a count change).
         /// </summary>
-        internal static void WriteGears(TransmissionComponent t, float[] stock, int reverse, float[] extended, int n, GearboxPreset p)
+        internal static void WriteGears(TransmissionComponent t, GearboxData d, int n, GearboxPreset p)
         {
+            float[] stock = d.Gears;
+            int reverse = d.Reverse;
             List<float> g = t.gears;
             int len = reverse + 1 + n;
             while (g.Count > len)
@@ -415,8 +475,7 @@ namespace ApocalypterSteeringMod.Runtime
             }
             for (int k = 0; k < n; k++)
             {
-                float baseRatio = k < extended.Length ? extended[k] : extended[extended.Length - 1];
-                g[reverse + 1 + k] = baseRatio * (p != null ? p.Scale(k + 1) : 1f);
+                g[reverse + 1 + k] = BaseRatio(d, p, k, n) * (p != null ? p.Scale(k + 1) : 1f);
             }
             t.forwardGearCount = n;
         }
@@ -476,17 +535,20 @@ namespace ApocalypterSteeringMod.Runtime
                     d.PendingTrim = false;
                 }
             }
+            if (t != null)
+            {
+                UnhookShifter(d, t);
+            }
             ClutchComponent c = r.Vc.powertrain.clutch;
             if (d.HasClutch && c != null)
             {
-                c.slipTorque = d.SlipTorque;
-                c.engagementRange = d.EngagementRange;
-                c.engagementRPM = d.EngagementRpm;
+                // A clutch value the game changed since our last write is the game's: keep it.
+                c.slipTorque = d.ClutchWritten ? Drift.Adopt(d.SlipTorque, d.LastSlipTorque, c.slipTorque) : d.SlipTorque;
+                c.engagementRange = d.ClutchWritten ? Drift.Adopt(d.EngagementRange, d.LastEngagementRange, c.engagementRange) : d.EngagementRange;
+                c.engagementRPM = d.ClutchWritten ? Drift.Adopt(d.EngagementRpm, d.LastEngagementRpm, c.engagementRPM) : d.EngagementRpm;
+                d.ClutchWritten = false;
             }
-            if (t != null && d.HasTransmission && t.transmissionType != d.Type)
-            {
-                t.transmissionType = d.Type;
-            }
+            // 0.7.0: transmissionType is never written by the mod any more, so nothing to restore.
         }
 
         /// <summary>Finish restores that had to wait for a shift to land (runs while the category is OFF).</summary>

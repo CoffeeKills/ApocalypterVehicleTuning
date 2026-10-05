@@ -65,7 +65,7 @@ namespace ApocalypterSteeringMod.Persistence
         private static ConfigEntry<string> _drivetrainPreset, _drivetrainBasedOn;
         private static ConfigEntry<float> _dtPower, _dtRevLimit, _dtLoss, _dtBoost, _dtFinalDrive,
             _dtUpshift, _dtDownshift, _dtShiftDur, _dtDiffStiff, _dtDiffBias;
-        private static ConfigEntry<string> _dtDiffFront, _dtDiffRear;
+        private static ConfigEntry<string> _dtDiffFront, _dtDiffRear, _dtDiffCenter;
         private static ConfigEntry<bool> _dtLayoutEnabled;     // 0.6.2
         private static ConfigEntry<string> _dtLayout;          // 0.6.2
 
@@ -89,6 +89,8 @@ namespace ApocalypterSteeringMod.Persistence
         private static ConfigEntry<int> _gearCount;
         private static readonly ConfigEntry<float>[] _gearScale = new ConfigEntry<float>[GearboxPreset.MaxGears];
         private static ConfigEntry<float> _gearClutchGrip, _gearClutchRange, _gearClutchRpm;
+        private static ConfigEntry<float> _gearShiftUp, _gearShiftDown, _gearKickdown;   // 0.7.0
+        private static ConfigEntry<bool> _gearSpread;                                     // 0.7.0
 
         // UI + telemetry (0.6.0)
         private static ConfigEntry<bool> _uiFreeze;
@@ -98,6 +100,7 @@ namespace ApocalypterSteeringMod.Persistence
         private static ConfigEntry<bool> _telDebugPick;
         private static ConfigEntry<float> _telScale;
         private static ConfigEntry<string> _telPosition;
+        private static ConfigEntry<string> _telPins;   // 0.7.0
 
         private static ConfigEntry<string> _toggleKey;
         // Read by Apocasetter via Chainloader (not wired to OnSettingChanged — we never read it).
@@ -184,6 +187,7 @@ namespace ApocalypterSteeringMod.Persistence
             MigrateLegacySteeringCurves(hadLegacySteeringCurves);
             PushAllToRuntime();
             MigrateLegacySuspension();
+            NormalizePins();
 
             config.SaveOnConfigSet = autoSave;
             config.Save();
@@ -310,6 +314,8 @@ namespace ApocalypterSteeringMod.Persistence
             _dtDiffBias = BindRange("Drivetrain.Custom", "DiffBiasScale", 1f, Limits.DiffScaleMin, Limits.DiffScaleMax, "Centre (AWD) differential front/rear bias factor; axle diffs keep their stock bias.");
             _dtDiffFront = _config.Bind("Drivetrain.Custom", "DiffFrontMode", "Stock", "Front-axle differential: Stock, Open, Locked, LimitedSlip (LSD accepted).");
             _dtDiffRear = _config.Bind("Drivetrain.Custom", "DiffRearMode", "Stock", "Rear-axle differential: Stock, Open, Locked, LimitedSlip (LSD accepted).");
+            _dtDiffCenter = _config.Bind("Drivetrain.Custom", "DiffCenterMode", "Stock",
+                "Centre (AWD / transfer) differential: Stock, Open, Locked, LimitedSlip (LSD accepted). Vehicles without a centre diff ignore it.");
             _dtLayoutEnabled = _config.Bind("Drivetrain.Layout", "Enabled", false,
                 "Replace each vehicle's own drivetrain wiring with the Layout below (needs [Drivetrain] Enabled; follows the panel's Apply-to target). "
                 + "A vehicle the layout does not fit (missing axle/wheel) keeps its own drivetrain; the log says why.");
@@ -374,7 +380,7 @@ namespace ApocalypterSteeringMod.Persistence
         private static void BindGearbox()
         {
             _gearEnabled = _config.Bind("Gearbox", "Enabled", false, "Master switch for gearbox customisation (opt-in).");
-            _gearPreset = _config.Bind("Gearbox", "Preset", "Stock", "Active gearbox preset: Stock, Comfort, Sport, Race, Custom.");
+            _gearPreset = _config.Bind("Gearbox", "Preset", "Stock", "Active gearbox preset: Stock, Comfort, Sport, Race, Truck, Custom.");
             _gearBasedOn = _config.Bind("Gearbox.Custom", "BasedOn", "", "Built-in preset the Custom gearbox was copied from.");
             _gearCount = BindIntRange("Gearbox.Custom", "GearCount", 0, Limits.GearCountMin, Limits.GearCountMax,
                 "Forward gear count; 0 = keep each vehicle's own. Added gears continue the vehicle's own ratio progression.");
@@ -390,7 +396,15 @@ namespace ApocalypterSteeringMod.Persistence
             _gearClutchRpm = BindRange("Gearbox.Custom", "ClutchRpmOffset", 0f, Limits.ClutchRpmMin, Limits.ClutchRpmMax,
                 "Clutch engagement RPM offset (never below the engine's idle).");
             _gearMode = _config.Bind("Gearbox.Custom", "TransmissionMode", "Stock",
-                "Transmission mode: Stock, Manual, Automatic (CVT vehicles always keep Stock).");
+                "Shifting while Gearbox is on (the mod shifts tuned gearboxes itself): Stock = follow the vehicle's own type, Manual = the game's shift keys, Automatic = by RPM. CVT vehicles always keep their own.");
+            _gearSpread = _config.Bind("Gearbox.Custom", "SpreadRatios", false,
+                "false = gears past a vehicle's own count continue its ratio progression; true = all gears are spread over the vehicle's own 1st-to-top range (closer ratios, truck-style).");
+            _gearShiftUp = BindRange("Gearbox.Custom", "ShiftUpFactor", 1f, Limits.ShiftFactorMin, Limits.ShiftFactorMax,
+                "Automatic shifting: factor on the upshift RPM (below 1 = earlier, lazier upshifts). The controller still keeps every shift clear of gear hunting.");
+            _gearShiftDown = BindRange("Gearbox.Custom", "ShiftDownFactor", 1f, Limits.ShiftFactorMin, Limits.ShiftFactorMax,
+                "Automatic shifting: factor on the downshift RPM (above 1 = downshifts sooner).");
+            _gearKickdown = BindRange("Gearbox.Custom", "KickdownScale", 1f, Limits.KickdownMin, Limits.KickdownMax,
+                "Automatic shifting: strength of the full-throttle kickdown (shift points rise 15 % x this above 80 % throttle).");
         }
 
         private static void BindUi()
@@ -407,6 +421,9 @@ namespace ApocalypterSteeringMod.Persistence
             _telPosition = _config.Bind("Telemetry", "Position", "TopLeft", "Screen corner: TopLeft, TopRight, BottomLeft, BottomRight.");
             _telDebugPick = _config.Bind("Telemetry", "DebugPick", false,
                 "Diagnostic (0.6.4): log the telemetry vehicle pick once per second. Off unless you are chasing a wrong telemetry car.");
+            _telPins = _config.Bind("Telemetry", "Pins", "",
+                "Slider values shown on the telemetry strip (the pin buttons in the panel), ';'-separated Category.Key names such as "
+                + "Steering.RateMultiplier;Suspension.SpringFront. Up to " + TelemetryPins.MaxPins + "; unknown names are dropped.");
         }
 
         // ---------------------------------------------------------------- wiring
@@ -435,7 +452,7 @@ namespace ApocalypterSteeringMod.Persistence
             Wire(_drivetrainEnabled); Wire(_drivetrainPreset); Wire(_drivetrainBasedOn);
             Wire(_dtPower); Wire(_dtRevLimit); Wire(_dtLoss); Wire(_dtBoost); Wire(_dtFinalDrive);
             Wire(_dtUpshift); Wire(_dtDownshift); Wire(_dtShiftDur); Wire(_dtDiffStiff); Wire(_dtDiffBias);
-            Wire(_dtDiffFront); Wire(_dtDiffRear);
+            Wire(_dtDiffFront); Wire(_dtDiffRear); Wire(_dtDiffCenter);
             Wire(_dtLayoutEnabled); Wire(_dtLayout);
             Wire(_assistsEnabled); Wire(_assistsPreset); Wire(_assistsBasedOn);
             Wire(_assistsAbsEnabled); Wire(_assistsAbsThr); Wire(_assistsAbsCut); Wire(_assistsAbsMult);
@@ -456,8 +473,9 @@ namespace ApocalypterSteeringMod.Persistence
                 Wire(_gearScale[g]);
             }
             Wire(_gearClutchGrip); Wire(_gearClutchRange); Wire(_gearClutchRpm);
+            Wire(_gearShiftUp); Wire(_gearShiftDown); Wire(_gearKickdown); Wire(_gearSpread);
             Wire(_uiFreeze); Wire(_uiScale); Wire(_uiWidth); Wire(_uiAlpha); Wire(_uiLastTab);
-            Wire(_telEnabled); Wire(_telScale); Wire(_telPosition); Wire(_telDebugPick);
+            Wire(_telEnabled); Wire(_telScale); Wire(_telPosition); Wire(_telDebugPick); Wire(_telPins);
             Wire(_targetMode); Wire(_targetVehicle);
         }
 
@@ -616,6 +634,25 @@ namespace ApocalypterSteeringMod.Persistence
             }
         }
 
+        /// <summary>0.7.0: the file keeps only the pins that parsed (unknown/duplicate/over-cap dropped on load).</summary>
+        private static void NormalizePins()
+        {
+            string clean = TelemetryPins.Serialize();
+            if (!string.Equals(_telPins.Value, clean, StringComparison.Ordinal))
+            {
+                bool wasSyncing = _syncing;
+                _syncing = true;
+                try
+                {
+                    _telPins.Value = clean;
+                }
+                finally
+                {
+                    _syncing = wasSyncing;
+                }
+            }
+        }
+
         // ---------------------------------------------------------------- save / push
 
         public static void Save()
@@ -717,6 +754,7 @@ namespace ApocalypterSteeringMod.Persistence
                 _dtDiffBias.Value = dc.DiffBiasScale;
                 _dtDiffFront.Value = dc.DiffFrontMode.ToString();
                 _dtDiffRear.Value = dc.DiffRearMode.ToString();
+                _dtDiffCenter.Value = dc.DiffCenterMode.ToString();
                 _dtLayoutEnabled.Value = DrivetrainSettings.LayoutEnabled;
                 _dtLayout.Value = DrivetrainSettings.LayoutText;
 
@@ -764,6 +802,10 @@ namespace ApocalypterSteeringMod.Persistence
                 _gearClutchRange.Value = gb.ClutchRangeScale;
                 _gearClutchRpm.Value = gb.ClutchRpmOffset;
                 _gearMode.Value = gb.TransmissionMode.ToString();
+                _gearSpread.Value = gb.SpreadRatios;
+                _gearShiftUp.Value = gb.ShiftUpFactor;
+                _gearShiftDown.Value = gb.ShiftDownFactor;
+                _gearKickdown.Value = gb.KickdownScale;
 
                 _uiFreeze.Value = UiSettings.FreezeWhileOpen;
                 _uiScale.Value = UiSettings.PanelScale;
@@ -774,6 +816,7 @@ namespace ApocalypterSteeringMod.Persistence
                 _telScale.Value = UiSettings.TelemetryScale;
                 _telPosition.Value = UiSettings.TelemetryPosition.ToString();
                 _telDebugPick.Value = UiSettings.TelemetryDebugPick;
+                _telPins.Value = TelemetryPins.Serialize();
                 _targetMode.Value = TargetSettings.Mode.ToString();
                 _targetVehicle.Value = TargetSettings.SelectedName ?? "";
             }
@@ -930,6 +973,7 @@ namespace ApocalypterSteeringMod.Persistence
             dc.DiffBiasScale = _dtDiffBias.Value;
             dc.DiffFrontMode = ParseDiffMode(_dtDiffFront.Value);
             dc.DiffRearMode = ParseDiffMode(_dtDiffRear.Value);
+            dc.DiffCenterMode = ParseDiffMode(_dtDiffCenter.Value);
             DrivetrainSettings.LayoutEnabled = _dtLayoutEnabled.Value;
             DrivetrainSettings.LayoutText = _dtLayout.Value;
 
@@ -977,6 +1021,10 @@ namespace ApocalypterSteeringMod.Persistence
             gb.ClutchRangeScale = _gearClutchRange.Value;
             gb.ClutchRpmOffset = _gearClutchRpm.Value;
             gb.TransmissionMode = ParseGearboxMode(_gearMode.Value);
+            gb.SpreadRatios = _gearSpread.Value;
+            gb.ShiftUpFactor = _gearShiftUp.Value;
+            gb.ShiftDownFactor = _gearShiftDown.Value;
+            gb.KickdownScale = _gearKickdown.Value;
 
             UiSettings.FreezeWhileOpen = _uiFreeze.Value;
             UiSettings.PanelScale = _uiScale.Value;
@@ -987,6 +1035,7 @@ namespace ApocalypterSteeringMod.Persistence
             UiSettings.TelemetryScale = _telScale.Value;
             UiSettings.TelemetryPosition = UiSettings.ParseCorner(_telPosition.Value);
             UiSettings.TelemetryDebugPick = _telDebugPick.Value;
+            TelemetryPins.Load(_telPins.Value);
             TargetSettings.Mode = TargetSettings.Parse(_targetMode.Value);
             TargetSettings.SelectedName = _targetVehicle.Value ?? "";
 

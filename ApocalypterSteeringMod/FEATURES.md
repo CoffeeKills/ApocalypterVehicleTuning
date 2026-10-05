@@ -4,24 +4,46 @@
 
 You have no terminal. The user runs `bash verify/run.sh` (needs .NET SDK 8+; globs **all** `plugin/**/*.cs`, so every new file must compile against the stubs — extend them, §7). Reason through it carefully.
 
-Version: `plugin/PluginInfo.cs` → `"0.7.0"`. README title → "v0.7.0-alpha" + a new "## Changes in 0.7.0-alpha" section. Current suite: **504 tests (486 logic + 18 prefix)**, all passing. Keep them green, add the §7 tests, and remove `GearboxSettings.ComingSoon` (release gate from 0.6.0) only when the §1 shifting subsystem is done — until then the gate stays.
+Version: `plugin/PluginInfo.cs` → `"0.7.0"` ✅. README title → "v0.7.0-alpha" + a new "## Changes in 0.7.0-alpha" section ✅. Suite before this round: **504 tests (486 logic + 18 prefix)**; after: **610 (592 + 18)**, all passing. Keep them green, add the §7 tests, and remove `GearboxSettings.ComingSoon` (release gate from 0.6.0) only when the §1 shifting subsystem is done — until then the gate stays.
 
-## Status after 0.6.4-alpha (what is already done, what remains)
+## Status after 0.7.0-alpha (what is done, what remains)
+
+**Every item is implemented and harness-tested** (`bash verify/run.sh`: 610 tests, 592 logic + 18 prefix, all passing on .NET SDK 8.0.131). In-game confirmation is still pending: README §10 items 38–46 (0.7.0), and earlier 29–37. The full changelog, deviations and negative controls are in README "Changes in 0.7.0-alpha".
+
+### Checklist
+
+| § | Item | Done | Harness-tested | Negative control | In-game check |
+|---|---|---|---|---|---|
+| §1 | Mod-owned shifting (`Runtime/ShiftController.cs`) — installed as NWH's `shiftDelegate`; the game's `input.ShiftInto/ShiftUp/ShiftDown` requests are read, never written; **no SetProperty patch** (deviation, README) | ✅ | ✅ | ✅ hook reverted: 11 fail | §10 38–41 |
+| §1 | Automatic: per-gear shift points from the tuned ratios, landing-RPM hysteresis (no hunting), kickdown, creep hold, NWH DNR rules | ✅ | ✅ (525-case no-hunting grid; 0→60→0 m/s drive through 12 gears, 0 reversals) | ✅ landing raise reverted: 3 fail | §10 38 |
+| §1 | Manual: the game's shift requests, clamped to the tuned count (vehicle's own ManualShift on Manual-type cars) | ✅ | ✅ | (covered by the hook control) | §10 39 |
+| §1 | CVT/External untouched; Stock & clutch-only presets keep NWH's own shifting | ✅ | ✅ | — | §10 41 |
+| §1 | Restore byte-for-byte (same delegate instance, gears, clutch; type never written); re-hook after the game changes the type; stale-runner and fault safety | ✅ | ✅ | (hook control) | §10 40 |
+| §1 | `[Gearbox.Custom] ShiftUpFactor / ShiftDownFactor / KickdownScale` | ✅ | ✅ | — | §10 46 |
+| §1 | `GearboxSettings.ComingSoon` and `AnyGearboxSkipped` removed (code + tests) | ✅ | ✅ | — | — |
+| §2 | Custom drivetrain layout (0.6.2, config) | ✅ 0.6.2 | ✅ | ✅ (0.6.2) | §10 30–33 |
+| §2 | Panel UI for the layout: switch, 5 templates, copy/paste via clipboard, status line | ✅ | ✅ (templates parse) | — | §10 42 |
+| §2 | Centre-diff mode (`[Drivetrain.Custom] DiffCenterMode`), bias slider enabled only with a centre diff, per-axle torque-split readout (live wiring), one-axle note | ✅ | ✅ | — | §10 42 |
+| §3 | Truck preset (12 gears, factors, clutch, ShiftUpFactor 0.9, 3+3 grid) — **ratios spread over the stock range** (`SpreadRatios`, deviation, README) | ✅ | ✅ | ✅ spread reverted: 2 fail | §10 38 |
+| §4 | Telemetry pins: Pin button on every category slider, `Category.ConfigKey` registry, cap 12, `[Telemetry] Pins`, unknown keys dropped, dynamic strip rows | ✅ | ✅ | ✅ normalise reverted: 1 fail | §10 43 |
+| §5 | Tighter UI (50/40/66/32/110, fonts +1..2) via `PanelLayout` constants; font fitting; 3 tab rows below 360 px; geometry at 300/400/460/800/1000 px | ✅ | ✅ | ✅ tab-font fit reverted: 4 fail | §10 44 |
+| §6 | Config additions only (6 keys); a real 0.6.4 file keeps all 133 keys/values | ✅ | ✅ | — | §10 46 |
+| §7 | Stubs mirror the new API; pure shift math; negative controls documented | ✅ | ✅ | ✅ | — |
+| §10 | Crash hardening (0.6.3), re-reviewed for 0.7.0 (controller faults contained inside NWH's ForwardStep; no new spawn-wave work) | ✅ | ✅ | ✅ (0.6.3) | §10 35 |
+| §11 | Telemetry pick (0.6.3/0.6.4); strip geometry now pure and tested with pins | ✅ | ✅ | ✅ (0.6.4) | §10 37, 43 |
+| audit | Game-changed drivetrain/clutch values adopted (drift), telemetry reset defaults, selected-vehicle overwrite, 300 px min width, tab-label overflow, digit keys vs shift keys, per-pass Last-driven pick | ✅ | ✅ | ✅ (1–5 fail each; the pass cache is performance-only) | §10 39, 45 |
+
+Known unknowns still to verify in-game: whether the game's saves serialise drivetrain wiring (0.6.2 hash hygiene is defensive) and gear lists (turn Gearbox off before saving); game diff-lock FSMs acting on bypassed diffs; how often `CheckTag` rewrites transmission fields (the drift adoption handles any rate); the HUD gear display lag.
+
+### Status after 0.6.4-alpha (historical)
 
 | § | Item | State |
 |---|---|---|
 | §2 core | Custom drivetrain layouts, config-only (`[Drivetrain.Layout]`) | ✅ done 0.6.2, harness-tested, negative controls |
 | — | Curve-editor / gear-graph grab fix (press-position picking), allocation-free apply path | ✅ done 0.6.2, harness-tested |
-| §10 | Crash hardening: post-load quiet window + spawn-jump deferral; per-category exception guards (capture with retries, apply, restore, baseline refresh) | ✅ done 0.6.3, harness-tested, negative controls |
-| §11 | Telemetry "zeros until I steer" — root cause was the driven-vehicle pick (idling engines counted as input, above the last-driven memory); also fixed "Apply to: Last driven" mis-targeting | ✅ done 0.6.3, harness-tested, negative controls; in-game check README §10 item 34 |
-| §11b | Telemetry follow-up (user report): parked cars freeze their FSM-written input at exit (handbrake/brakes left on) and stole the pick again — only fresh input is live now (2 s hold), `[Telemetry] DebugPick` diagnostic added | ✅ done 0.6.4, harness-tested, negative control; in-game check README §10 item 37 |
-| §1 | Mod-owned gearbox subsystem (shift-write suppression + `ShiftController`); remove `ComingSoon` only here | ⏳ open — **inputs attached**: PlayMaker sources in `gamecode/`, `docs/fsm-template-dump.md` (all 8128 FSMs decoded: the game shifts by `SetProperty` on `vc.input.ShiftInto`/`ShiftUp`/`ShiftDown`, never `transmission.Gear` — suppress those three writes) |
-| §2 rest | Panel UI for the drivetrain layout | ⏳ open |
-| §3 | Truck 12-gear preset (inert until §1) | ⏳ open |
-| §4 | Telemetry pins | ⏳ open |
-| §5 | Tighter UI | ⏳ open |
-
-Known unknowns to verify in-game: whether the game's saves serialise drivetrain wiring (the 0.6.2 hash hygiene is defensive), game diff-lock FSMs acting on bypassed diffs, no low-range transfer gearing (NWH diffs have no ratio), digit tab-hotkeys vs `ShiftInto1..8` on number keys (README §10 item 36).
+| §10 | Crash hardening: post-load quiet window + spawn-jump deferral; per-category exception guards | ✅ done 0.6.3, harness-tested, negative controls |
+| §11 | Telemetry driven-vehicle pick + liveness gate | ✅ done 0.6.3 / 0.6.4, harness-tested, negative controls |
+| §1–§5 | (open at 0.6.4) | ✅ done 0.7.0 — see the checklist above |
 
 ## 1. Mod-owned gearbox subsystem (unlock Gearbox for every transmission)
 
@@ -44,6 +66,8 @@ Known unknowns to verify in-game: whether the game's saves serialise drivetrain 
 
 **Config keys (additions)**: `[Gearbox.Custom] ShiftUpFactor` (0.5–1.5, default 1 — scales the computed upshift RPMs), `ShiftDownFactor` (0.5–1.5, default 1), `KickdownScale` (0.5–2, default 1). Keep everything else.
 
+> **Status (0.7.0, done + harness-tested):** implemented as NWH's `shiftDelegate` instead of a `SetProperty` patch (the FSMs never write `Gear`; their `input.Shift*` writes are the requests the controller reads). Shift points come from the landing-RPM rule rather than the formula in design point 2 (that formula lowers the upshift point on wide steps, which causes hunting), and kickdown raises the points. The controller hooks only for presets that change shifting. Details and reasons: README "Changes in 0.7.0-alpha".
+
 ## 2. AWD / 4WD and center-diff control (Drivetrain)
 
 **Scope honestly.** NWH2's powertrain differentials are wired at init (`DifferentialComponent.OutputA/OutputB`; gamecode/Powertrain.cs + DifferentialComponent.cs — read both). A live RWD→AWD conversion means rewiring the front diff's input source, which NWH does not support at runtime. Therefore:
@@ -55,6 +79,8 @@ Known unknowns to verify in-game: whether the game's saves serialise drivetrain 
 ## 3. Truck gearbox preset (12 gears)
 
 With §1 in, add a **"Truck"** Gearbox preset: GearCount 12, per-gear scales authored for a wide-ratio spread (gear 1 +20%, gears 2-6 +10%, 7-10 stock, 11-12 −10/−15% — verify feel in-game), clutch Street-style (grip ×1.1, range ×1.15), ShiftUpFactor 0.9 (shifts earlier, truck-style lazy revving), TransmissionMode Stock. Update the preset grid (perRow fits: 6 presets, 3+3).
+
+> **Status (0.7.0, done + harness-tested):** the Truck preset uses the new `SpreadRatios`. Continuing a 5-speed to 12 gears spans about 29:1 with an unusable top end, so the 12 gears are spread progressively over the vehicle's own 1st-to-top range instead (5.7:1). The clutch values follow the spec (×1.1 / ×1.15), so the clutch-type row shows "Custom" for Truck.
 
 ## 4. Telemetry pinning ("add to telemetry" boxes)
 

@@ -69,6 +69,7 @@ namespace ApocalypterSteeringMod.Settings
             public Kind Kind;
             public float Min, Max;
             public Func<ITunablePreset, string> Get;
+            public Func<ITunablePreset, float> GetNum;   // 0.7.0: numeric fields only (telemetry pins)
             // Returns false when the value cannot be parsed; sets clamped when it was clamped.
             public Func<ITunablePreset, string, Field, bool> Set;
         }
@@ -81,6 +82,7 @@ namespace ApocalypterSteeringMod.Settings
             {
                 Key = key, Kind = Kind.Float, Min = min, Max = max,
                 Get = p => FormatFloat(get((T)p)),
+                GetNum = p => get((T)p),
                 Set = (p, s, f) =>
                 {
                     float v;
@@ -100,6 +102,7 @@ namespace ApocalypterSteeringMod.Settings
             {
                 Key = key, Kind = Kind.Int, Min = min, Max = max,
                 Get = p => get((T)p).ToString(CultureInfo.InvariantCulture),
+                GetNum = p => get((T)p),
                 Set = (p, s, f) =>
                 {
                     int v;
@@ -238,6 +241,7 @@ namespace ApocalypterSteeringMod.Settings
                 F<DrivetrainPreset>("DiffStiffnessScale", Limits.DiffScaleMin, Limits.DiffScaleMax, p => p.DiffStiffnessScale, (p, v) => p.DiffStiffnessScale = v),
                 F<DrivetrainPreset>("DiffBiasScale", Limits.DiffScaleMin, Limits.DiffScaleMax, p => p.DiffBiasScale, (p, v) => p.DiffBiasScale = v),
                 Tx<DrivetrainPreset>("DiffFrontMode", p => p.DiffFrontMode.ToString(), (p, s) => { DiffMode m; if (!TryParseName(s, out m)) return false; p.DiffFrontMode = m; return true; }),
+                Tx<DrivetrainPreset>("DiffCenterMode", p => p.DiffCenterMode.ToString(), (p, s) => { DiffMode m; if (!TryParseName(s, out m)) return false; p.DiffCenterMode = m; return true; }),
                 Tx<DrivetrainPreset>("DiffRearMode", p => p.DiffRearMode.ToString(), (p, s) => { DiffMode m; if (!TryParseName(s, out m)) return false; p.DiffRearMode = m; return true; })
             };
 
@@ -280,6 +284,10 @@ namespace ApocalypterSteeringMod.Settings
                 F<GearboxPreset>("ClutchGripScale", Limits.ClutchGripMin, Limits.ClutchGripMax, p => p.ClutchGripScale, (p, v) => p.ClutchGripScale = v),
                 F<GearboxPreset>("ClutchRangeScale", Limits.ClutchRangeMin, Limits.ClutchRangeMax, p => p.ClutchRangeScale, (p, v) => p.ClutchRangeScale = v),
                 F<GearboxPreset>("ClutchRpmOffset", Limits.ClutchRpmMin, Limits.ClutchRpmMax, p => p.ClutchRpmOffset, (p, v) => p.ClutchRpmOffset = v),
+                B<GearboxPreset>("SpreadRatios", p => p.SpreadRatios, (p, v) => p.SpreadRatios = v),
+                F<GearboxPreset>("ShiftUpFactor", Limits.ShiftFactorMin, Limits.ShiftFactorMax, p => p.ShiftUpFactor, (p, v) => p.ShiftUpFactor = v),
+                F<GearboxPreset>("ShiftDownFactor", Limits.ShiftFactorMin, Limits.ShiftFactorMax, p => p.ShiftDownFactor, (p, v) => p.ShiftDownFactor = v),
+                F<GearboxPreset>("KickdownScale", Limits.KickdownMin, Limits.KickdownMax, p => p.KickdownScale, (p, v) => p.KickdownScale = v),
                 Tx<GearboxPreset>("TransmissionMode", p => p.TransmissionMode.ToString(), (p, s) => { GearboxMode m; if (!TryParseName(s, out m)) return false; p.TransmissionMode = m; return true; })
             };
             for (int g = 1; g <= GearboxPreset.MaxGears; g++)
@@ -330,6 +338,45 @@ namespace ApocalypterSteeringMod.Settings
                 return true;
             }
             return Enum.TryParse(v, true, out result) && Enum.IsDefined(typeof(TEnum), result);
+        }
+
+        /// <summary>True for a numeric (slider) key of this category — the telemetry-pinnable ones.</summary>
+        public static bool IsNumericKey(PresetCategory c, string key)
+        {
+            Field f = Find(Table(c), key);
+            return f != null && f.GetNum != null;
+        }
+
+        /// <summary>A numeric field of <paramref name="preset"/> (allocation-free after the tables exist).</summary>
+        public static bool TryGetNumber(PresetCategory c, ITunablePreset preset, string key, out float value)
+        {
+            Field f = Find(Table(c), key);
+            if (f == null || f.GetNum == null || preset == null)
+            {
+                value = 0f;
+                return false;
+            }
+            value = f.GetNum(preset);
+            return true;
+        }
+
+        /// <summary>The preset a category's sliders currently show (the active one; steering Vanilla shows the defaults).</summary>
+        public static ITunablePreset ShownPreset(PresetCategory c)
+        {
+            switch (c)
+            {
+                case PresetCategory.Steering:
+                    SteeringPreset sp = SteeringSettings.ActivePreset ?? SteeringPreset.Custom;
+                    return sp.IsVanilla ? SteeringPreset.Defaults : sp;
+                case PresetCategory.Suspension: return SuspensionSettings.Shown;
+                case PresetCategory.Aero: return AeroSettings.Shown;
+                case PresetCategory.Brakes: return BrakesSettings.Shown;
+                case PresetCategory.Grip: return GripSettings.Shown;
+                case PresetCategory.Drivetrain: return DrivetrainSettings.Shown;
+                case PresetCategory.Assists: return AssistsSettings.Shown;
+                case PresetCategory.Alignment: return AlignmentSettings.Shown;
+                default: return GearboxSettings.Shown;
+            }
         }
 
         /// <summary>Number of keys a category carries (for tests and the status line).</summary>

@@ -1,4 +1,4 @@
-# Apocalypter Vehicle Tuning (v0.6.4-alpha)
+# Apocalypter Vehicle Tuning (v0.7.0-alpha)
 
 A BepInEx mod for **Apocalypter** (SawyerK Games, Unity 2020.3.49, BepInEx 5.4.23.5 + Harmony 2) that adds a full vehicle-tuning panel: steering, suspension, aero, brakes, tire grip, drivetrain, stability assists (ABS/TCS), wheel alignment and gearbox, all applied live to every vehicle in the game. Since 0.6.0 the panel docks to the right edge and you can keep driving while it is open.
 
@@ -216,6 +216,212 @@ All §2 facts are preserved. The hidden-runner survival architecture is unchange
 - **Negative control** (against the untouched 0.5.0 plugin, compiled against the new stubs): the 9 new checks that compile against 0.5.0 give 5 failures (the four audit bugs: destroyed-vehicle writes ×2, latched-handbrake ABS, TCS mid-shift, external edit reverting panel edits) and 4 passes (their positive controls). The other 126 new checks exercise 0.6.0 API and do not compile against 0.5.0. `run.sh` is unchanged.
 - **gamecode/ gap:** `PowertrainComponent` (base of Engine/Clutch/Transmission/Wheel/Differential, declares `OutputRPM`) is referenced through `ClutchComponent.cs:10/95/108` but its file is not in the bundle. Please copy `PowertrainComponent.cs` from the decompiled tree into `gamecode/`. The stub mirrors only the members the mod uses.
 
+## Changes in 0.7.0-alpha
+
+Implements FEATURES.md 0.7.0 (§1 the mod-owned gearbox subsystem; the §2 remainder; §3–§5) on top of an audit of 0.6.4. Re-checked §10 (crash hardening) and §11 (telemetry). Suite: **610 tests (592 logic + 18 prefix), all passing.** I ran it on .NET SDK 8.0.131 (Linux; `run.sh` is unchanged and still runs from Git Bash). The 0.6.4 baseline was 504 (486 + 18). The steering prefix and its 18-test suite are byte-identical. Every new fix has a negative control (table below).
+
+Several spec recipes are implemented differently, because the decoded game data or the NWH source shows the spec's version would not work as intended. Each one is called out under **Deviations from FEATURES.md**.
+
+### §1 Mod-owned gearbox: `ShiftController` (new: `Runtime/ShiftController.cs`)
+
+**Where the game's shifting really lives** (`docs/fsm-template-dump.md` + `gamecode/TransmissionComponent.cs`):
+
+- The game's FSMs never write `transmission.Gear`. They write *requests* through PlayMaker `SetProperty`: `input.ShiftInto` (R = −1, N = 0, 1..5), `input.ShiftUp` and `input.ShiftDown`.
+- NWH's `TransmissionComponent.ForwardStep` then calls `shiftDelegate(vc)` every physics tick (`ManualShift` / `AutomaticShift` / `CVTShift`, `:403-420`), followed by `input.ResetShiftFlags()`. That delegate is the only code that *applies* a shift. NWH documents it as the extension point for custom shifting (`:93`).
+
+New load-bearing fact §2.15.
+
+**How the controller works.**
+
+- While Gearbox is ON, each targeted vehicle's transmission gets the vehicle's own `ShiftController` delegate (allocated once per vehicle, like the ABS/TCS delegates). The delegate found there is captured.
+- The game's FSM request writes still happen. The controller **reads** them (read-only, README §2.2) and NWH's own application is replaced.
+- OFF puts the captured delegate instance back: one field write, so restore is byte-for-byte. The harness checks it with `ReferenceEquals`.
+- `transmissionType` is **never written any more**. Writing it makes NWH re-assign its own delegate on the next tick (`:405`), so 0.7.0's mode setting only selects the controller's logic (Stock = follow the vehicle's own type, Manual, Automatic).
+
+**Automatic logic.** It uses the per-gear shift points from the live ratio list and decides on NWH's no-slip `ReferenceShiftRPM`.
+
+- **Upshift.** Starts at the vehicle's upshift RPM (Drivetrain-scaled, live) × `ShiftUpFactor` × kickdown, never below 1.25 × idle. It is then raised until the RPM the shift lands on clears the next gear's downshift floor (1.1 × idle) with a 90 % hysteresis margin. It is capped at 97 % of the rev limiter. If even the cap cannot land the next gear above that floor, the controller does not upshift at all.
+- **Downshift.** The vehicle's downshift RPM × `ShiftDownFactor` × kickdown, capped at 90 % of the RPM an upshift into this gear lands on, and floored at 1.1 × idle. Upshift and downshift points can therefore never chase each other: the harness checks "lands above down, below up" over a grid of 525 ratio-step × factor × kickdown combinations.
+- **Kickdown.** Above 80 % throttle both points rise by 15 % × `KickdownScale`, so the car holds gears longer and downshifts sooner.
+- **Creep hold.** Below 2 m/s it holds 1st, dropping straight to 1st from a higher gear.
+- **Spacing.** At least 0.6 s between the controller's own shifts. Manual-type boxes have no NWH post-shift ban.
+- **Drive / neutral / reverse.** Drive→neutral follows NWH's rules, including the game's `RequireShiftInput` variant. Neutral and reverse stay with the vehicle's own NWH automatic delegate. A Manual-type car run in Automatic mode uses a pure mirror of NWH's "Auto" DNR rules instead.
+- **Shifting itself** goes through `ShiftInto`, so it honours `shiftDuration`, the clutch's shift behaviour and the post-shift ban.
+
+**Manual logic.**
+
+- On a Manual-type vehicle (mode Stock or Manual), the vehicle's own `ManualShift` runs, which is exactly the game's behaviour, H-shifter hold included. Its `ShiftInto` bounds check already respects the tuned count.
+- Manual mode on an Automatic-type vehicle uses the pure `ManualTarget` mapping instead: ShiftUp, ShiftDown or ShiftInto, clamped to `[−reverse, forward]`. ShiftUp reaches gears the game's number keys don't have.
+
+**Robustness.**
+
+- **The game changes the type.** If the game changes `transmissionType` while we own the box (its `CheckTag` FSM writes it), NWH re-assigns its delegate. The next 2 s pass detects the foreign delegate, takes it and the new type as the game's intent, and hooks again. OFF afterwards leaves the game's new type and NWH's delegate for it.
+- **Stale controller.** A `ShiftController` delegate left behind by a runner that died without restoring is never captured as "stock": its own captured stock is used instead.
+- **Faults.** A fault inside the controller is caught inside NWH's `ForwardStep`, logged once, and shifting falls back to the vehicle's own delegate. It never throws every tick.
+- **Allocation.** The per-tick path is allocation-free (harness: 0 bytes over 500 ticks).
+
+**When the controller hooks.** Only when the preset changes shifting: the gears differ, the mode is forced, or a shift knob is not 1 (`GearboxPreset.NeedsShiftController`). Stock and the clutch-only presets (Comfort / Sport / Race) keep NWH's own shifting, variable shift points included, so they are exactly as shipped apart from the clutch.
+
+**Unlock.** `GearboxSettings.ComingSoon` is removed (code and tests), and so is the `AnyGearboxSkipped` skip and its panel note. Automatics are tunable. CVT and External boxes are still never hooked (clutch only, as before).
+
+**On the 0.6.x "stuck automatic" root cause.** I could not prove it from the code alone. The harness does reproduce the most likely mechanism: on a wide ratio step, NWH's raw automatic shifts at a fixed RPM with no regard for the next gear. It hunts 1⇄2 on every tick (100 shifts in 100 ticks in the test), and every shift opens the clutch for `shiftDuration`, which matches "engine revs, wheels don't move". Under the controller the same box holds 1st until the 2nd-gear landing is drivable, then shifts once. README §10 item 38 is the decisive check.
+
+**Gear display.** The game's HUD shows its own gear variable. A short lag is cosmetic and documented in the Gearbox status line. There is no HUD patching (it is a scene FSM, with no code to patch).
+
+### §2 Drivetrain: centre diff, torque split, layout UI
+
+- **Centre-diff mode** (Stock/Open/Locked/LSD) in the panel and in the config (`DiffCenterMode`). It applies to centre/transfer diffs, as classified by `ClassifyDiff` from their outputs. Axle diffs keep their own modes and External diffs are never touched.
+- **Centre-diff bias slider:** now enabled only when the car you drive has a centre diff.
+- **Per-axle torque-split readout.** Example: "Torque split of the car you drive (nominal): front 40% · rear 60%". It walks the **live** wiring from the gearbox, so a custom layout shows its own split. Open diffs split by bias (A gets 1 − biasAB); Locked and LSD diffs count as nominally 50/50. A one-axle vehicle shows "drives one axle. A custom layout below can make it AWD" (the spec's "disabled slider" note is obsolete since 0.6.2's live rewiring).
+- **Layout UI (new "Drivetrain layout" section).**
+  - A "Custom layout" switch.
+  - Five template buttons: RWD, FWD, AWD (the default text), 4x4 locked, 6x6. The active one highlights.
+  - "Copy this vehicle's layout" puts the stock layout text of the car you drive on the clipboard. "Paste layout" parses before accepting and reports the parser's message if the text is invalid.
+  - A status line: active / ignored with the reason / "needs Drivetrain on" / "this vehicle keeps its own drivetrain: why".
+  - Text entry stays in the config or Apocasetter: the panel is mouse-only.
+
+### §3 Truck gearbox preset
+
+- **Values:** `Truck` has 12 gears; 1st +20 %, 2–6 +10 %, 7–10 stock, 11–12 −10 / −15 %; clutch × 1.1 capacity / × 1.15 range; `ShiftUpFactor` 0.9; mode Stock.
+- **Grid:** the preset grid is now 6 buttons (3 + 3).
+- **Spread (deviation):** Truck spreads its 12 gears over the vehicle's own 1st-to-top range (new `SpreadRatios`, see Deviations) instead of continuing the ratio progression.
+- **Clutch row:** the clutch-type row shows "Custom" for Truck, because its clutch values match none of the four clutch types.
+
+### §4 Telemetry pins
+
+- **The button:** every category slider has a 26 × 26 `Pin` button left of its Reset.
+- **Keys:** a pin key is `Category.ConfigKey`, e.g. `Steering.RateMultiplier` or `Suspension.SpringFront`. Those are the `[Category.Custom]` config key names, so the scheme is stable and needs no new table. `PresetCodec` owns the field list and gained a numeric getter.
+- **What a pin shows:** the value of the preset that the category's tab shows, in the slider's own units. It is sampled on the strip's existing 4 Hz tick.
+- **Strip layout:** the strip grows one 26 px row per two pins below the four fixed cells (440 px wide). It stays click-through, with one Graphic per GameObject (label and value are separate Text objects, so a translation pack matches the label).
+- **Labels:** the slider's own title once the panel has been built, otherwise the key in words.
+- **Limits and persistence:** at most 12 pins. Pinning switches the strip on. `[Telemetry] Pins` is `;`-separated; unknown keys, duplicates and anything past 12 are dropped at load, in the runtime and in the file.
+- **Not pinnable:** the Settings tab's own sliders (panel size/width/alpha) — they are not tuning values.
+
+### §5 Tighter UI ("bigger text, smaller boxes")
+
+- **Constants:** every size is a `PanelLayout` constant or pure function.
+- **Block sizes:** rows 58 → 50 (stacked 100 → 86), preset buttons 44 → 40, master row 76 → 66 (narrow 92 → 80, or 96 below 400 px of content), section titles 38 → 32, footer 124 → 110.
+- **Fonts:** titles 17 → 19, hints 13 → 14, option hints 14 → 15, master 21/15 → 23/17, section titles 14 → 16, values 17 → 19, notes +1.
+- **Font fitting (new):** `PanelLayout` has Arial / Arial Bold advance-width tables (`TextWidth`, `FitFont`). Slider titles and hints, switch-row titles, preset buttons and tab labels shrink to fit their band, but never below 11 px (tabs 10 px at the 300 px minimum). uGUI text here overflows rather than clipping, so a label wider than its band draws over the pin, Reset or slider. Two measured cases:
+  - With the spec's flat 15 px tabs, "Suspension" (bold, 79 px at 14 px) would overflow its 82 px tab at the default 460 px window.
+  - At the 300 px minimum width, 0.6.x drew it 68 px wide in a 50 px tab.
+- **Tab rows:** under 360 px of window the tab strip uses 3 rows of 4. It keeps 2 rows of 5 above that.
+- **Kept:** the 0.6.0 width-adaptive insets, the curve-editor and gear-graph header bands, and their layout assertions. Geometry is checked at 300 / 400 / 460 / 800 / 1000 px, with and without pins.
+
+### Bugs fixed (audit of 0.6.4)
+
+1. **Game-changed drivetrain and clutch values were overwritten and then mis-restored.**
+   - **Evidence:** the decoded FSM data shows the game's `CheckTag` FSM writes `transmission.UpshiftRPM`, `DownshiftRPM`, `finalGearRatio` (and `transmissionType`). Apocalypter also swaps engines.
+   - **Old behaviour:** with Drivetrain ON, the tuner re-applied stock × factor from the *first-sight* baseline every 2 s, so the game's change was undone within 2 s. OFF then restored the stale first-sight value, wiping the game's change for good. The clutch (Gearbox) had the same pattern.
+   - **Fix:** the tuner now remembers what it last wrote (`Runtime/Drift.cs`). A live value that differs from that write was written by someone else and becomes the new stock: it is scaled from, and restored to. Allocation-free.
+2. **"Reset panel settings" turned the telemetry strip ON at bottom-left** (the pre-release 0.6.0 defaults). The shipped defaults are OFF / ×1 / top-left. New `UiSettings.ResetTelemetry`.
+3. **"Apply to: Selected vehicle" silently re-targeted another car.** Every panel refresh replaced a selection that was not currently tracked with the first tracked vehicle, even in "All" mode. Opening the panel before the selected car had spawned (after a save load) moved the tuning to another car and saved that choice. Now a non-empty selection is never replaced: the button shows "Name (not here)". Pure `TargetSettings.ResolveSelection`.
+4. **A `PanelWidth` of 300–319 rendered 320 px wide.** `PanelLayout.MinWindowWidth` was 320 while the slider and config range go down to 300. It is now 300.
+5. **Tab labels overflowed their tabs** at narrow widths (see §5).
+6. **Telemetry note text was wrong.** It said the strip "hides while this panel is open"; it has stayed visible since 0.6.x by design. The class summary had the same error.
+7. **"Last driven" targeting ran `FindDrivenVehicle` once per record per category.** That is a scan of every record which also advances input-liveness state, repeated on every slider tick: O(categories × vehicles²). It is now resolved once per pass (`BeginTargetPass`), so a pass can no longer see two different picks either. There is no harness negative control: it is performance only, and the targeting test covers behaviour.
+8. **Digit tab hotkeys vs the game's shift keys** (the 0.6.3 risk note, README §10 item 36). Now that the mod's manual shifting answers `ShiftInto` requests, digits switch tabs only while the mouse is over the panel in live mode (Freeze mode: always). This changes a hotkey gate, not widget navigation: the panel is still mouse-only.
+
+### Deviations from FEATURES.md (and why)
+
+- **No Harmony patch on PlayMaker `SetProperty`.** The spec's suppression target (`Gear` / `GearShift`) never occurs in the game's FSMs (dump: zero writes). Suppressing the real writes (`input.Shift*`) and then re-reading the global shift buttons would lose the per-vehicle routing that the FSM write carries, and the H-shifter hold semantics. It would also put a prefix on every PlayMaker property write in the game, every frame. Replacing NWH's shift delegate gives the same result ("the request reaches the mod, the game's application does not") at the exact place NWH applies shifts, restores with one field write, and needs no new patch. The controller runs inside NWH's physics tick, not on the runner's 2 s tick.
+- **Shift-point formula.** The spec's `upRpm[i] = clamp(stockUpshiftRpm × ratio[i+1]/ratio[i] × factor, …)` *lowers* the upshift point when the gap to the next gear is large (ratio < 1). That is backwards: a wide step needs a *later* upshift so the next gear lands above its downshift point. Otherwise you get exactly the hunting that stalls the car. The controller raises the point instead (see above). The negative control (the landing raise removed) fails 3 checks, including the grid's no-hunting property.
+- **Kickdown raises the shift points.** The spec said lower the upshift point by ~15 % at >0.8 throttle, which would make full throttle shift *earlier*. Real kickdown holds gears longer and downshifts. Same 15 %, scaled by `KickdownScale`.
+- **Reference RPM.** Decisions use NWH's `ReferenceShiftRPM` (no-slip, from wheel speed), as NWH's own automatic does, rather than engine `OutputRPM`. During a launch the engine sits at the clutch engagement RPM while the clutch slips, and wheelspin inflates it: either would trigger false upshifts.
+- **`ShiftInto`, not `Gear =`**, for the controller's shifts. It honours `shiftDuration` and the clutch's shift curve. Instant gear writes are still used where they must be: the resize guard, `ClampGear`.
+- **Truck ratios are spread, not continued (new `SpreadRatios`).** Continuing a typical 5-speed (3.274 … 0.817) to 12 gears runs down to 0.11 by the 12th, a 29:1 overall spread (harness control check). That is the 0.6.0 playtest's "ultra-tall continuation gears barely moved it". With `SpreadRatios` the gears fill the vehicle's own 1st-to-top range with progressive spacing, `r_k = r1 × (rTop / r1)^((k / (n − 1))^0.85)`. With the Truck factors that gives 5.7:1 over 12 strictly falling gears. The spacing is deliberately *not* geometric: a geometric list baked into a save would look like the 0.6.0 continuation to the save self-heal, which would wrongly truncate it (harness check). Custom presets keep the 0.6.0 continuation unless they switch spread on.
+- **Mode no longer writes `transmissionType`** (see §1). The 0.6.0 test "mode Manual applied" changed accordingly.
+
+### Crash report (`docs/crash-2026-10-04.md`) and §11 — reviewed
+
+- **Crash report:** reviewed again. Both hardening items have been in place since 0.6.3 and are unchanged. 0.7.0 adds no capture work: the shift delegate is hooked in the apply path for already-tracked vehicles only, so nothing new runs during the post-load spawn wave. A controller fault is caught inside NWH's `ForwardStep`, so a half-initialised vehicle cannot turn into a per-tick exception.
+- **§11 telemetry strip:** I could not check it against a real screen here (no game, no Unity runtime). Its geometry is now pure and harness-checked: `CellBand` / `StripHeight`, every cell inside the strip, none overlapping, with up to 12 pins. The in-game check is README §10 item 43.
+
+### Config keys and migration
+
+- **Added (6):**
+  - `[Drivetrain.Custom] DiffCenterMode` (string, `Stock`)
+  - `[Gearbox.Custom] SpreadRatios` (bool, false)
+  - `[Gearbox.Custom] ShiftUpFactor` (0.5–1.5, 1)
+  - `[Gearbox.Custom] ShiftDownFactor` (0.5–1.5, 1)
+  - `[Gearbox.Custom] KickdownScale` (0.5–2, 1)
+  - `[Telemetry] Pins` (string, empty)
+- **Nothing renamed, removed or default-changed.** Harness: all 133 keys of a *real* 0.6.4 file (generated with the 0.6.4 build, `verify/tests/fixtures/v064.cfg`) survive load + save with identical values, and exactly these six are added.
+- **No migration needed.** The new keys default to neutral values.
+- **Behaviour changes for existing files:**
+  - `[Gearbox] Enabled = true` in an existing cfg now applies (the gate is gone). Before 0.7.0 it was inert.
+  - `TransmissionMode = Manual/Automatic` now selects the controller's logic instead of writing the vehicle's type.
+  - The preset-list comment for `[Gearbox] Preset` mentions Truck. BepInEx only rewrites descriptions, not values.
+
+### Allocation
+
+These stay allocation-free:
+
+- the steering prefix (unchanged)
+- every apply/restore, now including Gearbox with the Truck spread and the hook (harness: 50 `ApplyLive` passes with seven categories plus a layout, 0 bytes)
+- the shift controller's per-tick body (0 bytes over 500 ticks)
+- the drift checks
+- the ABS/TCS bodies
+
+Allocations happen only at these points:
+
+- the telemetry pin cells, at 4 Hz and on a pin change
+- the panel readouts (the torque split uses a reused buffer)
+- one `ShiftController` per vehicle, on its first hook
+
+### Not changed
+
+All §2 facts are preserved (plus the new §2.15).
+
+- **Kept as they were:** the hidden-runner survival architecture, the PlayMaker input-blocking recipe, one Graphic per GameObject, the mouse-only panel (the digit gate narrows a hotkey; there is still no widget navigation), and BepInEx config as the only persistence, with the GUID unchanged.
+- **Game data stays read-only:** no `ES3.Save`. The mod never writes `vc.input.*`; the shift controller only reads `ShiftInto/ShiftUp/ShiftDown/InputSwapped*`, and NWH resets them.
+- **Unchanged code:** the steering prefix (byte-identical) and `run.sh`.
+
+### Verification harness
+
+- **Stubs** mirror the new API from `gamecode/`:
+  - `TransmissionComponent`: `Shift` delegate, `shiftDelegate`, `AutomaticTransmissionDNRShiftType`, `dnrSpeedThreshold`, `ReferenceShiftRPM`.
+  - `ForwardStep`'s order: re-assign the delegate on a type change → ratio → `shiftDelegate(vc)` → `ResetShiftFlags`.
+  - NWH's `ManualShift` and a reduced `AutomaticShift` (Auto DNR plus the sequential fixed-RPM branch), so the hunting control reproduces.
+  - `VehicleInputHandler.ShiftUp/ShiftDown/ShiftInto/InputSwappedThrottle/Brakes/ResetShiftFlags/swapInputInReverse/Clutch`.
+  - `RectTransformUtility.RectangleContainsScreenPoint` and `Input.mousePosition`.
+- **New checks (106):**
+  - shift math: points, landing raise, ceiling, floors, the 525-case no-hunting grid, creep, DNR, manual mapping, modes
+  - the controller: hook, restore by instance, the Truck 0→60→0 m/s drive through all 12 gears with zero reversals, manual requests, type-change re-hook, stale controller, fault, CVT, Stock/clutch-only presets keep NWH, allocation
+  - the Truck preset and spread
+  - drift (drivetrain and clutch)
+  - centre diff and torque split
+  - layout templates
+  - pins: keys, load, cap, values, units, labels, strip geometry, config
+  - layout at five widths, with pins
+  - a real 0.6.4 cfg
+  - the audit fixes
+- **Updated checks (5):**
+  - the 0.6.0 gearbox test's automatic-skip and mode checks (both now assert the 0.7.0 behaviour)
+  - the codec key count
+  - the 0.5.0 wide-row geometry (now the 0.7.0 geometry)
+  - the allocation test (now includes Gearbox)
+- **Negative controls** (each fix reverted on its own; failures):
+
+  | Fix reverted | Failures |
+  |---|---|
+  | shift controller hook | 11 |
+  | landing raise in the shift points | 3 |
+  | drift adoption | 5 |
+  | telemetry reset defaults | 1 |
+  | selection kept while not spawned | 1 |
+  | digit gate | 1 |
+  | 300 px minimum width | 1 |
+  | tab-font fitting | 4 |
+  | Truck spread | 2 |
+  | pins normalised in the file | 1 |
+
+  Against the untouched 0.6.4 plugin, the new checks do not compile (they exercise 0.7.0 API), which is why the controls revert one fix at a time.
+
+### In-game checks to add (§10 items 38–46)
+
+See §10.
+
 ## Changes in 0.6.4-alpha
 
 Scope: the user's in-game report that the telemetry strip still showed a parked car's zeros until they steered ("only when you turn does it show"). Root cause found in the pick: **a parked car's input is frozen at its exit values.** The game's FSM writes `vc.input.*` every frame only while a vehicle is driven (README §2.2); on exit the writes stop, so the parked car keeps whatever it froze with — handbrake held, brakes last pressed, last steering angle. 0.6.3 scored raw input, so that frozen value out-scored a hands-off player's zeros and stole the pick (and "Apply to: Last driven" with it). Steering raised the player's input above the frozen residual, which is why the strip "worked" only while turning. Suite: **504 tests (486 logic + 18 prefix), all passing**; negative control below.
@@ -320,7 +526,7 @@ Layout = gearbox -> transfer; transfer: Open split=0.4 -> front, rear; front: Op
 
 ## 1. What the mod does
 
-Nine tuning categories (plus a Panel tab for the panel itself), each with: a master ON/OFF switch (all default OFF — every category is opt-in), a row of presets, and labelled sliders with live values, "changed" highlight, per-slider Reset and plain-language hints. Moving any slider while a built-in preset is active copies that preset into a "Custom (Base)" slot (BasedOn tracked) so presets are never mutated. Everything applies live; settings persist in a BepInEx config file; panel opens via F7 or a "Vehicle Tuning" button cloned into the game's menus, docked right; by default the game keeps running (driving input live), `[UI] FreezeWhileOpen` restores the old modal pause. A click-through telemetry strip shows speed/RPM/gear/front slip while driving.
+Nine tuning categories (plus a Panel tab for the panel itself), each with: a master ON/OFF switch (all default OFF — every category is opt-in), a row of presets, and labelled sliders with live values, "changed" highlight, per-slider Reset and plain-language hints. Moving any slider while a built-in preset is active copies that preset into a "Custom (Base)" slot (BasedOn tracked) so presets are never mutated. Everything applies live; settings persist in a BepInEx config file; panel opens via F7 or a "Vehicle Tuning" button cloned into the game's menus, docked right; by default the game keeps running (driving input live), `[UI] FreezeWhileOpen` restores the old modal pause. A click-through telemetry strip shows speed/RPM/gear/front slip while driving, plus any slider values pinned to it (0.7.0).
 
 | Category | Model | Applied via |
 |---|---|---|
@@ -332,7 +538,7 @@ Nine tuning categories (plus a Panel tab for the panel itself), each with: a mas
 | Drivetrain | power/revLimiter/loss/boost/finalDrive/shift-RPMs (guarded)/shiftDuration ×, diff modes (Stock/Open/Locked/LSD) per axle resolved from the wheels each diff drives, centre-diff bias ×, diff stiffness × | Powertrain fields |
 | Assists | ABS + TCS via NWH's public delegate hooks — no modules, no vehicle fields | `brakes.brakeTorqueModifiers` / `engine.powerModifiers` |
 | Alignment | camber per wheel, caster/toe per axle, wheel position per axle or per wheel — **offsets** (deg/cm) on each vehicle's own geometry | `WheelUAPI.Camber`, `WheelGroup.CasterAngle/ToeAngle` (+ gates), wheel `transform.localPosition` |
-| Gearbox | per-gear ratio ×, gear count (0 = own; added gears continue the ratio progression), clutch type (emulated: capacity/engagement), transmission mode | `transmission.gears` (+ `Gear` re-shift guard), `clutch` fields, `transmissionType` |
+| Gearbox | per-gear ratio ×, gear count (0 = own; added gears continue the ratio progression, or 0.7.0 spread over the stock range), clutch type (emulated: capacity/engagement), shifting by the mod's own controller (mode, shift points, kickdown) | `transmission.gears` (+ `Gear` re-shift guard), `clutch` fields, `transmission.shiftDelegate` (0.7.0; `transmissionType` is never written) |
 
 All factors are **multipliers on each vehicle's captured stock values** (effective = stock × factor). Stock baselines are captured when a vehicle is first seen, re-read whenever a category is switched on (while it was off the fields were the game's), and restored exactly when a category is switched off. The suspension tab additionally shows computed **absolute readouts** (mean stock baseline × factor, e.g. "×1.40 / 42 000 N"), Brakes shows the torque in N·m, Gearbox the absolute ratio of each gear and Alignment the reference vehicle's stock angle/position.
 
@@ -355,12 +561,13 @@ These drove several unusual design decisions; treat them as load-bearing when re
 12. **Gearbox (0.6.0)**: `gears = [reverse…, 0, forward…]`, counts recomputed every `ForwardStep`, `CalculateTotalGearRatio` indexes `gears[gearIndex]` unguarded; `ShiftInto` refuses during the post-shift ban / an in-flight shift / full damage (instant does not bypass the ban) — so the mod writes `Gear` directly and defers shrinks while `isShifting`; CVT needs exactly 3 gears; `transmissionType` is live-safe.
 13. **Geometry (0.6.0)**: `WheelGroup.CasterAngle/ToeAngle` setters call `ApplyGeometryValues` (euler X = −caster, Y = ∓toe by side of `localPosition.x`, Z kept; gated by `applyCasterAngle/applyToeAngle`); `CamberController` and solid axles (`WheelGroup.Update`) overwrite camber every tick; `vc.wheelbase`/`trackWidth` are computed at init only; NWH mirrors camber/toe by the sign of `localPosition.x`.
 14. **Powertrain wiring (0.6.2)**: NWH steps the powertrain by recursing through `_output`/`_outputB` object references every tick (`PowertrainComponent.cs:156-189`, `DifferentialComponent.cs:192-234`); the public `Output`/`OutputB` setters relink live (and clear the old target's `_input`); name hashes are only zero-checked while stepping and resolved by name once in `VC_Initialize`. A new `DifferentialComponent` has no split delegate until `DifferentialType` is assigned. `WheelComponent.ForwardStep` sets `AutoSimulate = false` — an undriven wheel must have it back on to be simulated at all. A cycle in the wiring recurses until the game crashes.
+15. **Shifting (0.7.0)**: the game's FSMs never write `transmission.Gear`; they write shift *requests* by PlayMaker `SetProperty` on `input.ShiftInto` (R=-1/N=0/1..5), `input.ShiftUp`, `input.ShiftDown` (`docs/fsm-template-dump.md`). NWH applies them in `TransmissionComponent.ForwardStep` through `shiftDelegate(vc)` (Manual/Automatic/CVT), then `input.ResetShiftFlags()` (`:403-420`). A `transmissionType` change re-assigns NWH's own delegate on the next tick (`:405`), and the game's `CheckTag` FSM writes `transmissionType`/`UpshiftRPM`/`DownshiftRPM`/`finalGearRatio`. NWH's raw automatic shifts at fixed RPMs without checking the next gear's landing RPM (it hunts on wide ratio steps). The mod's shift controller replaces the delegate and never writes the type.
 
 ## 3. Architecture (file-by-file)
 
 ```
 Plugin.cs                       Slim entry: config load → ES3 read-only import → Harmony patches (steering + InputBlocker) → hidden runner GO; sceneLoaded → recreate runner.
-PluginInfo.cs                   GUID "dev.apocalypter.tractionsteering" (unchanged for config continuity), name, version "0.6.0" (numeric-only: BepInEx 5 skips "-alpha" tags).
+PluginInfo.cs                   GUID "dev.apocalypter.tractionsteering" (unchanged for config continuity), name, version "0.7.0" (numeric-only: BepInEx 5 skips "-alpha" tags).
 Settings/PresetBook.cs          Generic preset semantics shared by all 7 categories: ITunablePreset + PresetBook<T> (Identity/Custom/Defaults/NotFound, SetByName with legacy-name mapping, BeginEdit copy-to-Custom with BasedOn, Reference for per-slider Reset, ResetCustom).
 Settings/EditableCurve.cs       Piecewise-linear curve over [0,1]², 2-8 points: allocation-free Evaluate (prefix hot path), add/move/remove, Clone, "x:y;x:y" (de)serialization with validation.
 Settings/SteeringPreset.cs      6 presets (Vanilla/GTA/Euro Truck/Sim-Race/Drift/Custom) + Defaults; UseVehicleCurve + LockCurve + ReturnCurve; v2.0.0-behavior defaults; Custom mutated by UI; RestoreBaseCurve() re-attaches the BasedOn preset's curves (config-parse fallback).
@@ -374,7 +581,8 @@ Settings/DrivetrainPreset.cs    PowerScale/RevLimiterScale/LossScale/BoostScale/
 Settings/AssistsPreset.cs       AbsEnabled/AbsSlipThreshold/AbsCutoffSpeed/AbsCutMultiplier + Tcs*; presets Off/Standard/Sport/Off-road/Race/Custom.
 Settings/AlignmentPreset.cs     (0.6.0) WheelRole; Camber per wheel, Caster/Toe per axle, PosX(outward)/PosY/PosZ per wheel — offsets in deg/cm; presets Stock/Street/Sport/Race/Off-road/Stance/Custom.
 Settings/AlignmentSettings.cs   (0.6.0) Book delegate; Enabled/PerWheel; axle helpers; LinkSides (fork-first).
-Settings/GearboxPreset.cs       (0.6.0) GearCount, GearScale[12], clutch grip/range/RPM offset, GearboxMode; ClutchTypes table (Stock/Street/Sport/Race); presets Stock/Comfort/Sport/Race/Custom.
+Settings/GearboxPreset.cs       (0.6.0) GearCount, GearScale[12], clutch grip/range/RPM offset, GearboxMode; ClutchTypes table (Stock/Street/Sport/Race); presets Stock/Comfort/Sport/Race/Truck/Custom. 0.7.0: SpreadRatios, ShiftUpFactor/ShiftDownFactor/KickdownScale, NeedsShiftController.
+Settings/TelemetryPins.cs       (0.7.0) Pin registry: "Category.ConfigKey" keys (PresetCodec's numeric fields), toggle/cap 12, load (drop unknown/dupes)/serialize, value of the shown preset, labels, units.
 Settings/GearboxSettings.cs     (0.6.0) Book delegate; PerGearScale; ClutchTypeIndex.
 Settings/DrivetrainLayout.cs    (0.6.2) Layout text parser + tree validator (pure, NWH-free).
 Settings/UiSettings.cs          (0.6.0) Panel (freeze, scale, width, alpha, last tab) + telemetry preferences; name-only corner parse; tab clamp.
@@ -388,10 +596,12 @@ Runtime/VehicleTuner.Systems.cs Suspension/Grip/Brakes/Drivetrain/Aero apply+res
 Runtime/VehicleTuner.Assists.cs ABS/TCS delegate factory (allocated once per vehicle, reads live settings each tick) + registration/removal with flags.
 Runtime/VehicleTuner.Alignment.cs (0.6.0) camber/caster/toe/position apply+restore, gate handling, camber-lock skip, x=0 clamp, baseline refresh.
 Runtime/VehicleTuner.Layout.cs  (0.6.2) Custom drivetrain layout: stock-wiring capture (axles, sides, driven set, own wheel inertia), per-vehicle resolve, idempotent wiring with hash hygiene, wheel release, exact restore, stock-layout log text.
-Runtime/VehicleTuner.Gearbox.cs (0.6.0) gear capture/layout check/continuation, ratio+count write with the Gear re-shift guard and in-flight-shift deferral, clutch, mode, mid-shift restore + trim.
-Runtime/PanelLayout.cs          (0.6.0) Every panel size as a pure function of the width (wide = 0.5.0 geometry, narrow = stacked rows), scale factor, effective width, digit→tab.
+Runtime/VehicleTuner.Gearbox.cs (0.6.0) gear capture/layout check/continuation (0.7.0: or progressive spread), ratio+count write with the Gear re-shift guard and in-flight-shift deferral, clutch (drift-aware), mid-shift restore + trim; 0.7.0 HookShifter/UnhookShifter.
+Runtime/ShiftController.cs      (0.7.0) The mod's own shifting: pure shift-point/DNR/manual math + a per-vehicle NWH shift delegate (reads the game's shift requests, ShiftInto, fault fallback, allocation-free).
+Runtime/Drift.cs                (0.7.0) "Did the game change this field since our last write?" — adopt it as the new stock (drivetrain + clutch).
+Runtime/PanelLayout.cs          (0.6.0) Every panel size as a pure function of the width (wide / narrow stacked rows), scale factor, effective width, digit→tab. 0.7.0: tighter constants, font constants, pin band, tab rows, Arial width tables + FitFont.
 Runtime/GearGraph.cs            (0.6.0) Gear-ratio bar graph row (sibling of CurveEditor): bars vs stock outlines, click selects, bar drag edits, other drags scroll.
-Runtime/TelemetryStrip.cs       (0.6.0) Click-through speed/RPM/gear/slip strip on the hidden runner, own canvas, 4 Hz. Shows FindDrivenVehicle(): live input → last driven → running engine → fastest → first (0.6.3).
+Runtime/TelemetryStrip.cs       (0.6.0) Click-through speed/RPM/gear/slip strip on the hidden runner, own canvas, 4 Hz. Shows FindDrivenVehicle(): live input → last driven → running engine → fastest → first (0.6.3). 0.7.0: pinned-value cells (pure CellBand/StripHeight).
 Runtime/InputBlocker.cs        Two layers (0.6.0): InputController name whitelist (driving input stays live) + the PlayMaker class patch set (forks routed by name, OnEnter gated by everyFrame); SetInputBlocked / SetFreeze (see §2.8, §2.11).
 Runtime/SettingsPanelManager.cs On the hidden runner: hotkey/Esc/digit polling (dual input), menu-button injection (§2.7), panel lifecycle (live vs freeze), per-frame cursor freeing + selection clearing, EventSystem find-or-create, auto-save on close.
 Runtime/SettingsPanel.cs        The 10-tab docked panel (two-row tab strip, width-adaptive rows via Relayout, one Graphic per GO, mouse-only widgets, single refresher list, two-click per-tab reset-all and "Turn everything off", copy/paste preset footer, dim + click-outside close in Freeze mode only, absolute readouts).
@@ -414,7 +624,7 @@ gamecode/, PROMPT.md            Audit-bundle files, now kept in the tree (gameco
 
 ## 5. Config schema and migration
 
-Sections: `Steering` (Enabled **false** by default, Preset, MatchGameSteeringSpeed) + `Steering.Custom.*` · `Suspension` (Enabled, Preset, SplitFrontRear) + `Suspension.Custom.*` (10 factor keys + BasedOn) · `Aero` / `Brakes` / `Grip` / `Drivetrain` / `Assists` (Enabled, Preset) + per-category `Custom.*` (incl. DiffFrontMode/DiffRearMode strings, Abs/Tcs keys) · `UI.ToggleKey`. 0.6.0 adds `Alignment` (Enabled, Preset, PerWheel) + `Alignment.Custom.*` (BasedOn + 20 offset keys), `Gearbox` (Enabled, Preset) + `Gearbox.Custom.*` (BasedOn, GearCount, Gear1..12Scale, clutch keys, TransmissionMode), `UI.FreezeWhileOpen/PanelScale/PanelWidth/PanelAlpha/LastTab`, `Telemetry.Enabled/Scale/Position`. All numeric entries carry AcceptableValueRanges from `Limits`. 0.6.0 needs no migration (additions + widened ranges only). 0.6.2 adds `Drivetrain.Layout` (Enabled, Layout) — additions only.
+Sections: `Steering` (Enabled **false** by default, Preset, MatchGameSteeringSpeed) + `Steering.Custom.*` · `Suspension` (Enabled, Preset, SplitFrontRear) + `Suspension.Custom.*` (10 factor keys + BasedOn) · `Aero` / `Brakes` / `Grip` / `Drivetrain` / `Assists` (Enabled, Preset) + per-category `Custom.*` (incl. DiffFrontMode/DiffRearMode strings, Abs/Tcs keys) · `UI.ToggleKey`. 0.6.0 adds `Alignment` (Enabled, Preset, PerWheel) + `Alignment.Custom.*` (BasedOn + 20 offset keys), `Gearbox` (Enabled, Preset) + `Gearbox.Custom.*` (BasedOn, GearCount, Gear1..12Scale, clutch keys, TransmissionMode), `UI.FreezeWhileOpen/PanelScale/PanelWidth/PanelAlpha/LastTab`, `Telemetry.Enabled/Scale/Position`. All numeric entries carry AcceptableValueRanges from `Limits`. 0.6.0 needs no migration (additions + widened ranges only). 0.6.2 adds `Drivetrain.Layout` (Enabled, Layout) — additions only. 0.7.0 adds `Drivetrain.Custom.DiffCenterMode`, `Gearbox.Custom.SpreadRatios/ShiftUpFactor/ShiftDownFactor/KickdownScale`, `Telemetry.Pins` — additions only (harness: a real 0.6.4 file keeps all 133 keys and values).
 
 **v3.1 → v3.2 migration (one-time, in `ModConfig.MigrateLegacySuspension`)**: (1) `Suspension.Preset = "Street"` maps to "Stock"; (2) if any legacy `[Suspension.User]` multiplier ≠ 1.0, fold `Custom_i = Clamp(presetFactor_i × user_i, 0.5, 2)` into the Suspension.Custom entries with BasedOn set, ActivePreset = Custom; (3) the 10 legacy keys are `config.Remove`d every load so the fold can never run twice. Covered by tests.
 
@@ -426,7 +636,7 @@ Sections: `Steering` (Enabled **false** by default, Preset, MatchGameSteeringSpe
 
 ```
 cd plugin && dotnet build -c Release          # real DLL, references game DLLs at D:\SteamLibrary\...\Apocalypter_Data\Managed (adjust paths in the csproj; 0.6.0 adds UnityEngine.IMGUIModule for the clipboard)
-cd verify && bash run.sh                      # stubs compile + 504 tests (486 logic + 18 prefix); .NET SDK 8+; refs/ already populated
+cd verify && bash run.sh                      # stubs compile + 610 tests (592 logic + 18 prefix); .NET SDK 8+; refs/ already populated (tests/fixtures/v064.cfg is read from verify/)
 ```
 Install: copy the DLL to `BepInEx\plugins\` and `icon.png` next to it as `ApocalypterSteeringMod.png` (the Apocasetter Mods-window icon). Rebuild the install zip with both files at the zip root. **Never run it alongside an old `SteeringFix.dll`** (earlier assembly name) — both prefixes would double-process steering. The GUID is deliberately unchanged, so the existing config file migrates in place.
 
@@ -434,7 +644,7 @@ Install: copy the DLL to `BepInEx\plugins\` and `icon.png` next to it as `Apocal
 
 The Apocasetter updater installs mods from its GitHub index (`DeonUrist/Apocasetter-Index`); its contract for a loose-DLL mod like this one:
 
-- a public GitHub repo with a release whose tag equals the `[BepInPlugin]` version (`0.6.0`),
+- a public GitHub repo with a release whose tag equals the `[BepInPlugin]` version (`0.7.0`),
 - a release `.zip` that unpacks into `BepInEx\plugins` — i.e. `ApocalypterSteeringMod.dll` + `ApocalypterSteeringMod.png` at the zip root (the layout of `BepInEx\plugins\ApocalypterSteeringMod.zip`),
 - the `[General] Apocasetter = true` config entry (bound on load, written on first run),
 - one-time submission via the index repo's "Submit a mod" issue template.
@@ -457,6 +667,7 @@ powershell Compress-Archive README.md,PROMPT.md,FEATURES.md,CONTEXT.md,plugin,ve
 6. **Config hygiene**: migration one-time-ness, range clamping, `_syncing` guard, Save on close/disable.
 7. **UI hygiene**: one Graphic per GO, labels raycastTarget=false, EventSystem never duplicated, cursor restored, timeScale restored (Freeze) / never touched (live), input unblocked one frame late, selection cleared every frame while open.
 8. **0.6.0**: gear-list resize never leaves `gearIndex` out of range (also under an in-flight shift); alignment never crosses x = 0, never writes a locked camber, restores gates; blocker whitelist fail-closed; layout bands at 400/460/800.
+9. **0.7.0**: the shift delegate is restored by instance on every OFF path (category, target switch, OnDisable/OnDestroy) and never captured from a stale controller; `transmissionType` never written; controller per-tick path allocation-free and exception-contained; drift adoption only on a mismatch with our own last write; pins never break one-Graphic-per-GO.
 
 ## 8. Known limitations / deliberate decisions
 
@@ -465,7 +676,7 @@ powershell Compress-Archive README.md,PROMPT.md,FEATURES.md,CONTEXT.md,plugin,ve
 - **Live-mode risk (accepted):** with no click-catcher, game UI beside the panel stays clickable — opened from the pause menu, its buttons can be clicked (uGUI onClick is not blocker-gated). Freeze ON keeps the 0.5.0 modal dim. Live mode never writes timeScale, so a panel opened from the pause menu keeps the game paused.
 - **Whitelist is fail-closed:** a driving action whose name is not in `InputBlocker.DrivingKeys/DrivingAxes` does nothing while the panel is open; its name is logged once ("InputBlocker: blocked input action '…'"). Add such names to the whitelist after the in-game check.
 - **Telemetry default ON** deviates from the opt-in convention on purpose: it is passive, click-through UI that changes no vehicle; one toggle in the Panel tab (or `[Telemetry] Enabled = false`) hides it.
-- Alignment: moved wheels keep NWH's init-time wheelbase/track width (Ackermann, solid-axle camber); wheels with a camber controller or on a solid axle keep their camber; caster/toe are per axle only. Gearbox: CVT/External boxes and non-standard gear lists keep their gears; clutch types are emulated. If the runner is replaced exactly while a shift into an added gear is in flight, the placeholder gears left by the restore become the new runner's "stock" (harmless duplicates of the top gear; cleared by re-enabling and turning Gearbox off, or a restart).
+- Alignment: moved wheels keep NWH's init-time wheelbase/track width (Ackermann, solid-axle camber); wheels with a camber controller or on a solid axle keep their camber; caster/toe are per axle only. Gearbox: CVT/External boxes and non-standard gear lists keep their gears; clutch types are emulated. 0.7.0 shift controller: the game's HUD gear readout may lag a shift (cosmetic); after the game changes a vehicle's `transmissionType` while tuned, NWH's own shifting runs for up to one 2 s pass until the controller re-hooks; Manual mode on an Automatic-type vehicle inherits NWH's 0.5 s post-shift ban (the type is not changed to avoid the ban, see §2.15); a save made while a spread/tuned box is applied bakes it (only the 0.6.0 continuation shape is auto-repaired — turn Gearbox off before saving). Telemetry pins show the tuning *setting* (the slider value), not a live vehicle measurement. If the runner is replaced exactly while a shift into an added gear is in flight, the placeholder gears left by the restore become the new runner's "stock" (harmless duplicates of the top gear; cleared by re-enabling and turning Gearbox off, or a restart).
 - Vehicles without an aero module get extra drag only (0.5.0: default-module Cd × (DragScale − 1), so nothing at ×1.0 or below; no downforce-point synthesis); onboarded modules stay in `Components` (disabled and inert) after restore and are reused. A shipped module's own `simulateDrag`/`simulateDownforce` switches are never changed.
 - The mod's TCS keeps a low-speed cutoff (`TcsCutoffSpeed`, default 2 m/s). NWH's `TCSModule` declares `lowerSpeedThreshold` but never reads it, so the stock module also cuts during a standing-start; the mod's launch behaviour therefore differs below the cutoff (set it to 0 for NWH-like launches). Left as is in 0.2.0 — it is a feel decision that needs in-game testing.
 - Digressive damper valving params are deliberately untouched. `brakeOffThrottleIntensity` is deliberately untouched.
@@ -484,7 +695,7 @@ powershell Compress-Archive README.md,PROMPT.md,FEATURES.md,CONTEXT.md,plugin,ve
 
 ## 10. In-game test checklist (for the machine with the game)
 
-1. Log shows `Apocalypter Vehicle Tuning 0.6.0 loaded.`, two `InputBlocker: patched …` counts (6 InputController methods + the PlayMaker action methods) and no errors.
+1. Log shows `Apocalypter Vehicle Tuning 0.7.0 loaded.`, two `InputBlocker: patched …` counts (6 InputController methods + the PlayMaker action methods) and no errors.
 2. F7 (or the "Vehicle Tuning" button in the pause menu) opens the panel docked right; cursor free; the game keeps running (0.6.0 live mode — see item 21; item 22 covers the Freeze option). Esc/F7/X/Done close it (click-outside only with Freeze ON).
 3. Each of the 9 tuning tabs: master ON applies the preset, sliders live-edit (preset → "Custom (Base)"), Reset returns to the preset origin, OFF restores stock feel.
 4. Steering tab: Vanilla must feel exactly unmodded; Custom defaults ≈ the old v2.0.0 feel; traction clamp + opposite lock behave as before.
@@ -524,6 +735,16 @@ powershell Compress-Archive README.md,PROMPT.md,FEATURES.md,CONTEXT.md,plugin,ve
 35. **0.6.3 — save load:** load a save with several vehicles: the log shows no tuner activity for ~5 s, then the captures; no "failed and was skipped" warnings on a healthy save (if any appear, send the log — they name the category and vehicle).
 36. **0.6.3 — digit keys vs gears:** with the panel open in live mode, shift with the number keys (if the game binds ShiftInto1..8 to them): note whether the panel tab also switches.
 37. **0.6.4 — telemetry with a parked fleet:** park your car (handbrake on) next to other parked cars, hands off: the strip keeps YOUR car (speed/RPM/gear), not a parked car's zeros; driving straight shows values, not only while steering. If it ever picks the wrong car, set `[Telemetry] DebugPick = true`, wait ~2 s, reproduce, and send the `Telemetry pick:` lines from `BepInEx\LogOutput.log`.
+
+38. **0.7.0 — the automatic that used to get stuck:** Gearbox ON, preset **Truck**, on an AUTOMATIC car (game setting automatic gearbox on). From a standstill, full throttle then cruise: the car drives off in 1st and shifts up by itself through the gears (watch the telemetry Gear cell — it should reach 10-12 on a long straight), with no rapid shift-flicker and no "engine revs, wheels don't turn". Lift off and brake to a stop: it shifts down and ends in N like stock. The log has no "Shift controller … failed" line.
+39. **0.7.0 — manual mode:** same car, Shifting mode **Manual**: the game's gear keys (1..5, R, N, shift up/down) select gears; shift up continues past 5th to 12th; with the panel open and the mouse NOT over it, the number keys shift without switching panel tabs (item 36's risk); with the mouse over the panel they switch tabs.
+40. **0.7.0 — exact restore:** Gearbox OFF while driving: the car shifts like stock again immediately (the game's own automatic or manual), the gear count is back to stock, nothing in the log. Toggle the game's automatic-gearbox setting while Gearbox is ON: within ~2 s the mod follows the new type (Stock mode).
+41. **0.7.0 — Stock/clutch presets:** Gearbox ON with Stock, Comfort, Sport or Race: shifting feels exactly like stock (only the clutch changes); the Gearbox status line does not say "The mod shifts …".
+42. **0.7.0 — drivetrain tab:** on an AWD car the centre-diff buttons work (Locked = no front/rear speed difference), the bias slider is enabled and the "Torque split" line shows front/rear %; on a RWD/FWD car it says "drives one axle" and the bias slider is dimmed. Pick the AWD layout template + "Custom layout" ON on a RWD car: the split line shows 40%/60% and the car pulls with all wheels. "Copy this vehicle's layout" then "Paste layout" round-trips; pasting garbage shows "Not a layout: …".
+43. **0.7.0 — telemetry pins:** click Pin on 3 sliders (e.g. Steering speed, Stiffness, Gear 1): the strip turns on (if off) and grows one row per two pins with "title value" cells; values change as you move the sliders; the strip never takes a click; restart: the pins are still there. Check the strip at 1080p and 1440p/4K and both scales: cells readable, not overlapping. Settings tab → "Pinned values" OFF clears them.
+44. **0.7.0 — tighter panel:** at widths 300 / 460 / 1000 every tab is visibly tighter than 0.6.4 with bigger text; no label runs under a Pin/Reset button (long titles are slightly smaller instead); at 300 px the tabs use three rows and every tab name fits.
+45. **0.7.0 — game-changed values:** with Drivetrain ON (any preset), swap the car's engine (or change the game's automatic-gearbox setting): the new engine's power/shift points take effect (scaled), and Drivetrain OFF leaves the new engine's values, not the old ones.
+46. **0.7.0 — config:** your 0.6.4 cfg loads unchanged and gains `DiffCenterMode`, `SpreadRatios`, `ShiftUpFactor`, `ShiftDownFactor`, `KickdownScale`, `Pins`. Note: if your cfg had `[Gearbox] Enabled = true`, the gearbox now applies (it was gated before).
 
 ## 11. Translation (ApocaLanguage)
 

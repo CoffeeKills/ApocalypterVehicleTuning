@@ -22,6 +22,34 @@ namespace ApocalypterSteeringMod.Settings
         public const string DefaultLayoutText =
             "gearbox -> transfer; transfer: Open split=0.4 -> front, rear; front: Open -> FL, FR; rear: LSD -> RL, RR";
 
+        /// <summary>
+        /// Layout templates for the panel (0.7.0, FEATURES §2): one click writes the text. Wheel
+        /// names FL/FR/RL/RR are the first/last axle, so they fit any vehicle with two or more axles
+        /// (the 6x6 one needs three).
+        /// </summary>
+        public static readonly string[] LayoutTemplateNames = { "RWD", "FWD", "AWD", "4x4 locked", "6x6" };
+        public static readonly string[] LayoutTemplates =
+        {
+            "gearbox -> rear; rear: LSD -> RL, RR",
+            "gearbox -> front; front: Open -> FL, FR",
+            DefaultLayoutText,
+            "gearbox -> transfer; transfer: Locked -> front, rear; front: Open -> FL, FR; rear: Open -> RL, RR",
+            "gearbox -> transfer; transfer: Locked -> front, bogie; front: Open -> FL, FR; bogie: Locked -> mid, rear; mid: Open -> A2L, A2R; rear: Open -> RL, RR"
+        };
+
+        /// <summary>Index of the template the current text equals, or -1 (a hand-written layout).</summary>
+        public static int LayoutTemplateIndex()
+        {
+            for (int i = 0; i < LayoutTemplates.Length; i++)
+            {
+                if (string.Equals(LayoutTemplates[i], LayoutText, System.StringComparison.Ordinal))
+                {
+                    return i;
+                }
+            }
+            return -1;
+        }
+
         /// <summary>Use <see cref="Layout"/> instead of each vehicle's own wiring (needs Enabled too).</summary>
         public static bool LayoutEnabled = false;
 

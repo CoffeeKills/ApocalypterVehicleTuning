@@ -12,12 +12,14 @@
 - **Git**: local repo at `D:\projects\ApocalypterMods`, remote https://github.com/CoffeeKills/ApocalypterVehicleTuning (main). Repo-local identity is "Claude Code <noreply@anthropic.com>".
 - **Nexus**: "Vehicle Tuning Interface" (nexusmods.com/apocalypter/mods/19).
 
-## Current state (2026-10-04)
+## Current state (2026-10-05)
 
-- **Shipped/installed: 0.6.4-alpha** (PluginInfo "0.6.4"). Harness: **504 tests (486 logic + 18 prefix)**, green (run on .NET SDK 8.0.131). Built against the game DLLs (0 warnings), installed to `BepInEx\plugins\`, release zip `ApocalypterVehicleTuning-0.6.4-alpha.zip` + refreshed audit zip at the repo root.
-- 0.6.3 closed FEATURES §10 (crash hardening) and §11 (telemetry pick: idling engines). 0.6.4 closed the user's follow-up: parked cars freeze their FSM-written input at exit values (handbrake/brakes) and stole the pick again — the pick is now liveness-gated (`UpdateInputLiveness`: input counts only while it changes, 2 s hold, `InputDeadZone` 0.05; first-sample grace). `[Telemetry] DebugPick` logs the pick for diagnostics. See README "Changes in 0.6.4-alpha".
-- **Remaining for 0.7.0**: §1 mod-owned gearbox subsystem (shift-write suppression + `ShiftController`; `ComingSoon` gate stays until then), §2 remainder (layout panel UI), §3 Truck preset, §4 telemetry pins (+ the §4 remainder), §5 tighter UI.
-- In-game checks pending: README §10 items 29–37 (0.6.2 items 29–33, 0.6.3 items 34–36, 0.6.4 item 37).
+- **Returned bundle: 0.7.0-alpha** (PluginInfo "0.7.0"), reworked by the third-party pass and **not yet merged, built or installed**. Harness: **610 tests (592 logic + 18 prefix)**, green on .NET SDK 8.0.131. FEATURES §1–§5 are done (see the FEATURES.md checklist and README "Changes in 0.7.0-alpha"). `GearboxSettings.ComingSoon` is gone.
+- **Previous shipped build: 0.6.4-alpha.**
+- **Shifting:** the mod's `ShiftController` is installed as NWH's `transmission.shiftDelegate` while Gearbox changes shifting, and restored by instance on OFF. There is no PlayMaker `SetProperty` patch, and `transmissionType` is never written (README §2.15).
+- **New config keys (6, additive):** `DiffCenterMode`, `SpreadRatios`, `ShiftUpFactor`, `ShiftDownFactor`, `KickdownScale`, `[Telemetry] Pins`.
+- **Harness fixture:** `verify/tests/fixtures/v064.cfg`, a real 0.6.4 cfg, ships with the harness.
+- **In-game checks pending:** README §10 items 38–46 (0.7.0), plus 29–37.
 
 ### Inputs §1 needs (attached with this round's audit zip)
 - **Attached**: the PlayMaker action sources (`SetProperty.cs`, `GetProperty.cs`, `CallMethod.cs`, `FsmProperty.cs`, `FsmObject.cs`, `FsmStateAction.cs`) in `gamecode/`, plus `docs/fsm-shift-inputs.md` and **`docs/fsm-template-dump.md`** — the full §1 input. The gap is closed: the hand-rolled parser missed the trailing `setProperty` bool in `FsmProperty` (template-copy serialization), so every FSM with a SetProperty action failed to parse; fixed in `tools/fsm_extract.py`, and `tools/template_dump.py` now parses all 8128 FSMs. **Decoded answer**: the game shifts by `SetProperty` reflection on `VehicleController.input.ShiftInto` (int, R=-1/N=0/1..5) and `input.ShiftUp`/`input.ShiftDown` — never `transmission.Gear`. The §1 suppression target is those three property writes on a VehicleController target; the shift-button reads (`ShiftIntoR1`, `ShiftInto1..8`, `ShiftUp`, `ShiftDown`) stay untouched. `tools/template_dump.json` holds every FSM's action data (local tooling, not in git).
@@ -34,7 +36,7 @@
 ## Gotchas that have bitten us
 
 - **BepInEx 5 version strings**: numeric-only ("0.6.2"); "-alpha" makes BepInEx skip the plugin.
-- **The game's shift logic owns automatic transmissions** — any gearbox change on an automatic (mode/ratios/count/clutch) leaves the car stuck (engine revs, no drive). Hence the `ComingSoon` gate; only the 0.7.0 shift controller unlocks it. `GearCount = 12` in an old cfg is a landmine (set 0).
+- **Gearbox on automatics (0.6.x "stuck" bug):** in 0.6.x any gearbox change on an automatic left the car stuck. The likely mechanism, reproduced in the harness, is NWH's raw automatic hunting on wide ratio steps, with the clutch open on every shift. 0.7.0's `ShiftController` owns shifting whenever Gearbox changes it, and the `ComingSoon` gate is gone. An old cfg with `[Gearbox] Enabled = true` now applies.
 - **Config migrations are one-time, triggered by RAW-FILE key presence** (`ConfigFile.ContainsKey` only sees bound entries). Widening ranges never invalidates stored values.
 - **The game never sets NWH's `isPlayerControllable`** → `Vehicle.ActiveVehicle` is empty; telemetry/driven-vehicle picks: live input → last-driven memory → running engine → fastest → first.
 - **Driving input names** (whitelisted in InputBlocker, verified from the discovery log): `Steering`, `Throttle`, `Brakes`, `Handbrake`, `Clutch`, `Horn`, `Headlight`, `ShiftUp`, `ShiftDown`, `ShiftInto1..8`, `ShiftIntoR1`, `Cruise Control`, `Change Camera`, `TrailerAttachDetach`.

@@ -1,4 +1,4 @@
-Apocalypter Vehicle Tuning 0.6.4-alpha
+Apocalypter Vehicle Tuning 0.7.0-alpha
 ======================================
 
 An in-game tuning panel for every vehicle in Apocalypter: steering,
@@ -57,6 +57,14 @@ NOTES
   target. If the strip ever shows the wrong car, set Telemetry ->
   DebugPick = true in the mod config and send the "Telemetry pick:"
   lines from BepInEx\LogOutput.log.
+- New in 0.7.0: gearbox tuning is fully unlocked for every
+  transmission - the mod runs its own shift controller while gearbox
+  changes are active (the "coming soon" notice is gone), the Truck
+  12-gear preset, centre-diff mode + torque-split readout, a panel UI
+  for custom drivetrain layouts, telemetry value pinning, a tighter
+  panel, and several fixes (game-changed values no longer overwritten,
+  selected-vehicle targeting, panel reset, 300 px width, tab labels,
+  digit keys). In-game checklist: README section 10, items 38-46.
 - Steering tab: the two graphs are editable - click to add a point,
   drag to move, double-click to remove. The "Return to center" graph
   is what makes the Euro Truck preset hold its wheels when stopped

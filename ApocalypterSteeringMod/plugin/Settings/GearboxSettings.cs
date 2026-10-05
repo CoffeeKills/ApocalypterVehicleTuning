@@ -2,7 +2,9 @@ namespace ApocalypterSteeringMod.Settings
 {
     /// <summary>
     /// Runtime gearbox settings: per-gear ratio factors, optional gear count, clutch
-    /// "type" (emulated through capacity and engagement), transmission mode. Opt-in.
+    /// "type" (emulated through capacity and engagement), transmission mode and the
+    /// shift controller's knobs. Opt-in. 0.7.0: the "coming soon" release gate is gone —
+    /// while the category is ON the mod shifts tuned gearboxes itself (ShiftController).
     /// </summary>
     public static class GearboxSettings
     {
@@ -11,13 +13,6 @@ namespace ApocalypterSteeringMod.Settings
             GearboxPreset.Defaults, GearboxPreset.Stock);
 
         public static bool Enabled = false;
-
-        /// <summary>
-        /// Release gate: the gearbox category is hidden behind "coming soon" until the
-        /// mod owns shifting (the game's FSM shift logic fights resized boxes on
-        /// automatic transmissions). The tests flip this off to exercise the logic.
-        /// </summary>
-        public static bool ComingSoon = true;
 
         public static GearboxPreset ActivePreset
         {

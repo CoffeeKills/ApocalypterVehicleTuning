@@ -31,6 +31,20 @@ namespace ApocalypterSteeringMod.Settings
             }
         }
 
+        /// <summary>
+        /// The selection to keep (0.7.0): a non-empty name is never replaced, even while no tracked
+        /// vehicle carries it (it may not have spawned yet); only an empty selection is filled with
+        /// the cycle position's vehicle. Pure.
+        /// </summary>
+        public static string ResolveSelection(string selected, System.Collections.Generic.IList<string> tracked, int cycleIndex)
+        {
+            if (!string.IsNullOrEmpty(selected) || tracked == null || tracked.Count == 0)
+            {
+                return selected ?? "";
+            }
+            return tracked[cycleIndex >= 0 && cycleIndex < tracked.Count ? cycleIndex : 0];
+        }
+
         /// <summary>Name-only parse (case/space tolerant), anything else falls back to All.</summary>
         public static TargetMode Parse(string s)
         {

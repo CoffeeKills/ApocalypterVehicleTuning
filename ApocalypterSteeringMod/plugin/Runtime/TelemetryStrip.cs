@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using ApocalypterSteeringMod.Settings;
 using UnityEngine;
 using UnityEngine.UI;
@@ -10,14 +11,21 @@ namespace ApocalypterSteeringMod.Runtime
     /// (0.6.0). Lives on the hidden runner (survives scene loads with it), has its own
     /// canvas below the panel's, and every Graphic has raycastTarget = false, so it can never
     /// eat a click. One Graphic per GameObject: a background Image on the root, one Text
-    /// child per value. Hidden while the panel is open, when disabled, and when there is
-    /// no active vehicle. Updates at 4 Hz (allocations are fine at that rate; the physics
-    /// hot paths stay allocation-free).
+    /// child per value. Hidden when disabled and when there is no active vehicle (it stays
+    /// visible while the panel is open). Updates at 4 Hz (allocations are fine at that rate;
+    /// the physics hot paths stay allocation-free).
+    ///
+    /// 0.7.0 (FEATURES §4): pinned slider values (TelemetryPins) get their own cells below the
+    /// four fixed ones, two per 26 px row; the strip grows downward from its corner (upward
+    /// for a bottom corner, the pivot is the corner). Geometry is the pure CellBand/StripHeight.
     /// </summary>
     public sealed class TelemetryStrip : MonoBehaviour
     {
         public const float UpdateInterval = 0.25f;
         public const float Width = 440f, Height = 32f, Margin = 12f;
+        public const int FixedCells = 4;
+        public const int PinsPerRow = 2;
+        public const float PinRowHeight = 26f, PinGap = 2f;
         public const int SortingOrder = 31000;   // below the panel (32000)
 
         private GameObject _canvasGo;
@@ -25,6 +33,10 @@ namespace ApocalypterSteeringMod.Runtime
         private RectTransform _strip;
         private readonly Text[] _cells = new Text[4];
         private VehicleTuner _tuner;
+        private readonly List<Text> _pinLabels = new List<Text>();   // label (left) + value (right): two
+        private readonly List<Text> _pinCells = new List<Text>();    // Text GOs so a translation pack matches the label
+        private readonly List<GameObject> _pinCellObjects = new List<GameObject>();
+        private int _pinsVersion = -1;
         private float _next;
         private bool _buildFailed;
         private TelemetryCorner _corner = (TelemetryCorner)(-1);
@@ -75,6 +87,68 @@ namespace ApocalypterSteeringMod.Runtime
             _cells[1].text = UiStrings.TelemetryRpm(s.Rpm);
             _cells[2].text = UiStrings.TelemetryGear(s.Gear);
             _cells[3].text = UiStrings.TelemetrySlip(s.FrontSlip);
+            UpdatePins();
+        }
+
+        /// <summary>Strip height for this many pins: the fixed row plus one 26 px row per two pins.</summary>
+        public static float StripHeight(int pins)
+        {
+            if (pins <= 0)
+            {
+                return Height;
+            }
+            int rows = (pins + PinsPerRow - 1) / PinsPerRow;
+            return Height + PinGap + rows * PinRowHeight;
+        }
+
+        /// <summary>Cell rectangle from the strip's top-left: 0..3 = the fixed cells, 4.. = pins.</summary>
+        public static PanelLayout.Band CellBand(int index)
+        {
+            float fixedW = Width / FixedCells;
+            if (index < FixedCells)
+            {
+                return new PanelLayout.Band(index * fixedW, 0f, fixedW, Height);
+            }
+            int j = index - FixedCells;
+            float pinW = Width / PinsPerRow;
+            return new PanelLayout.Band((j % PinsPerRow) * pinW, Height + PinGap + (j / PinsPerRow) * PinRowHeight, pinW, PinRowHeight);
+        }
+
+        private void UpdatePins()
+        {
+            IList<string> pins = TelemetryPins.Pins;
+            if (_pinsVersion != TelemetryPins.Version)
+            {
+                _pinsVersion = TelemetryPins.Version;
+                for (int i = 0; i < _pinCellObjects.Count; i++)
+                {
+                    Destroy(_pinCellObjects[i]);
+                }
+                _pinCellObjects.Clear();
+                _pinCells.Clear();
+                _pinLabels.Clear();
+                for (int i = 0; i < pins.Count; i++)
+                {
+                    RectTransform cell = UiKit.Make("Pin" + i, _strip);
+                    PanelLayout.Apply(cell, Inset(CellBand(FixedCells + i)));
+                    _pinCellObjects.Add(cell.gameObject);
+                    _pinLabels.Add(UiKit.Label(cell, TelemetryPins.Label(pins[i]), 13, UiKit.TextMuted, TextAnchor.MiddleLeft));
+                    _pinCells.Add(UiKit.Label(cell, "", 13, UiKit.TextMain, TextAnchor.MiddleRight, FontStyle.Bold));
+                }
+                _corner = (TelemetryCorner)(-1);   // re-apply the size
+            }
+            for (int i = 0; i < pins.Count && i < _pinCells.Count; i++)
+            {
+                float v;
+                string pin = pins[i];
+                _pinLabels[i].text = TelemetryPins.Label(pin);   // the panel may register the slider title later
+                _pinCells[i].text = TelemetryPins.TryGetValue(pin, out v) ? UiStrings.PinValue(TelemetryPins.UnitOf(pin), v) : "";
+            }
+        }
+
+        private static PanelLayout.Band Inset(PanelLayout.Band b)
+        {
+            return new PanelLayout.Band(b.X + 8f, b.Top, b.W - 16f, b.H);
         }
 
         private bool Build()
@@ -100,7 +174,8 @@ namespace ApocalypterSteeringMod.Runtime
                 for (int i = 0; i < _cells.Length; i++)
                 {
                     RectTransform cell = UiKit.Make("Cell" + i, _strip);
-                    UiKit.Place(cell, i / 4f, 0f, (i + 1) / 4f, 1f, 6f, 0f, 6f, 0f);
+                    PanelLayout.Band b = CellBand(i);
+                    PanelLayout.Apply(cell, new PanelLayout.Band(b.X + 6f, b.Top, b.W - 12f, b.H));
                     _cells[i] = UiKit.Label(cell, "", 15, UiKit.TextMain, TextAnchor.MiddleCenter, FontStyle.Bold);
                 }
                 return true;
@@ -149,7 +224,7 @@ namespace ApocalypterSteeringMod.Runtime
             _strip.anchorMin = a;
             _strip.anchorMax = a;
             _strip.pivot = a;
-            _strip.sizeDelta = new Vector2(Width, Height);
+            _strip.sizeDelta = new Vector2(Width, StripHeight(TelemetryPins.Count));
             _strip.anchoredPosition = CornerOffset(_corner, Margin);
         }
     }

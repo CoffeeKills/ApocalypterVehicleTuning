@@ -89,6 +89,10 @@ namespace UnityEngine
             localPoint = default(Vector2);
             return false;
         }
+
+        // 0.7.0 (digit hotkeys only over the panel). Test hook: the answer.
+        public static bool TestContains;
+        public static bool RectangleContainsScreenPoint(RectTransform rect, Vector2 screenPoint, Camera cam) { return TestContains; }
     }
 
     public sealed class GameObject : Object
@@ -298,6 +302,7 @@ namespace UnityEngine
     {
         public static bool GetKeyDown(KeyCode key) { return false; }
         public static bool GetKey(KeyCode key) { return false; }
+        public static Vector3 mousePosition { get { return default(Vector3); } }
     }
 
     public static class Resources

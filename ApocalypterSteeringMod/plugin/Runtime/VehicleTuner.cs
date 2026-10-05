@@ -71,6 +71,10 @@ namespace ApocalypterSteeringMod.Runtime
             public float[] DiffBias, DiffStiff;
             public bool[] DiffCaptured;                      // false = slot was null at capture: never written
             public LayoutData Layout;                        // 0.6.2 stock wiring + custom layout state (null: no transmission/wheels)
+            // 0.7.0 drift tracking: what ApplyDrivetrain last wrote (see Drift).
+            public bool Written;
+            public float LastMaxPower, LastRevLimiterRPM, LastLossPercent, LastBoostGain;
+            public float LastFinalGearRatio, LastUpshiftRPM, LastDownshiftRPM, LastShiftDuration;
         }
 
         internal sealed class AeroData
@@ -94,6 +98,12 @@ namespace ApocalypterSteeringMod.Runtime
             public TransmissionComponent.TransmissionShiftType Type;
             public float SlipTorque, EngagementRange, EngagementRpm;
             public bool PendingTrim;           // restore left placeholder gears behind an in-flight shift
+            // 0.7.0 shift controller + drift tracking.
+            public TransmissionComponent.Shift StockShift;   // the vehicle's own delegate at capture (diagnostic)
+            public ShiftController Shifter;                  // created once per record, reused across hooks
+            public bool Hooked;                              // our delegate is installed
+            public bool ClutchWritten;                       // Last* hold what we last wrote
+            public float LastSlipTorque, LastEngagementRange, LastEngagementRpm;
         }
 
         internal sealed class AssistHandles
@@ -216,6 +226,32 @@ namespace ApocalypterSteeringMod.Runtime
         /// </summary>
         public void ApplyLive()
         {
+            BeginTargetPass();
+            try
+            {
+                ApplyLiveCore();
+            }
+            finally
+            {
+                _passActive = false;
+            }
+        }
+
+        // 0.7.0: "Last driven" is resolved ONCE per pass. 0.6.x called FindDrivenVehicle (a scan of
+        // every record that also advances each record's input-liveness state) from IsTarget, i.e.
+        // once per record per category: O(categories x vehicles^2) per slider tick, and the pick
+        // could in principle change half-way through a pass.
+        private bool _passActive;
+        private VehicleController _passDriven;
+
+        private void BeginTargetPass()
+        {
+            _passDriven = TargetSettings.Mode == TargetMode.LastDriven ? FindDrivenVehicle() : null;
+            _passActive = true;
+        }
+
+        private void ApplyLiveCore()
+        {
             // 0.6.0: drop destroyed vehicles first. ApplyLive runs on every slider tick, i.e.
             // between scans; 0.5.0 then wrote into a destroyed vehicle (and could onboard an
             // aero module into it, which throws inside NWH and aborted every later category).
@@ -242,7 +278,7 @@ namespace ApocalypterSteeringMod.Runtime
             if (AlignmentSettings.Enabled) { if (!_alignmentApplied) RefreshBaselines(Category.Alignment); ApplyAllAlignment(); _alignmentApplied = true; }
             else if (_alignmentApplied) { RestoreAllAlignment(); _alignmentApplied = false; }
 
-            if (GearboxSettings.Enabled && !GearboxSettings.ComingSoon) { if (!_gearboxApplied) RefreshBaselines(Category.Gearbox); ApplyAllGearbox(); _gearboxApplied = true; }
+            if (GearboxSettings.Enabled) { if (!_gearboxApplied) RefreshBaselines(Category.Gearbox); ApplyAllGearbox(); _gearboxApplied = true; }
             else
             {
                 if (_gearboxApplied) { RestoreAllGearbox(); _gearboxApplied = false; }
@@ -885,7 +921,11 @@ namespace ApocalypterSteeringMod.Runtime
             }
         }
 
-        /// <summary>Stock ratio of forward gear <paramref name="gear"/> (1..12) of the reference vehicle, continued past its own count; 0 when unknown.</summary>
+        /// <summary>
+        /// Base ratio of forward gear <paramref name="gear"/> (1..12) of the reference vehicle under the
+        /// shown preset (its own ratio, continued past its count, or 0.7.0's spread), before the
+        /// per-gear factor; 0 when unknown.
+        /// </summary>
         public float ReferenceGearStock(int gear)
         {
             VehicleRecord r = ReferenceRecord();
@@ -893,7 +933,8 @@ namespace ApocalypterSteeringMod.Runtime
             {
                 return 0f;
             }
-            return r.Gearbox.Extended[gear - 1];
+            GearboxPreset p = GearboxSettings.Shown;
+            return BaseRatio(r.Gearbox, p, gear - 1, TargetForward(r.Gearbox, p));
         }
 
         /// <summary>Any tracked vehicle with a camber the mod must not write (CamberController / solid axle).</summary>
@@ -930,12 +971,22 @@ namespace ApocalypterSteeringMod.Runtime
             }
         }
 
-        /// <summary>
-        /// True when a gear-count change was skipped this pass: automatic
-        /// transmissions keep their stock count (the game's shift logic expects
-        /// it — resizing makes the car undrivable). Panel shows a note.
-        /// </summary>
-        public bool AnyGearboxSkipped { get; private set; }
+        /// <summary>Tracked vehicles whose gearbox the mod's shift controller currently drives.</summary>
+        public int ShiftControlledCount
+        {
+            get
+            {
+                int n = 0;
+                foreach (KeyValuePair<VehicleController, VehicleRecord> kv in _records)
+                {
+                    if (kv.Key != null && kv.Value.Gearbox != null && kv.Value.Gearbox.Hooked)
+                    {
+                        n++;
+                    }
+                }
+                return n;
+            }
+        }
 
         // --------------------------------------------------------------- telemetry
 
@@ -1139,7 +1190,7 @@ namespace ApocalypterSteeringMod.Runtime
             switch (TargetSettings.Mode)
             {
                 case TargetMode.LastDriven:
-                    return vc != null && vc == FindDrivenVehicle();
+                    return vc != null && vc == (_passActive ? _passDriven : FindDrivenVehicle());
                 case TargetMode.Selected:
                     return vc != null && string.Equals(TargetSettings.SelectedName, VehicleName(vc), StringComparison.Ordinal);
                 default:
@@ -1167,15 +1218,30 @@ namespace ApocalypterSteeringMod.Runtime
         {
             get
             {
-                int n = 0;
-                foreach (KeyValuePair<VehicleController, VehicleRecord> kv in _records)
+                bool outer = _passActive;
+                if (!outer)
                 {
-                    if (kv.Key != null && kv.Value.Vc != null && IsTarget(kv.Key))
+                    BeginTargetPass();
+                }
+                try
+                {
+                    int n = 0;
+                    foreach (KeyValuePair<VehicleController, VehicleRecord> kv in _records)
                     {
-                        n++;
+                        if (kv.Key != null && kv.Value.Vc != null && IsTarget(kv.Key))
+                        {
+                            n++;
+                        }
+                    }
+                    return n;
+                }
+                finally
+                {
+                    if (!outer)
+                    {
+                        _passActive = false;
                     }
                 }
-                return n;
             }
         }
 

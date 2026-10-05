@@ -497,6 +497,9 @@ namespace ApocalypterSteeringMod.Runtime
                 return;
             }
             EngineComponent engine = r.Vc.powertrain.engine;
+            TransmissionComponent transmission = r.Vc.powertrain.transmission;
+            // 0.7.0: adopt anything the game wrote since our last pass as its new stock (Drift).
+            AdoptDrivetrainDrift(b, engine, transmission);
             if (b.HasEngine && engine != null)
             {
                 engine.maxPower = b.MaxPower * p.PowerScale;
@@ -508,7 +511,6 @@ namespace ApocalypterSteeringMod.Runtime
                     engine.forcedInduction.powerGainMultiplier = Mathf.Clamp(b.BoostGain * p.BoostScale, 1f, 3f);
                 }
             }
-            TransmissionComponent transmission = r.Vc.powertrain.transmission;
             if (b.HasTransmission && transmission != null)
             {
                 float up, down;
@@ -518,6 +520,7 @@ namespace ApocalypterSteeringMod.Runtime
                 transmission.DownshiftRPM = down;
                 transmission.shiftDuration = b.ShiftDuration * p.ShiftDurationScale;
             }
+            RememberDrivetrainWrites(b, engine, transmission);
 
             // Differentials: count-guarded list access (the vc.Diff* convenience
             // properties index unguarded and throw on short lists).
@@ -534,15 +537,15 @@ namespace ApocalypterSteeringMod.Runtime
                     DifferentialComponent.Type stock = b.DiffModes[i];
                     DiffRole role = ClassifyDiff(r, diff, i);
 
-                    // Mode: the axle's mode, or the captured stock type for "Stock" (so
-                    // switching back to Stock while enabled really restores it). Centre
-                    // diffs and External (script-driven) diffs always keep their type:
+                    // Mode: the axle's (or, 0.7.0, the centre diff's) mode, or the captured
+                    // stock type for "Stock" (so switching back to Stock while enabled really
+                    // restores it). External (script-driven) diffs always keep their type:
                     // assigning External does not re-assign NWH's split delegate.
                     DifferentialComponent.Type want = stock;
                     if (stock != DifferentialComponent.Type.External)
                     {
                         DiffMode mode = role == DiffRole.Front ? p.DiffFrontMode
-                            : role == DiffRole.Rear ? p.DiffRearMode : DiffMode.Stock;
+                            : role == DiffRole.Rear ? p.DiffRearMode : p.DiffCenterMode;
                         if (mode != DiffMode.Stock)
                         {
                             want = ToNwhType(mode);
@@ -581,6 +584,9 @@ namespace ApocalypterSteeringMod.Runtime
             {
                 RestoreLayout(b.Layout);
             }
+            // A field the game changed while we were applied keeps the game's value.
+            AdoptDrivetrainDrift(b, r.Vc.powertrain.engine, r.Vc.powertrain.transmission);
+            b.Written = false;
             if (b.HasEngine && r.Vc.powertrain.engine != null)
             {
                 EngineComponent engine = r.Vc.powertrain.engine;
@@ -618,6 +624,51 @@ namespace ApocalypterSteeringMod.Runtime
                     diff.stiffness = b.DiffStiff[i];
                 }
             }
+        }
+
+        /// <summary>Fields changed by someone else since our last write become the stock (see Drift).</summary>
+        private static void AdoptDrivetrainDrift(DrivetrainData b, EngineComponent engine, TransmissionComponent transmission)
+        {
+            if (!b.Written)
+            {
+                return;
+            }
+            if (b.HasEngine && engine != null)
+            {
+                b.MaxPower = Drift.Adopt(b.MaxPower, b.LastMaxPower, engine.maxPower);
+                b.RevLimiterRPM = Drift.Adopt(b.RevLimiterRPM, b.LastRevLimiterRPM, engine.revLimiterRPM);
+                b.LossPercent = Drift.Adopt(b.LossPercent, b.LastLossPercent, engine.engineLossPercent);
+                if (engine.forcedInduction != null)
+                {
+                    b.BoostGain = Drift.Adopt(b.BoostGain, b.LastBoostGain, engine.forcedInduction.powerGainMultiplier);
+                }
+            }
+            if (b.HasTransmission && transmission != null)
+            {
+                b.FinalGearRatio = Drift.Adopt(b.FinalGearRatio, b.LastFinalGearRatio, transmission.finalGearRatio);
+                b.UpshiftRPM = Drift.Adopt(b.UpshiftRPM, b.LastUpshiftRPM, transmission.UpshiftRPM);
+                b.DownshiftRPM = Drift.Adopt(b.DownshiftRPM, b.LastDownshiftRPM, transmission.DownshiftRPM);
+                b.ShiftDuration = Drift.Adopt(b.ShiftDuration, b.LastShiftDuration, transmission.shiftDuration);
+            }
+        }
+
+        private static void RememberDrivetrainWrites(DrivetrainData b, EngineComponent engine, TransmissionComponent transmission)
+        {
+            if (b.HasEngine && engine != null)
+            {
+                b.LastMaxPower = engine.maxPower;
+                b.LastRevLimiterRPM = engine.revLimiterRPM;
+                b.LastLossPercent = engine.engineLossPercent;
+                b.LastBoostGain = engine.forcedInduction != null ? engine.forcedInduction.powerGainMultiplier : 0f;
+            }
+            if (b.HasTransmission && transmission != null)
+            {
+                b.LastFinalGearRatio = transmission.finalGearRatio;
+                b.LastUpshiftRPM = transmission.UpshiftRPM;
+                b.LastDownshiftRPM = transmission.DownshiftRPM;
+                b.LastShiftDuration = transmission.shiftDuration;
+            }
+            b.Written = true;
         }
 
         private static DifferentialComponent.Type ToNwhType(DiffMode mode)

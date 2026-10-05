@@ -28,6 +28,7 @@ namespace ApocalypterSteeringMod.Settings
         public float ShiftDurationScale = 1f;  // x transmission.shiftDuration
         public DiffMode DiffFrontMode = DiffMode.Stock;
         public DiffMode DiffRearMode = DiffMode.Stock;
+        public DiffMode DiffCenterMode = DiffMode.Stock;   // 0.7.0: centre (AWD) / transfer diffs
         public float DiffStiffnessScale = 1f;  // x differential.stiffness
         public float DiffBiasScale = 1f;       // x differential.biasAB (clamped 0.05..0.95)
 
@@ -48,6 +49,7 @@ namespace ApocalypterSteeringMod.Settings
             ShiftDurationScale = o.ShiftDurationScale;
             DiffFrontMode = o.DiffFrontMode;
             DiffRearMode = o.DiffRearMode;
+            DiffCenterMode = o.DiffCenterMode;
             DiffStiffnessScale = o.DiffStiffnessScale;
             DiffBiasScale = o.DiffBiasScale;
         }
