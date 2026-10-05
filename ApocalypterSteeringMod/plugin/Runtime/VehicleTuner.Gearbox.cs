@@ -429,6 +429,10 @@ namespace ApocalypterSteeringMod.Runtime
             }
             if (d.Hooked && t.shiftDelegate == d.Shifter.Delegate)
             {
+                // Already ours. 0.7.6: the game may have changed the type under us without a
+                // delegate reassignment (both flips guarded) — keep the mode decision live.
+                d.Shifter.StockType = t.transmissionType;
+                d.Type = t.transmissionType;
                 return;
             }
             TransmissionComponent.Shift current = t.shiftDelegate;
@@ -473,13 +477,23 @@ namespace ApocalypterSteeringMod.Runtime
 
         /// <summary>
         /// If this transmission is controlled, put its controller delegate back (called from
-        /// the Harmony postfix after NWH re-assigns its own; also testable directly).
+        /// the Harmony postfix after NWH re-assigns its own; also testable directly). 0.7.6:
+        /// when NWH has just assigned a fresh delegate for a changed type, adopt BOTH — the
+        /// delegate and the type — so a controller hooked on the prefab default (Manual) learns
+        /// the game's real type (Automatic) the tick the game writes it. Without this, a
+        /// Stock-mode controller on a Manual-captured box stays manual forever and throttle
+        /// from neutral does nothing (the load bug).
         /// </summary>
         public static void RehookIfControlled(TransmissionComponent t)
         {
             ShiftController c;
             if (t != null && Controlled.TryGetValue(t, out c) && c != null && t.shiftDelegate != c.Delegate)
             {
+                if (t.shiftDelegate != null && t.shiftDelegate.Target is TransmissionComponent)
+                {
+                    c.StockDelegate = t.shiftDelegate;
+                    c.StockType = t.transmissionType;
+                }
                 t.shiftDelegate = c.Delegate;
             }
         }

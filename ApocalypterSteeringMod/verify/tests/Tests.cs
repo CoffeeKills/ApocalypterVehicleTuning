@@ -3076,7 +3076,11 @@ public static class Tests
         Check(guarded, "with the guard, the controller is back in the same tick and the box shifts one gear at a time (" + tt.Gear + ")");
 
         // 6. Manual-type car, mode Stock: the vehicle's own ManualShift does the shifting.
+        // (Set the type back to Manual: 5b's flips left it Automatic, and the mode follows
+        // the live type since 0.7.6.)
         GearboxSettings.Enabled = true;
+        tt.transmissionType = TransmissionComponent.TransmissionShiftType.Manual;
+        tt.SimulateForwardStep();
         GearboxSettings.BeginEdit().TransmissionMode = GearboxMode.Stock;
         GearboxSettings.Shown.GearCount = 12;
         tuner.ApplyLive();
@@ -3196,6 +3200,45 @@ public static class Tests
         Check(loadMax == 12 && loadRev == 0, "the load-path box drives up through all 12 gears, never back (" + loadMax + " reached, " + loadRev + " reversals)");
         GearboxSettings.Enabled = false;
         tL.ApplyLive();
+        TransmissionComponent.AfterDelegateReassign = null;
+        ResetAllCategories();
+
+        // 13. 0.7.6: the load bug. At load the tuner hooks before the game's CheckTag has
+        // written the real transmission type, so it captures the prefab default (Manual) on a
+        // Stock-mode preset — the controller follows the vehicle's type, runs the game's own
+        // ManualShift, and throttle from neutral does nothing forever (the user report: wheels
+        // dead after loading with a custom gearbox, fine when enabled in-session). The guard
+        // must adopt the game's fresh delegate AND type on the flip.
+        UnityEngine.Object.Registry.Clear();
+        VehicleController mv = MakeShiftCar(TransmissionComponent.TransmissionShiftType.Manual, "ManualPrefab");
+        TransmissionComponent mt = mv.powertrain.transmission;
+        UnityEngine.Object.Registry.Add(mv);
+        GearboxSettings.Enabled = true;
+        GearboxSettings.SetPresetByName("Truck");
+        var tM = new VehicleTuner();
+        tM.ReapplyNow();                                        // hooks on the prefab default: Manual
+        Check(!mt.HasNwhDelegate && mt.transmissionType == TransmissionComponent.TransmissionShiftType.Manual,
+            "load: hooked while the prefab type is still Manual");
+        mv.input.Throttle = 0.8f;
+        mt.SimulateForwardStep();
+        bool stuckManual = mt.Gear == 0;
+        TransmissionComponent.AfterDelegateReassign = VehicleTuner.RehookIfControlled;
+        mt.transmissionType = TransmissionComponent.TransmissionShiftType.Automatic;   // the game's setting FSM
+        mt.SimulateForwardStep();
+        TransmissionComponent.AfterDelegateReassign = null;
+        Check(stuckManual, "before the game's type write, throttle from neutral stays in neutral (the manual path)");
+        Check(!mt.HasNwhDelegate, "after the flip the guard still owns the box");
+        mv.input.Throttle = 0.8f;
+        mt.SimulateForwardStep();
+        bool engaged = mt.Gear == 1;
+        var fixedSeq = new List<int>();
+        int fixedRev = Ramp(mv, 0f, 60f, 0.02f, 0.8f, fixedSeq);
+        int fixedMax = 0;
+        foreach (int g in fixedSeq) if (g > fixedMax) fixedMax = g;
+        Check(engaged, "with the adopted type, throttle from neutral engages 1st (" + mt.Gear + ")");
+        Check(fixedMax == 12 && fixedRev == 0, "and the box drives up through all 12 gears (" + fixedMax + ", " + fixedRev + " reversals)");
+        GearboxSettings.Enabled = false;
+        tM.ApplyLive();
         TransmissionComponent.AfterDelegateReassign = null;
         ResetAllCategories();
         tA.ApplyLive();

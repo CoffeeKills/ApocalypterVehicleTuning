@@ -1,4 +1,4 @@
-Apocalypter Vehicle Tuning 0.7.5-alpha
+Apocalypter Vehicle Tuning 0.7.6-alpha
 ======================================
 
 An in-game tuning panel for every vehicle in Apocalypter: steering,
@@ -57,6 +57,7 @@ NOTES
   target. If the strip ever shows the wrong car, set Telemetry ->
   DebugPick = true in the mod config and send the "Telemetry pick:"
   lines from BepInEx\LogOutput.log.
+- New in 0.7.6: loading with a custom gearbox enabled is FIXED - the controller was hooking before the game wrote its real transmission type and followed the stale prefab default. It now adopts the game's type and delegate the tick they change.
 - New in 0.7.5: loading the game with a custom gearbox enabled is being chased down - the mod now logs every shift hook and warns if a controller stays in neutral with the throttle held (one repro log will name the culprit).
 - New in 0.7.4: the per-tab Reset buttons now match the reorganized tabs (the merged tabs reset both of their categories), and the telemetry pin feature is replaced by a readout list (speed, RPM, gear, front/rear slip, lateral/longitudinal g, steering angle, throttle, brakes - pick them in Settings > "Strip contents").
 - New in 0.7.3: 12-gear gearboxes no longer get grabbed by the game's own skipping automatic (the launch-from-gear-8 bug; the mod's shift controller is re-installed the same tick the game flips transmission type).
