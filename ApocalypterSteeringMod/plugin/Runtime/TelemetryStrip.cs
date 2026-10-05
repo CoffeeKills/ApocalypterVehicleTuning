@@ -15,9 +15,11 @@ namespace ApocalypterSteeringMod.Runtime
     /// visible while the panel is open). Updates at 4 Hz (allocations are fine at that rate;
     /// the physics hot paths stay allocation-free).
     ///
-    /// 0.7.0 (FEATURES §4): pinned slider values (TelemetryPins) get their own cells below the
-    /// four fixed ones, two per 26 px row; the strip grows downward from its corner (upward
-    /// for a bottom corner, the pivot is the corner). Geometry is the pure CellBand/StripHeight.
+    /// 0.7.0 (FEATURES §4): pinned slider values (TelemetryPins) get their own cells stacked
+    /// away from the fixed four, two per 26 px row; the strip grows from its corner (the fixed
+    /// row hugs the corner). Geometry is the pure CellBand/StripHeight/CellAnchoredPosition —
+    /// every cell is anchored to the strip's own corner, so the rows can never overlap at any
+    /// corner (0.7.2 fix for the pin row overlapping the main strip).
     /// </summary>
     public sealed class TelemetryStrip : MonoBehaviour
     {
@@ -130,7 +132,7 @@ namespace ApocalypterSteeringMod.Runtime
                 for (int i = 0; i < pins.Count; i++)
                 {
                     RectTransform cell = UiKit.Make("Pin" + i, _strip);
-                    PanelLayout.Apply(cell, Inset(CellBand(FixedCells + i)));
+                    PlaceCell(cell, FixedCells + i, 8f, 16f);
                     _pinCellObjects.Add(cell.gameObject);
                     _pinLabels.Add(UiKit.Label(cell, TelemetryPins.Label(pins[i]), 13, UiKit.TextMuted, TextAnchor.MiddleLeft));
                     _pinCells.Add(UiKit.Label(cell, "", 13, UiKit.TextMain, TextAnchor.MiddleRight, FontStyle.Bold));
@@ -146,9 +148,35 @@ namespace ApocalypterSteeringMod.Runtime
             }
         }
 
-        private static PanelLayout.Band Inset(PanelLayout.Band b)
+        /// <summary>
+        /// A cell's anchored position in the strip's corner space, for any corner: Band.Top is
+        /// the distance from the strip's TOP edge, so a top-corner strip places the cell at
+        /// y = -Top below that edge, and a bottom-corner strip (which grows upward) places the
+        /// cell's BOTTOM edge at (StripHeight - Top - H) from the strip's bottom. Pure
+        /// (harness-tested): for every corner the pin rows sit strictly further from the
+        /// corner than the fixed row, so they can never overlap it.
+        /// </summary>
+        public static Vector2 CellAnchoredPosition(TelemetryCorner corner, int index, float stripHeight)
         {
-            return new PanelLayout.Band(b.X + 8f, b.Top, b.W - 16f, b.H);
+            PanelLayout.Band b = CellBand(index);
+            bool top = CornerAnchor(corner).y > 0.5f;
+            return top
+                ? new Vector2(b.X, -b.Top)
+                : new Vector2(b.X, stripHeight - b.Top - b.H);
+        }
+
+        /// <summary>Place one cell at its corner-mapped position (anchored to the strip's own corner).</summary>
+        private void PlaceCell(RectTransform cell, int index, float insetX, float insetW)
+        {
+            PanelLayout.Band b = CellBand(index);
+            b = new PanelLayout.Band(b.X + insetX, b.Top, b.W - insetW, b.H);
+            float topY = CornerAnchor(UiSettings.TelemetryPosition).y;
+            cell.anchorMin = new Vector2(0f, topY);
+            cell.anchorMax = new Vector2(0f, topY);
+            cell.pivot = new Vector2(0f, topY);
+            cell.sizeDelta = new Vector2(b.W, b.H);
+            Vector2 p = CellAnchoredPosition(UiSettings.TelemetryPosition, index, StripHeight(TelemetryPins.Count));
+            cell.anchoredPosition = new Vector2(p.x + insetX, p.y);
         }
 
         private bool Build()
@@ -174,8 +202,7 @@ namespace ApocalypterSteeringMod.Runtime
                 for (int i = 0; i < _cells.Length; i++)
                 {
                     RectTransform cell = UiKit.Make("Cell" + i, _strip);
-                    PanelLayout.Band b = CellBand(i);
-                    PanelLayout.Apply(cell, new PanelLayout.Band(b.X + 6f, b.Top, b.W - 12f, b.H));
+                    PlaceCell(cell, i, 6f, 12f);
                     _cells[i] = UiKit.Label(cell, "", 15, UiKit.TextMain, TextAnchor.MiddleCenter, FontStyle.Bold);
                 }
                 return true;

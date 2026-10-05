@@ -3306,6 +3306,35 @@ public static class Tests
         }
         Check(geo, "strip grows by one 26 px row per two pins; every cell inside the strip, none overlapping");
 
+        // 0.7.2: the corner mapping — at every corner and pin count the pin rows sit strictly
+        // further from the corner than the fixed row (the fix for the pin row overlapping the
+        // main strip on real screens).
+        bool cornerMap = true;
+        foreach (TelemetryCorner c in new[] { TelemetryCorner.TopLeft, TelemetryCorner.TopRight, TelemetryCorner.BottomLeft, TelemetryCorner.BottomRight })
+        {
+            bool top = TelemetryStrip.CornerAnchor(c).y > 0.5f;
+            for (int pins = 1; pins <= TelemetryPins.MaxPins && cornerMap; pins++)
+            {
+                float h = TelemetryStrip.StripHeight(pins);
+                for (int i = 0; i < 4 && cornerMap; i++)
+                {
+                    PanelLayout.Band bi = TelemetryStrip.CellBand(i);
+                    Vector2 pi = TelemetryStrip.CellAnchoredPosition(c, i, h);
+                    float fixedNear = top ? -pi.y : pi.y;
+                    float fixedFar = fixedNear + bi.H;
+                    for (int j = 4; j < 4 + pins && cornerMap; j++)
+                    {
+                        PanelLayout.Band bj = TelemetryStrip.CellBand(j);
+                        Vector2 pj = TelemetryStrip.CellAnchoredPosition(c, j, h);
+                        float pinNear = top ? -pj.y : pj.y;
+                        float pinFar = pinNear + bj.H;
+                        cornerMap &= top ? pinNear >= fixedFar : pinFar <= fixedNear;
+                    }
+                }
+            }
+        }
+        Check(cornerMap, "corner mapping: pin rows never overlap the fixed row, at any corner and pin count");
+
         // Config round trip.
         string path = Path.Combine(dir, "pins.cfg");
         ModConfig.Load(new ConfigFile(path, true));

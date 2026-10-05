@@ -1,4 +1,4 @@
-# Apocalypter Vehicle Tuning (v0.7.1-alpha)
+# Apocalypter Vehicle Tuning (v0.7.2-alpha)
 
 A BepInEx mod for **Apocalypter** (SawyerK Games, Unity 2020.3.49, BepInEx 5.4.23.5 + Harmony 2) that adds a full vehicle-tuning panel: steering, suspension, aero, brakes, tire grip, drivetrain, stability assists (ABS/TCS), wheel alignment and gearbox, all applied live to every vehicle in the game. Since 0.6.0 the panel docks to the right edge and you can keep driving while it is open.
 
@@ -215,6 +215,10 @@ All §2 facts are preserved. The hidden-runner survival architecture is unchange
 - **New logic tests (135):** audit regressions; alignment (roles, camber/caster/toe incl. L/R toe mirroring, Z preserved, outward PosX, x = 0 clamp, gates, solid axle + CamberController skip, rescan re-apply, OFF→ON baseline refresh, exact restore); gearbox (layout, continuation, add/truncate, ban-proof re-shift, deferred shrink under an in-flight shift, mid-shift restore + trim, clutch types and clamps, mode, CVT refusal, no Drivetrain field touched); blocker routing (whitelist, fork routing, OnEnter decisions, live instances, freeze save/restore incl. pause-menu 0); codec (byte-identical round trip for all nine books, header, garbage, clamping, unknown/missing keys, BasedOn resolution, status strings); config (defaults, Limits ↔ `AcceptableValueRange` for widened/unwidened/new keys, 0.5.0 file loads as is, out-of-range clamping, name-only parsing, round trip); layout at 400/460/800 (no overlaps across slider/option/master rows, tabs, curve editors, gear graph; wide = 0.5.0 geometry exactly; effective width/scale factor); telemetry formatting/sampling; two-click arm; all-off.
 - **Negative control** (against the untouched 0.5.0 plugin, compiled against the new stubs): the 9 new checks that compile against 0.5.0 give 5 failures (the four audit bugs: destroyed-vehicle writes ×2, latched-handbrake ABS, TCS mid-shift, external edit reverting panel edits) and 4 passes (their positive controls). The other 126 new checks exercise 0.6.0 API and do not compile against 0.5.0. `run.sh` is unchanged.
 - **gamecode/ gap:** `PowertrainComponent` (base of Engine/Clutch/Transmission/Wheel/Differential, declares `OutputRPM`) is referenced through `ClutchComponent.cs:10/95/108` but its file is not in the bundle. Please copy `PowertrainComponent.cs` from the decompiled tree into `gamecode/`. The stub mirrors only the members the mod uses.
+
+## Changes in 0.7.2-alpha
+
+- **Telemetry pins render fix** (user report: the pin row overlapped the main strip at any corner). Every strip cell is now anchored to the strip's own corner with a pure corner mapping (`CellAnchoredPosition`), so the fixed row hugs the screen corner and pin rows extend inward — they cannot overlap by construction. Harness adds a corner×pin-count sweep (611 tests green).
 
 ## Changes in 0.7.1-alpha
 
