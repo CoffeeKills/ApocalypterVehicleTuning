@@ -1,8 +1,8 @@
-# Apocalypter Vehicle Tuning (v0.7.6-alpha)
+# Apocalypter Vehicle Tuning (v0.9.0-alpha)
 
 A BepInEx mod for **Apocalypter** (SawyerK Games, Unity 2020.3.49, BepInEx 5.4.23.5 + Harmony 2) that adds a full vehicle-tuning panel: steering, suspension, aero, brakes, tire grip, drivetrain, stability assists (ABS/TCS), wheel alignment and gearbox, all applied live to every vehicle in the game. Since 0.6.0 the panel docks to the right edge and you can keep driving while it is open.
 
-The repo contains the complete mod source (`plugin/`) plus a self-contained test harness (`verify/` — Unity/NWH compile stubs and a 504-test suite, needs only a .NET SDK 8+; `verify/refs/` carries the BepInEx 5 core DLLs it needs). The `gamecode/` excerpts used for audits are kept out of the public repo.
+The repo contains the complete mod source (`plugin/`) plus a self-contained test harness (`verify/` — Unity/NWH compile stubs and a 646-test suite (627 logic + 19 steering-prefix), needs only a .NET SDK 8+; `verify/refs/` carries the BepInEx 5 core DLLs it needs). The `gamecode/` excerpts used for audits are kept out of the public repo.
 
 ## Changes in 0.2.0-alpha
 
@@ -215,6 +215,46 @@ All §2 facts are preserved. The hidden-runner survival architecture is unchange
 - **New logic tests (135):** audit regressions; alignment (roles, camber/caster/toe incl. L/R toe mirroring, Z preserved, outward PosX, x = 0 clamp, gates, solid axle + CamberController skip, rescan re-apply, OFF→ON baseline refresh, exact restore); gearbox (layout, continuation, add/truncate, ban-proof re-shift, deferred shrink under an in-flight shift, mid-shift restore + trim, clutch types and clamps, mode, CVT refusal, no Drivetrain field touched); blocker routing (whitelist, fork routing, OnEnter decisions, live instances, freeze save/restore incl. pause-menu 0); codec (byte-identical round trip for all nine books, header, garbage, clamping, unknown/missing keys, BasedOn resolution, status strings); config (defaults, Limits ↔ `AcceptableValueRange` for widened/unwidened/new keys, 0.5.0 file loads as is, out-of-range clamping, name-only parsing, round trip); layout at 400/460/800 (no overlaps across slider/option/master rows, tabs, curve editors, gear graph; wide = 0.5.0 geometry exactly; effective width/scale factor); telemetry formatting/sampling; two-click arm; all-off.
 - **Negative control** (against the untouched 0.5.0 plugin, compiled against the new stubs): the 9 new checks that compile against 0.5.0 give 5 failures (the four audit bugs: destroyed-vehicle writes ×2, latched-handbrake ABS, TCS mid-shift, external edit reverting panel edits) and 4 passes (their positive controls). The other 126 new checks exercise 0.6.0 API and do not compile against 0.5.0. `run.sh` is unchanged.
 - **gamecode/ gap:** `PowertrainComponent` (base of Engine/Clutch/Transmission/Wheel/Differential, declares `OutputRPM`) is referenced through `ClutchComponent.cs:10/95/108` but its file is not in the bundle. Please copy `PowertrainComponent.cs` from the decompiled tree into `gamecode/`. The stub mirrors only the members the mod uses.
+
+## Changes in 0.9.0-alpha
+
+- **Per-vehicle tunes** — each vehicle keeps its own tune per category. `PresetBook<T>` grows a per-vehicle store (`HasVehicle/ForVehicle/SaveVehicle/ImportVehicle/RemoveVehicle/ClearVehicles/VehicleNames/VehicleCopy`), and every apply path now picks `Book.ForVehicle(vehicle)`: a vehicle with a saved tune uses it (in any apply-to mode), everyone else keeps the global Active preset.
+- **`[PerVehicle] Tunes` config blob** — one line per tune, `VehicleName|Category|code`, where `code` is a PresetCodec AVT1 line (the same format as the panel's copy/paste footer). It loads with a clear-and-reimport inside `PushAllToRuntime()` (idempotent — reloading/re-importing never doubles tunes) and saves from `MirrorRuntimeToEntries()`; the `_perVehicleTunes` entry is wired so external edits (Apocasetter) re-apply live.
+- **BasedOn survives the round trip**: `SerializeVehicle` exports `copy.BasedOn`; `SaveVehicle` records the origin (a built-in records its own name, Custom keeps its BasedOn, the identity records ""); import resolves origins via `PresetCodec.ResolveBuiltIn` (unresolvable falls to the Custom slot).
+- **BepInEx 5 multi-line semantics (harness-pinned)**: real `\n` in the blob is escaped to a literal two-char `\n` on save and un-escaped on load (round-trip safe); a hand-written multi-line value truncates to its first line. Treat the entry as panel-managed — don't hand-edit it.
+- **`[General] ResetOnSaveSwitch` default flipped false → true**: fresh configs now turn every category off when a different save loads (0.8.0's feature, opt-out from 0.9.0). Existing config files keep their stored value — only unbound keys pick up the new default.
+- **Known gaps (documented, not bugs)**: the panel has no per-vehicle save/remove UI yet (`SettingsPanel.cs` is unmodified; the blob is config-level), and `ShiftController` still decides shifts from the global `GearboxSettings.ActivePreset` while gearbox apply picks per-vehicle — a vehicle's own tune changes the box, but shift points stay global (a decision for a later version).
+- **Harness**: 21 new checks — blob round-trip incl. escaping, per-vehicle pick, BasedOn preservation, idempotent re-import, live external edit. Suite: **646 tests (627 logic + 19 prefix), all passing.**
+
+### Config keys and migration
+
+- Added: `[PerVehicle] Tunes` (multi-line blob). Default-changed: `[General] ResetOnSaveSwitch` false → true (see above). Nothing renamed or removed.
+- **No migrations.** A 0.8.0 cfg loads as is; every key and value is kept.
+
+### Not changed
+
+All §2 facts are preserved. No new writes to the vehicle or the game's save data; BepInEx config remains the only persistence; the steering prefix is unchanged; hot paths stay allocation-free (the per-vehicle lookup is a dictionary read behind the same guards).
+
+## Changes in 0.8.0-alpha
+
+- **Max steering angle slider** — `[Steering.Custom] MaxSteerAngle` (0–70°, default 0 = each vehicle's own lock). The prefix uses it as the cap: `maxSteer = preset.MaxSteerAngle > 0.1f ? preset.MaxSteerAngle : __instance.maximumSteerAngle`, and the override feeds the whole pipeline (curve evaluation, linearity, traction-clamp bounds, rate limiting), so the clamp never binds beyond it. Raise it for drift-style extra angle.
+- **Save tracking** — new `Game/SaveTracker.cs` detects the loaded save slot (newest `SaveGameN.es3` in the save dir; pure and harness-tested) and logs it; `[General] LastSave`/`LastSaveStamp` are tracked automatically. `ModConfig.NoteLoadedSave(name, stamp)` turns every category off when a different save loads, gated by `[General] ResetOnSaveSwitch` (default **false** in 0.8.0 — flipped in 0.9.0), so an old save's serialized state can't fight the config.
+- **Harness**: 7 new checks (one new prefix test proves the raised cap on the real patch path; SaveTracker's newest-save pick is pure-tested). Suite: **626 tests (607 logic + 19 prefix), all passing.**
+
+### Config keys and migration
+
+- Added: `[Steering.Custom] MaxSteerAngle` · `[General] ResetOnSaveSwitch, LastSave, LastSaveStamp` (the last two tracked automatically). Additions only — nothing renamed, removed or default-changed (in 0.8.0).
+- **No migrations.**
+
+### Not changed
+
+All §2 facts are preserved. The prefix's targets and guards are unchanged (the cap override is a local in the same method); `MaxSteerAngle = 0` reproduces 0.7.x exactly. No new writes to the vehicle or the game's save data.
+
+## Changes in 0.7.7-alpha
+
+- **Quiet release logging** — the shift-hook diagnostic added in 0.7.5 is now behind `[Gearbox] DebugHooks` (default **off**); the stuck-neutral warning stays (it only fires in a genuinely broken state and names it). No behaviour change otherwise.
+- Config: adds `[Gearbox] DebugHooks` — additions only, no migrations.
+- Suite: **619 tests (601 logic + 18 prefix), all passing.**
 
 ## Changes in 0.7.6-alpha
 
@@ -565,11 +605,11 @@ Layout = gearbox -> transfer; transfer: Open split=0.4 -> front, rear; front: Op
 - `gamecode/PowertrainComponent.cs` is now in the bundle (0.6.0 noted it was missing); the stub follows it.
 
 ### Reviewed, not changed
-- `docs/crash-2026-10-04.md` (native crash during a save load, mod inert): read; its two hardening items are part of the 0.7.0 spec and not done in this pass. The layout adds one more read-only capture step at first sight of a vehicle and no writes while the category is off.
+- `docs/crash-2026-10-04.md` (native crash during a save load, mod inert): read; its two hardening items are part of the 0.7.0 spec and not done in this pass (both completed by the end of the 0.7.0 round — see FEATURES.md status). The layout adds one more read-only capture step at first sight of a vehicle and no writes while the category is off.
 
 ## 1. What the mod does
 
-Nine tuning categories (plus a Panel tab for the panel itself), each with: a master ON/OFF switch (all default OFF — every category is opt-in), a row of presets, and labelled sliders with live values, "changed" highlight, per-slider Reset and plain-language hints. Moving any slider while a built-in preset is active copies that preset into a "Custom (Base)" slot (BasedOn tracked) so presets are never mutated. Everything applies live; settings persist in a BepInEx config file; panel opens via F7 or a "Vehicle Tuning" button cloned into the game's menus, docked right; by default the game keeps running (driving input live), `[UI] FreezeWhileOpen` restores the old modal pause. A click-through telemetry strip shows speed/RPM/gear/front slip while driving, plus any slider values pinned to it (0.7.0).
+Nine tuning categories (plus a Panel tab for the panel itself), each with: a master ON/OFF switch (all default OFF — every category is opt-in), a row of presets, and labelled sliders with live values, "changed" highlight, per-slider Reset and plain-language hints. Moving any slider while a built-in preset is active copies that preset into a "Custom (Base)" slot (BasedOn tracked) so presets are never mutated. Everything applies live; settings persist in a BepInEx config file; panel opens via F7 or a "Vehicle Tuning" button cloned into the game's menus, docked right; by default the game keeps running (driving input live), `[UI] FreezeWhileOpen` restores the old modal pause. A click-through telemetry strip shows speed/RPM/gear/front slip while driving, plus a configurable readout list (0.7.4).
 
 | Category | Model | Applied via |
 |---|---|---|
@@ -610,10 +650,10 @@ These drove several unusual design decisions; treat them as load-bearing when re
 
 ```
 Plugin.cs                       Slim entry: config load → ES3 read-only import → Harmony patches (steering + InputBlocker) → hidden runner GO; sceneLoaded → recreate runner.
-PluginInfo.cs                   GUID "dev.apocalypter.tractionsteering" (unchanged for config continuity), name, version "0.7.0" (numeric-only: BepInEx 5 skips "-alpha" tags).
-Settings/PresetBook.cs          Generic preset semantics shared by all 7 categories: ITunablePreset + PresetBook<T> (Identity/Custom/Defaults/NotFound, SetByName with legacy-name mapping, BeginEdit copy-to-Custom with BasedOn, Reference for per-slider Reset, ResetCustom).
+PluginInfo.cs                   GUID "dev.apocalypter.tractionsteering" (unchanged for config continuity), name, version "0.9.0" (numeric-only: BepInEx 5 skips "-alpha" tags).
+Settings/PresetBook.cs          Generic preset semantics shared by all 7 categories: ITunablePreset + PresetBook<T> (Identity/Custom/Defaults/NotFound, SetByName with legacy-name mapping, BeginEdit copy-to-Custom with BasedOn, Reference for per-slider Reset, ResetCustom). 0.9.0: per-vehicle store (HasVehicle/ForVehicle/SaveVehicle/ImportVehicle/RemoveVehicle/ClearVehicles/VehicleNames) — every apply path picks ForVehicle.
 Settings/EditableCurve.cs       Piecewise-linear curve over [0,1]², 2-8 points: allocation-free Evaluate (prefix hot path), add/move/remove, Clone, "x:y;x:y" (de)serialization with validation.
-Settings/SteeringPreset.cs      6 presets (Vanilla/GTA/Euro Truck/Sim-Race/Drift/Custom) + Defaults; UseVehicleCurve + LockCurve + ReturnCurve; v2.0.0-behavior defaults; Custom mutated by UI; RestoreBaseCurve() re-attaches the BasedOn preset's curves (config-parse fallback).
+Settings/SteeringPreset.cs      6 presets (Vanilla/GTA/Euro Truck/Sim-Race/Drift/Custom) + Defaults; UseVehicleCurve + LockCurve + ReturnCurve; v2.0.0-behavior defaults; Custom mutated by UI; RestoreBaseCurve() re-attaches the BasedOn preset's curves (config-parse fallback). 0.8.0: MaxSteerAngle override (0 = vehicle's own lock, ≤70).
 Settings/SteeringSettings.cs    Book delegate; Enabled default FALSE (opt-in); MatchGameSteeringSpeed; GameSteeringSpeedFactor.
 Settings/SuspensionPreset.cs    5 presets + Custom as multipliers on stock (Stock/Comfort/Sport/Off-road/Race); the preset factor IS the slider value.
 Settings/SuspensionSettings.cs  Book delegate (legacy "Street"→"Stock"); SplitFrontRear; LinkRearToFront (BeginEdit first); factor accessors Spring(front) etc.
@@ -625,26 +665,27 @@ Settings/AssistsPreset.cs       AbsEnabled/AbsSlipThreshold/AbsCutoffSpeed/AbsCu
 Settings/AlignmentPreset.cs     (0.6.0) WheelRole; Camber per wheel, Caster/Toe per axle, PosX(outward)/PosY/PosZ per wheel — offsets in deg/cm; presets Stock/Street/Sport/Race/Off-road/Stance/Custom.
 Settings/AlignmentSettings.cs   (0.6.0) Book delegate; Enabled/PerWheel; axle helpers; LinkSides (fork-first).
 Settings/GearboxPreset.cs       (0.6.0) GearCount, GearScale[12], clutch grip/range/RPM offset, GearboxMode; ClutchTypes table (Stock/Street/Sport/Race); presets Stock/Comfort/Sport/Race/Truck/Custom. 0.7.0: SpreadRatios, ShiftUpFactor/ShiftDownFactor/KickdownScale, NeedsShiftController.
-Settings/TelemetryPins.cs       (0.7.0) Pin registry: "Category.ConfigKey" keys (PresetCodec's numeric fields), toggle/cap 12, load (drop unknown/dupes)/serialize, value of the shown preset, labels, units.
+Settings/TelemetryCells.cs      (0.7.4) Readout-list registry: ";'-separated [Telemetry] Cells names (Speed, Engine RPM, Gear, Front/Rear slip, Lateral/Longitudinal G, Steering angle, Throttle, Brakes; up to 8), unknown dropped, labels/units/sample accessors. Replaces the 0.7.0 pin registry.
 Settings/GearboxSettings.cs     (0.6.0) Book delegate; PerGearScale; ClutchTypeIndex.
 Settings/DrivetrainLayout.cs    (0.6.2) Layout text parser + tree validator (pure, NWH-free).
 Settings/UiSettings.cs          (0.6.0) Panel (freeze, scale, width, alpha, last tab) + telemetry preferences; name-only corner parse; tab clamp.
-Settings/PresetCodec.cs         (0.6.0) Pure static preset export/import ("AVT1|…"), per-category key tables, clamping, Custom-only import.
+Settings/PresetCodec.cs         (0.6.0) Pure static preset export/import ("AVT1|…"), per-category key tables, clamping, Custom-only import. 0.9.0: SerializeVehicle/ResolveBuiltIn for the per-vehicle blob.
 Settings/Limits.cs              Single source of truth for every slider/config range.
 Game/GameSettingsReader.cs      Read-only ES3 import of steeringspeed/smoothinput/normalizeinput; re-read on panel open.
-Persistence/ModConfig.cs        BepInEx ConfigFile binding for all categories; AcceptableValueRange clamping; SettingChanged → runtime push + event; one write per save; v3.1→v3.2, v0.3.0 and v0.4.0 migrations (see §5); [General] Apocasetter opt-in key.
-Patching/TractionEdgeSteeringPatch.cs  The steering prefix (allocation-free; target/guards unchanged since v3.0; Vanilla preset = early return true).
-Runtime/VehicleTuner.cs         The multi-system tuner (replaces SuspensionApplier): 2 s unscaled scans (FindObjectsOfType), per-vehicle baseline capture (one pass, per-system null guards, mean-wheel-Z axle detection, TyreWear flag), per-category baseline refresh on OFF→ON (0.5.0), per-category apply/restore with applied-flags, OnDestroy → RestoreAll, MeanBaseline readout API, TrackedVehicles.
+Game/SaveTracker.cs             (0.8.0) Detects the loaded save slot (newest SaveGameN.es3; pure, harness-tested); NoteLoadedSave(name, stamp) → every category off on a save switch when ResetOnSaveSwitch.
+Persistence/ModConfig.cs        BepInEx ConfigFile binding for all categories; AcceptableValueRange clamping; SettingChanged → runtime push + event; one write per save; v3.1→v3.2, v0.3.0 and v0.4.0 migrations (see §5); [General] Apocasetter opt-in key. 0.8.0: MaxSteerAngle, ResetOnSaveSwitch, LastSave(+Stamp). 0.9.0: [PerVehicle] Tunes blob (multi-line escape/unescape) + ResetOnSaveSwitch default true; _perVehicleTunes live external edits.
+Patching/TractionEdgeSteeringPatch.cs  The steering prefix (allocation-free; target/guards unchanged since v3.0; Vanilla preset = early return true). 0.8.0: MaxSteerAngle cap feeds the whole pipeline. 0.9.0: per-vehicle preset pick.
+Runtime/VehicleTuner.cs         The multi-system tuner (replaces SuspensionApplier): 2 s unscaled scans (FindObjectsOfType), per-vehicle baseline capture (one pass, per-system null guards, mean-wheel-Z axle detection, TyreWear flag), per-category baseline refresh on OFF→ON (0.5.0), per-category apply/restore with applied-flags, OnDestroy → RestoreAll, MeanBaseline readout API, TrackedVehicles. 0.9.0: apply paths pick Book.ForVehicle.
 Runtime/VehicleTuner.Systems.cs Suspension/Grip/Brakes/Drivetrain/Aero apply+restore. Aero: find module in vc.moduleManager.Components; onboard when absent AND the preset asks for more drag than stock (an onboarded module adds Cd × (DragScale − 1)); re-enable after restore; no downforce-point synthesis (Stock = exactly as shipped).
 Runtime/VehicleTuner.Assists.cs ABS/TCS delegate factory (allocated once per vehicle, reads live settings each tick) + registration/removal with flags.
 Runtime/VehicleTuner.Alignment.cs (0.6.0) camber/caster/toe/position apply+restore, gate handling, camber-lock skip, x=0 clamp, baseline refresh.
 Runtime/VehicleTuner.Layout.cs  (0.6.2) Custom drivetrain layout: stock-wiring capture (axles, sides, driven set, own wheel inertia), per-vehicle resolve, idempotent wiring with hash hygiene, wheel release, exact restore, stock-layout log text.
 Runtime/VehicleTuner.Gearbox.cs (0.6.0) gear capture/layout check/continuation (0.7.0: or progressive spread), ratio+count write with the Gear re-shift guard and in-flight-shift deferral, clutch (drift-aware), mid-shift restore + trim; 0.7.0 HookShifter/UnhookShifter.
-Runtime/ShiftController.cs      (0.7.0) The mod's own shifting: pure shift-point/DNR/manual math + a per-vehicle NWH shift delegate (reads the game's shift requests, ShiftInto, fault fallback, allocation-free).
+Runtime/ShiftController.cs      (0.7.0) The mod's own shifting: pure shift-point/DNR/manual math + a per-vehicle NWH shift delegate (reads the game's shift requests, ShiftInto, fault fallback, allocation-free). 0.9.0 known gap: shift points still come from the global GearboxSettings.ActivePreset while gearbox apply picks per-vehicle.
 Runtime/Drift.cs                (0.7.0) "Did the game change this field since our last write?" — adopt it as the new stock (drivetrain + clutch).
-Runtime/PanelLayout.cs          (0.6.0) Every panel size as a pure function of the width (wide / narrow stacked rows), scale factor, effective width, digit→tab. 0.7.0: tighter constants, font constants, pin band, tab rows, Arial width tables + FitFont.
+Runtime/PanelLayout.cs          (0.6.0) Every panel size as a pure function of the width (wide / narrow stacked rows), scale factor, effective width, digit→tab. 0.7.0: tighter constants, font constants, cell band, tab rows, Arial width tables + FitFont.
 Runtime/GearGraph.cs            (0.6.0) Gear-ratio bar graph row (sibling of CurveEditor): bars vs stock outlines, click selects, bar drag edits, other drags scroll.
-Runtime/TelemetryStrip.cs       (0.6.0) Click-through speed/RPM/gear/slip strip on the hidden runner, own canvas, 4 Hz. Shows FindDrivenVehicle(): live input → last driven → running engine → fastest → first (0.6.3). 0.7.0: pinned-value cells (pure CellBand/StripHeight).
+Runtime/TelemetryStrip.cs       (0.6.0) Click-through speed/RPM/gear/slip strip on the hidden runner, own canvas, 4 Hz. Shows FindDrivenVehicle(): live input → last driven → running engine → fastest → first (0.6.3). 0.7.4: readout-list cells (pure CellBand/StripHeight).
 Runtime/InputBlocker.cs        Two layers (0.6.0): InputController name whitelist (driving input stays live) + the PlayMaker class patch set (forks routed by name, OnEnter gated by everyFrame); SetInputBlocked / SetFreeze (see §2.8, §2.11).
 Runtime/SettingsPanelManager.cs On the hidden runner: hotkey/Esc/digit polling (dual input), menu-button injection (§2.7), panel lifecycle (live vs freeze), per-frame cursor freeing + selection clearing, EventSystem find-or-create, auto-save on close.
 Runtime/SettingsPanel.cs        The 8-tab docked panel (0.7.1: two merged tabs — Wheels = alignment + grip, Drivetrain = engine/diffs/gearbox/layout) (two-row tab strip, width-adaptive rows via Relayout, one Graphic per GO, mouse-only widgets, single refresher list, two-click per-tab reset-all and "Turn everything off", copy/paste preset footer, dim + click-outside close in Freeze mode only, absolute readouts).
@@ -659,15 +700,15 @@ gamecode/, PROMPT.md            Audit-bundle files, now kept in the tree (gameco
 
 ## 4. Settings model (summary — full data in the preset classes)
 
-- Steering knobs: `RateMultiplier` (× degreesPerSecondLimit) · `SmoothingScale` (× speedSensitiveSmoothingCurve) · `LinearityOverride`+`LinearityExponent` · `UseVehicleCurve` + `LockCurve` (editable lock-at-speed curve, y = fraction of max steer, evaluated at Speed/50) · `ReturnCurve` (editable return-to-center curve, y = fraction of the steer-in rate used while unwinding; flat 1 = symmetric, 0 at rest = holds the wheels) · `TractionClampEnabled` · `SlipAngleDeg` · `OppositeLockBoost`. Custom defaults reproduce the v2.0.0 feel.
-- Steering physics: front-axle slip geometry `frontSlip ≈ bodySlip + (a/v)·yawRate − steerAngle`; clamp to ±SlipAngleDeg yields opposite-lock freedom, into-slide suppression and plow prevention. Clamp bounds are limited to `maximumSteerAngle` BEFORE clamping (fixes the v3.0 inverted-bounds bug).
+- Steering knobs: `RateMultiplier` (× degreesPerSecondLimit) · `SmoothingScale` (× speedSensitiveSmoothingCurve) · `LinearityOverride`+`LinearityExponent` · `UseVehicleCurve` + `LockCurve` (editable lock-at-speed curve, y = fraction of max steer, evaluated at Speed/50) · `ReturnCurve` (editable return-to-center curve, y = fraction of the steer-in rate used while unwinding; flat 1 = symmetric, 0 at rest = holds the wheels) · `TractionClampEnabled` · `SlipAngleDeg` · `OppositeLockBoost` · `MaxSteerAngle` (0.8.0; 0 = the vehicle's own lock, up to 70°). Custom defaults reproduce the v2.0.0 feel.
+- Steering physics: front-axle slip geometry `frontSlip ≈ bodySlip + (a/v)·yawRate − steerAngle`; clamp to ±SlipAngleDeg yields opposite-lock freedom, into-slide suppression and plow prevention. Clamp bounds are limited to the effective max steer angle (`MaxSteerAngle` when set, else the vehicle's `maximumSteerAngle`) BEFORE clamping (fixes the v3.0 inverted-bounds bug) — 0.8.0's override raises that cap, the clamp never binds beyond it.
 - Suspension/other categories: `effective = capturedStock × presetFactor`; presets are authored factors; sliders edit them through Custom. Suspension readouts: mean stock baseline across tracked vehicles × factor.
 - `MatchGameSteeringSpeed` (default true): effective steering rate ×= `Clamp(gameSteeringspeed/50, 0.35, 2.5)`.
 - Alignment (0.6.0): effective = stock geometry + offset (deg for camber/caster/toe, cm for position; PosX outward). Gearbox (0.6.0): ratio_i = stock_i (continued past the vehicle's own count) × factor_i; clutch slipTorque/engagementRange × factor (≥ 1), engagementRPM + offset (≥ min(stock, 1.1 × idle)).
 
 ## 5. Config schema and migration
 
-Sections: `Steering` (Enabled **false** by default, Preset, MatchGameSteeringSpeed) + `Steering.Custom.*` · `Suspension` (Enabled, Preset, SplitFrontRear) + `Suspension.Custom.*` (10 factor keys + BasedOn) · `Aero` / `Brakes` / `Grip` / `Drivetrain` / `Assists` (Enabled, Preset) + per-category `Custom.*` (incl. DiffFrontMode/DiffRearMode strings, Abs/Tcs keys) · `UI.ToggleKey`. 0.6.0 adds `Alignment` (Enabled, Preset, PerWheel) + `Alignment.Custom.*` (BasedOn + 20 offset keys), `Gearbox` (Enabled, Preset) + `Gearbox.Custom.*` (BasedOn, GearCount, Gear1..12Scale, clutch keys, TransmissionMode), `UI.FreezeWhileOpen/PanelScale/PanelWidth/PanelAlpha/LastTab`, `Telemetry.Enabled/Scale/Position`. All numeric entries carry AcceptableValueRanges from `Limits`. 0.6.0 needs no migration (additions + widened ranges only). 0.6.2 adds `Drivetrain.Layout` (Enabled, Layout) — additions only. 0.7.0 adds `Drivetrain.Custom.DiffCenterMode`, `Gearbox.Custom.SpreadRatios/ShiftUpFactor/ShiftDownFactor/KickdownScale`, `Telemetry.Pins` — additions only (harness: a real 0.6.4 file keeps all 133 keys and values).
+Sections: `Steering` (Enabled **false** by default, Preset, MatchGameSteeringSpeed) + `Steering.Custom.*` · `Suspension` (Enabled, Preset, SplitFrontRear) + `Suspension.Custom.*` (10 factor keys + BasedOn) · `Aero` / `Brakes` / `Grip` / `Drivetrain` / `Assists` (Enabled, Preset) + per-category `Custom.*` (incl. DiffFrontMode/DiffRearMode strings, Abs/Tcs keys) · `UI.ToggleKey`. 0.6.0 adds `Alignment` (Enabled, Preset, PerWheel) + `Alignment.Custom.*` (BasedOn + 20 offset keys), `Gearbox` (Enabled, Preset) + `Gearbox.Custom.*` (BasedOn, GearCount, Gear1..12Scale, clutch keys, TransmissionMode), `UI.FreezeWhileOpen/PanelScale/PanelWidth/PanelAlpha/LastTab`, `Telemetry.Enabled/Scale/Position`. All numeric entries carry AcceptableValueRanges from `Limits`. 0.6.0 needs no migration (additions + widened ranges only). 0.6.2 adds `Drivetrain.Layout` (Enabled, Layout) — additions only. 0.7.0 adds `Drivetrain.Custom.DiffCenterMode`, `Gearbox.Custom.SpreadRatios/ShiftUpFactor/ShiftDownFactor/KickdownScale`, `Telemetry.Pins` — additions only (harness: a real 0.6.4 file keeps all 133 keys and values). 0.7.4 retires `Telemetry.Pins` (an old cfg line is ignored) and adds `Telemetry.Cells`. 0.7.7 adds `Gearbox.DebugHooks`. 0.8.0 adds `Steering.Custom.MaxSteerAngle` and `General.ResetOnSaveSwitch/LastSave/LastSaveStamp` — additions only. 0.9.0 adds `PerVehicle.Tunes` (multi-line blob, panel-managed) and flips the `ResetOnSaveSwitch` default to true (existing files keep their stored value).
 
 **v3.1 → v3.2 migration (one-time, in `ModConfig.MigrateLegacySuspension`)**: (1) `Suspension.Preset = "Street"` maps to "Stock"; (2) if any legacy `[Suspension.User]` multiplier ≠ 1.0, fold `Custom_i = Clamp(presetFactor_i × user_i, 0.5, 2)` into the Suspension.Custom entries with BasedOn set, ActivePreset = Custom; (3) the 10 legacy keys are `config.Remove`d every load so the fold can never run twice. Covered by tests.
 
@@ -679,7 +720,7 @@ Sections: `Steering` (Enabled **false** by default, Preset, MatchGameSteeringSpe
 
 ```
 cd plugin && dotnet build -c Release          # real DLL, references game DLLs at D:\SteamLibrary\...\Apocalypter_Data\Managed (adjust paths in the csproj; 0.6.0 adds UnityEngine.IMGUIModule for the clipboard)
-cd verify && bash run.sh                      # stubs compile + 610 tests (592 logic + 18 prefix); .NET SDK 8+; refs/ already populated (tests/fixtures/v064.cfg is read from verify/)
+cd verify && bash run.sh                      # stubs compile + 646 tests (627 logic + 19 prefix); .NET SDK 8+; refs/ already populated (tests/fixtures/v064.cfg is read from verify/)
 ```
 Install: copy the DLL to `BepInEx\plugins\` and `icon.png` next to it as `ApocalypterSteeringMod.png` (the Apocasetter Mods-window icon). Rebuild the install zip with both files at the zip root. **Never run it alongside an old `SteeringFix.dll`** (earlier assembly name) — both prefixes would double-process steering. The GUID is deliberately unchanged, so the existing config file migrates in place.
 
@@ -687,12 +728,12 @@ Install: copy the DLL to `BepInEx\plugins\` and `icon.png` next to it as `Apocal
 
 The Apocasetter updater installs mods from its GitHub index (`DeonUrist/Apocasetter-Index`); its contract for a loose-DLL mod like this one:
 
-- a public GitHub repo with a release whose tag equals the `[BepInPlugin]` version (`0.7.0`),
+- a public GitHub repo with a release whose tag equals the `[BepInPlugin]` version (`0.9.0`),
 - a release `.zip` that unpacks into `BepInEx\plugins` — i.e. `ApocalypterSteeringMod.dll` + `ApocalypterSteeringMod.png` at the zip root (the layout of `BepInEx\plugins\ApocalypterSteeringMod.zip`),
 - the `[General] Apocasetter = true` config entry (bound on load, written on first run),
 - one-time submission via the index repo's "Submit a mod" issue template.
 
-Git is currently local-only, so the index submission stays deferred until the user publishes a repo. Nexus releases ship the same DLL + icon.
+The repo is public (github.com/CoffeeKills/ApocalypterVehicleTuning, main); the one-time index submission stays deferred until the user files the "Submit a mod" issue. Nexus releases ship the same DLL + icon.
 
 The audit bundle (what the third-party rework pass receives) is separate from the install zip and is regenerated from the tree — everything it needs now lives here:
 
@@ -719,7 +760,8 @@ powershell Compress-Archive README.md,PROMPT.md,FEATURES.md,CONTEXT.md,plugin,ve
 - **Live-mode risk (accepted):** with no click-catcher, game UI beside the panel stays clickable — opened from the pause menu, its buttons can be clicked (uGUI onClick is not blocker-gated). Freeze ON keeps the 0.5.0 modal dim. Live mode never writes timeScale, so a panel opened from the pause menu keeps the game paused.
 - **Whitelist is fail-closed:** a driving action whose name is not in `InputBlocker.DrivingKeys/DrivingAxes` does nothing while the panel is open; its name is logged once ("InputBlocker: blocked input action '…'"). Add such names to the whitelist after the in-game check.
 - **Telemetry default ON** deviates from the opt-in convention on purpose: it is passive, click-through UI that changes no vehicle; one toggle in the Panel tab (or `[Telemetry] Enabled = false`) hides it.
-- Alignment: moved wheels keep NWH's init-time wheelbase/track width (Ackermann, solid-axle camber); wheels with a camber controller or on a solid axle keep their camber; caster/toe are per axle only. Gearbox: CVT/External boxes and non-standard gear lists keep their gears; clutch types are emulated. 0.7.0 shift controller: the game's HUD gear readout may lag a shift (cosmetic); after the game changes a vehicle's `transmissionType` while tuned, NWH's own shifting runs for up to one 2 s pass until the controller re-hooks; Manual mode on an Automatic-type vehicle inherits NWH's 0.5 s post-shift ban (the type is not changed to avoid the ban, see §2.15); a save made while a spread/tuned box is applied bakes it (only the 0.6.0 continuation shape is auto-repaired — turn Gearbox off before saving). Telemetry pins show the tuning *setting* (the slider value), not a live vehicle measurement. If the runner is replaced exactly while a shift into an added gear is in flight, the placeholder gears left by the restore become the new runner's "stock" (harmless duplicates of the top gear; cleared by re-enabling and turning Gearbox off, or a restart).
+- Alignment: moved wheels keep NWH's init-time wheelbase/track width (Ackermann, solid-axle camber); wheels with a camber controller or on a solid axle keep their camber; caster/toe are per axle only. Gearbox: CVT/External boxes and non-standard gear lists keep their gears; clutch types are emulated. 0.7.0 shift controller: the game's HUD gear readout may lag a shift (cosmetic); after the game changes a vehicle's `transmissionType` while tuned, NWH's own shifting runs for up to one 2 s pass until the controller re-hooks; Manual mode on an Automatic-type vehicle inherits NWH's 0.5 s post-shift ban (the type is not changed to avoid the ban, see §2.15); a save made while a spread/tuned box is applied bakes it (only the 0.6.0 continuation shape is auto-repaired — turn Gearbox off before saving). Telemetry cells show chosen vehicle readouts (see 0.7.4), not tuning settings. If the runner is replaced exactly while a shift into an added gear is in flight, the placeholder gears left by the restore become the new runner's "stock" (harmless duplicates of the top gear; cleared by re-enabling and turning Gearbox off, or a restart).
+- **Per-vehicle tunes (0.9.0): no panel UI yet** — the `[PerVehicle] Tunes` blob is config-level (Apocasetter can edit it live; the panel's copy/paste footer still works on the global preset). The shift controller still reads the global `GearboxSettings.ActivePreset` for shift points, so a vehicle's own gearbox tune changes the box but shifts with the global shift points (a decision for a later version).
 - Vehicles without an aero module get extra drag only (0.5.0: default-module Cd × (DragScale − 1), so nothing at ×1.0 or below; no downforce-point synthesis); onboarded modules stay in `Components` (disabled and inert) after restore and are reused. A shipped module's own `simulateDrag`/`simulateDownforce` switches are never changed.
 - The mod's TCS keeps a low-speed cutoff (`TcsCutoffSpeed`, default 2 m/s). NWH's `TCSModule` declares `lowerSpeedThreshold` but never reads it, so the stock module also cuts during a standing-start; the mod's launch behaviour therefore differs below the cutoff (set it to 0 for NWH-like launches). Left as is in 0.2.0 — it is a feel decision that needs in-game testing.
 - Digressive damper valving params are deliberately untouched. `brakeOffThrottleIntensity` is deliberately untouched.
@@ -738,7 +780,7 @@ powershell Compress-Archive README.md,PROMPT.md,FEATURES.md,CONTEXT.md,plugin,ve
 
 ## 10. In-game test checklist (for the machine with the game)
 
-1. Log shows `Apocalypter Vehicle Tuning 0.7.0 loaded.`, two `InputBlocker: patched …` counts (6 InputController methods + the PlayMaker action methods) and no errors.
+1. Log shows `Apocalypter Vehicle Tuning 0.9.0 loaded.`, two `InputBlocker: patched …` counts (6 InputController methods + the PlayMaker action methods) and no errors.
 2. F7 (or the "Vehicle Tuning" button in the pause menu) opens the panel docked right; cursor free; the game keeps running (0.6.0 live mode — see item 21; item 22 covers the Freeze option). Esc/F7/X/Done close it (click-outside only with Freeze ON).
 3. Each of the 9 tuning tabs: master ON applies the preset, sliders live-edit (preset → "Custom (Base)"), Reset returns to the preset origin, OFF restores stock feel.
 4. Steering tab: Vanilla must feel exactly unmodded; Custom defaults ≈ the old v2.0.0 feel; traction clamp + opposite lock behave as before.
@@ -784,10 +826,18 @@ powershell Compress-Archive README.md,PROMPT.md,FEATURES.md,CONTEXT.md,plugin,ve
 40. **0.7.0 — exact restore:** Gearbox OFF while driving: the car shifts like stock again immediately (the game's own automatic or manual), the gear count is back to stock, nothing in the log. Toggle the game's automatic-gearbox setting while Gearbox is ON: within ~2 s the mod follows the new type (Stock mode).
 41. **0.7.0 — Stock/clutch presets:** Gearbox ON with Stock, Comfort, Sport or Race: shifting feels exactly like stock (only the clutch changes); the Gearbox status line does not say "The mod shifts …".
 42. **0.7.0 — drivetrain tab:** on an AWD car the centre-diff buttons work (Locked = no front/rear speed difference), the bias slider is enabled and the "Torque split" line shows front/rear %; on a RWD/FWD car it says "drives one axle" and the bias slider is dimmed. Pick the AWD layout template + "Custom layout" ON on a RWD car: the split line shows 40%/60% and the car pulls with all wheels. "Copy this vehicle's layout" then "Paste layout" round-trips; pasting garbage shows "Not a layout: …".
-43. **0.7.0 — telemetry pins:** click Pin on 3 sliders (e.g. Steering speed, Stiffness, Gear 1): the strip turns on (if off) and grows one row per two pins with "title value" cells; values change as you move the sliders; the strip never takes a click; restart: the pins are still there. Check the strip at 1080p and 1440p/4K and both scales: cells readable, not overlapping. Settings tab → "Pinned values" OFF clears them.
+43. **0.7.4 — telemetry readout list** (replaces the 0.7.0 pins check): Settings → "Strip contents", pick e.g. Steering angle + Throttle + Brakes: the strip shows them as "title value" cells and updates live; the strip never takes a click; restart keeps the selection. An old cfg's `[Telemetry] Pins` line is ignored.
 44. **0.7.0 — tighter panel:** at widths 300 / 460 / 1000 every tab is visibly tighter than 0.6.4 with bigger text; no label runs under a Pin/Reset button (long titles are slightly smaller instead); at 300 px the tabs use three rows and every tab name fits.
 45. **0.7.0 — game-changed values:** with Drivetrain ON (any preset), swap the car's engine (or change the game's automatic-gearbox setting): the new engine's power/shift points take effect (scaled), and Drivetrain OFF leaves the new engine's values, not the old ones.
 46. **0.7.0 — config:** your 0.6.4 cfg loads unchanged and gains `DiffCenterMode`, `SpreadRatios`, `ShiftUpFactor`, `ShiftDownFactor`, `KickdownScale`, `Pins`. Note: if your cfg had `[Gearbox] Enabled = true`, the gearbox now applies (it was gated before).
+
+47. **0.8.0 — max steering angle:** Steering ON, Custom, raise **Max steering angle** toward 70°: at full lock the wheels visibly steer past the car's own lock, return-to-center still works, and OFF/Vanilla is exactly stock. At 0 each vehicle uses its own lock (a drift car still steers wider than a truck).
+
+48. **0.8.0 — save switch:** with a category on, save, quit, load a DIFFERENT save: the log names the loaded save. With `[General] ResetOnSaveSwitch = true` (the 0.9.0 default) every category switch is OFF on that new save; with false they stay on. Loading the SAME save again changes nothing.
+
+49. **0.9.0 — per-vehicle tunes:** put a `VehicleName|Category|code` tune into `[PerVehicle] Tunes` (an AVT1 clipboard line; or via Apocasetter), reload: that vehicle uses its own tune while the other vehicles follow the global preset; editing one slider on the tuned vehicle and restarting keeps the edit (blob round-trip). A `Category` the codec does not know is dropped (log line), not applied.
+
+50. **0.9.0 — ResetOnSaveSwitch default:** with a fresh config file (rename/delete the old one) the key defaults to true and a save switch turns everything off (item 48). An existing 0.8.0 cfg keeps its stored false.
 
 ## 11. Translation (ApocaLanguage)
 

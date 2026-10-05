@@ -1,14 +1,23 @@
-# FEATURES.md — Feature specification for v0.7.0-alpha
+# FEATURES.md — Feature specification (0.7.0-alpha; implemented — see the Status sections)
 
-**This file is the authoritative spec for the next version.** Implement everything below on top of the **0.6.4** code in this bundle. Where this file and PROMPT.md conflict, this file wins for *features*; PROMPT.md's hard constraints (no `ES3.Save`, no `vc.input.*` writes, allocation-free steering prefix, hidden-runner survival architecture, one Graphic per GameObject, mouse-only panel, BepInEx config the only persistence, unchanged GUID) always win.
+**This file is the spec** — authored for 0.7.0-alpha and fully implemented since (every section below carries a Status line). The "Status after …" section at the top lists what is done and what remains — implement the remaining items on top of the shipped 0.9.0 code in this bundle. Where this file and PROMPT.md conflict, this file wins for *features*; PROMPT.md's hard constraints (no `ES3.Save`, no `vc.input.*` writes, allocation-free steering prefix, hidden-runner survival architecture, one Graphic per GameObject, mouse-only panel, BepInEx config the only persistence, unchanged GUID) always win.
 
 You have no terminal. The user runs `bash verify/run.sh` (needs .NET SDK 8+; globs **all** `plugin/**/*.cs`, so every new file must compile against the stubs — extend them, §7). Reason through it carefully.
 
 Version: `plugin/PluginInfo.cs` → `"0.7.0"` ✅. README title → "v0.7.0-alpha" + a new "## Changes in 0.7.0-alpha" section ✅. Suite before this round: **504 tests (486 logic + 18 prefix)**; after: **610 (592 + 18)**, all passing. Keep them green, add the §7 tests, and remove `GearboxSettings.ComingSoon` (release gate from 0.6.0) only when the §1 shifting subsystem is done — until then the gate stays.
 
+## Status after 0.9.0-alpha (what is done, what remains)
+
+**Everything in this spec (§1–§5, §6 config, §7 harness, §10 crash hardening, §11 telemetry) is implemented, harness-tested and shipped** through 0.9.0-alpha, plus the post-0.7.1 rounds: 0.7.2 pin-overlap fix, 0.7.3 12-gear launch fix (ShiftDelegateGuard), 0.7.4 per-tab Reset fix + pins replaced by the telemetry readout list, 0.7.5 gearbox-at-load diagnostics, 0.7.6 the gearbox-at-load fix, 0.7.7 quiet release logging (`[Gearbox] DebugHooks` off), 0.8.0 max steering angle + save tracking (ResetOnSaveSwitch, default flipped true in 0.9.0), and **0.9.0 per-vehicle tunes** (`[PerVehicle] Tunes` blob, `PresetBook<T>` store, BasedOn round-trip, per-vehicle apply picks — README "Changes in 0.9.0-alpha"). Harness: **646 tests (627 logic + 19 prefix)**, green.
+
+**Remains** (flagged gaps, documented in README §8 — the repo is maintenance/frozen mode, SPO is the future):
+- Panel UI for per-vehicle save/remove (0.9.0 shipped the blob config-level only; `SettingsPanel.cs` unmodified).
+- `ShiftController.cs:287` decides shifts from the global `GearboxSettings.ActivePreset` while gearbox apply picks per-vehicle — needs a decision.
+- In-game checks: README §10 items 29–37 (0.6.x) and 47–50 (0.8.0/0.9.0) remain individually unconfirmed (38–46 were covered by the user's playtests).
+
 ## Status after 0.7.1-alpha (what is done, what remains)
 
-**Every §1–§5 item is implemented and harness-tested** (`bash verify/run.sh`: 610 tests, 592 logic + 18 prefix, all passing on .NET SDK 8.0.131). In-game confirmation is still pending: README §10 items 38–46 (0.7.0), and earlier 29–37. The full changelog, deviations and negative controls are in README "Changes in 0.7.0-alpha".
+**Every §1–§5 item is implemented and harness-tested** (`bash verify/run.sh`: 610 tests, 592 logic + 18 prefix, all passing on .NET SDK 8.0.131). README §10 items 38–46 (0.7.0) were later covered by the user's playtests of 0.7.1/0.7.6+; 29–37 remain individually unconfirmed. The full changelog, deviations and negative controls are in README "Changes in 0.7.0-alpha".
 
 **0.7.1 (panel reorg, user request):** 8 tabs grouped by car area — Steering · Suspension · **Wheels** (alignment + grip) · **Drivetrain** (engine/diffs/layout + gearbox) · Brakes · Assists · Aero · Settings. 6x6 template button removed (parser keeps accepting multi-axle text); stored `LastTab` 8/9 clamps to the last tab (the one config-continuity exception). See README "Changes in 0.7.1-alpha".
 

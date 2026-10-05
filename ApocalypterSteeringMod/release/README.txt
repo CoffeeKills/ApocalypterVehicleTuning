@@ -1,4 +1,4 @@
-Apocalypter Vehicle Tuning 0.7.6-alpha
+Apocalypter Vehicle Tuning 0.9.0-alpha
 ======================================
 
 An in-game tuning panel for every vehicle in Apocalypter: steering,
@@ -39,8 +39,10 @@ NOTES
   pick a preset, or draw your own curves in the steering tab.
 - The panel keeps the game running while it is open (docked on the
   right) - tune and drive at the same time. The telemetry strip shows
-  speed/RPM/gear/slip. Prefer the old paused panel? Turn on
-  "Freeze game while open" in the Settings tab.
+  the readouts you pick in Settings > "Strip contents" (speed, RPM,
+  gear, slip, g-forces, steering angle, throttle, brakes). Prefer the
+  old paused panel? Turn on "Freeze game while open" in the Settings
+  tab.
 - New in 0.6.0-0.6.2: wheel alignment (camber, caster, toe, position),
   custom drivetrain layouts (config-only: AWD, part-time 4x4, 6x6 wiring),
   panel width/size/transparency settings, a rebindable panel hotkey
@@ -57,6 +59,17 @@ NOTES
   target. If the strip ever shows the wrong car, set Telemetry ->
   DebugPick = true in the mod config and send the "Telemetry pick:"
   lines from BepInEx\LogOutput.log.
+- New in 0.9.0: per-vehicle tunes - save a tune under a vehicle's
+  name and it re-applies to that vehicle only. Config-level for now:
+  one line per tune in the config file's [PerVehicle] Tunes section
+  (Apocasetter edits it live; a panel UI comes later). Switching
+  saves now resets the tuning by default (ResetOnSaveSwitch = true).
+- New in 0.8.0: max steering angle slider (0 = each vehicle's own
+  lock, up to 70 deg for drift-style extra angle) and save tracking -
+  the mod detects the loaded save slot and can turn every category
+  off when a different save loads.
+- New in 0.7.7: quieter logging - the gearbox debug hooks are off by
+  default (the stuck-in-neutral warning stays).
 - New in 0.7.6: loading with a custom gearbox enabled is FIXED - the controller was hooking before the game wrote its real transmission type and followed the stale prefab default. It now adopts the game's type and delegate the tick they change.
 - New in 0.7.5: loading the game with a custom gearbox enabled is being chased down - the mod now logs every shift hook and warns if a controller stays in neutral with the throttle held (one repro log will name the culprit).
 - New in 0.7.4: the per-tab Reset buttons now match the reorganized tabs (the merged tabs reset both of their categories), and the telemetry pin feature is replaced by a readout list (speed, RPM, gear, front/rear slip, lateral/longitudinal g, steering angle, throttle, brakes - pick them in Settings > "Strip contents").

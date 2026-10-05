@@ -17,7 +17,8 @@ plus the templates in `Runtime/UiStrings.cs`:
 grep -o '"[^"]\{3,\}"' plugin/Runtime/SettingsPanel.cs plugin/Runtime/SettingsPanelManager.cs plugin/Runtime/GearGraph.cs plugin/Settings/*Preset.cs plugin/Settings/DrivetrainSettings.cs | sed 's/^[^:]*://' | sort -u
 ```
 
-(0.7.0 sweep: 508 unique quoted strings across those files, display and internal together.)
+(0.9.0 sweep: 456 unique quoted strings across those files, display and internal together —
+down from 508 at 0.7.0, mostly the pin strings removed in 0.7.4.)
 
 Not every hit is a display string: internal object names (`AeroPage`, `ApocalypterSettingsCanvas`,
 `ApocalypterSteeringMod_Button`, `Dim`, `Footer`, `Body`, `Description`, `Default*`) and format
@@ -61,13 +62,18 @@ specifiers (`"0.00"`) appear in the sweep but are never shown. Display strings b
    centre-diff buttons (the same `Stock` / `Open` / `Locked` / `LSD` labels), `Drivetrain layout`
    section (`Custom layout`, the template buttons `RWD`, `FWD`, `AWD`, `4x4 locked`,
    `Copy this vehicle's layout`, `Paste layout`); Settings tab "Strip contents" cell options.
-   **Telemetry pin cells** show two texts: the label (the slider's own title once the panel was
+   **Telemetry pin cells** (0.7.0; removed in 0.7.4 with the pin feature) showed two texts: the label (the slider's own title once the panel was
    built — the same string as in the panel, so one translation covers both — else the config key
    in words, e.g. `Spring front`) and the value in the slider's units (the existing `Times`,
    `Deg`, `DegSigned`, `CmSigned`, `Percent`, `SpeedMps`, `GearCountFmt` templates, `Own`, and
    `TelemetryRpmFmt` for the clutch offset). The layout status line concatenates
    `LayoutUnfitFmt` + a space + `LayoutTextFmt`; the torque split joins `AxleFrontFmt` /
    `AxleRearFmt` (or `AxleNFmt` + a space + `PercentFmt`) parts with ` · ` inside `SplitFmt`.
+
+10. **0.8.0 additions** — two static labels in the steering tab: `Max steering angle` and its
+   hint `0 = each vehicle's own lock; raise it for drift-style extra angle` (SettingsPanel.cs).
+   No new templates; the save-tracking log lines are log output, not panel strings. **0.9.0 adds
+   no panel strings** — the per-vehicle tunes blob is config-level.
 
 ## Dynamic templates (UiStrings.cs)
 
@@ -125,7 +131,6 @@ Every dynamic string is a `string.Format` template using only `{0}` (repeated `{
 | `LayoutCopied` / `LayoutCopyNone` / `LayoutPasted` | — | no placeholder; footer status (0.7.0) |
 | `TargetMissingFmt` | the selected vehicle's name | "… (not here)" while it has not spawned (0.7.0) |
 | (pin strings removed in 0.7.4 with the pin feature) | — | — |
-| `PinsFullFmt` | the pin cap (12) | footer status (0.7.0) |
 
 **Conventions**
 
