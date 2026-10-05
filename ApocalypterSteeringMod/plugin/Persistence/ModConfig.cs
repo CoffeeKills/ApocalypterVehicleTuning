@@ -93,6 +93,11 @@ namespace ApocalypterSteeringMod.Persistence
         private static ConfigEntry<float> _gearShiftUp, _gearShiftDown, _gearKickdown;   // 0.7.0
         private static ConfigEntry<bool> _gearSpread;                                     // 0.7.0
 
+        // Weight (0.10.0)
+        private static ConfigEntry<bool> _weightEnabled;
+        private static ConfigEntry<string> _weightPreset, _weightBasedOn;
+        private static ConfigEntry<float> _weightFront, _weightRear;
+
         // UI + telemetry (0.6.0)
         private static ConfigEntry<bool> _uiFreeze;
         private static ConfigEntry<float> _uiScale, _uiWidth, _uiAlpha;
@@ -183,6 +188,7 @@ namespace ApocalypterSteeringMod.Persistence
             BindAssists();
             BindAlignment();
             BindGearbox();
+            BindWeight();
 
             _toggleKey = config.Bind("UI", "ToggleKey", "F7",
                 "Hotkey that opens/closes the tuning panel (a Unity KeyCode name, e.g. F7, F8, Home). Rebind in the Settings tab; applies immediately.");
@@ -420,6 +426,17 @@ namespace ApocalypterSteeringMod.Persistence
                 "Automatic shifting: strength of the full-throttle kickdown (shift points rise 15 % x this above 80 % throttle).");
         }
 
+        private static void BindWeight()
+        {
+            _weightEnabled = _config.Bind("Weight", "Enabled", false, "Master switch for the weight tab (opt-in).");
+            _weightPreset = _config.Bind("Weight", "Preset", "Stock", "Active weight preset: Stock, Front ballast, Rear ballast, Full load, Lift, Custom.");
+            _weightBasedOn = _config.Bind("Weight.Custom", "BasedOn", "", "Built-in preset the Custom weight was copied from.");
+            _weightFront = BindRange("Weight.Custom", "FrontKg", 0f, Limits.WeightKgMin, Limits.WeightKgMax,
+                "Front axle weight in kg. Positive = real ballast at the front (more mass, shifted centre of mass, scaled inertia); negative = balloon lift pulling that axle up.");
+            _weightRear = BindRange("Weight.Custom", "RearKg", 0f, Limits.WeightKgMin, Limits.WeightKgMax,
+                "Rear axle weight in kg. Positive = real ballast at the rear (more mass, shifted centre of mass, scaled inertia); negative = balloon lift pulling that axle up.");
+        }
+
         private static void BindUi()
         {
             _uiFreeze = _config.Bind("UI", "FreezeWhileOpen", false,
@@ -494,6 +511,7 @@ namespace ApocalypterSteeringMod.Persistence
             }
             Wire(_gearClutchGrip); Wire(_gearClutchRange); Wire(_gearClutchRpm);
             Wire(_gearShiftUp); Wire(_gearShiftDown); Wire(_gearKickdown); Wire(_gearSpread);
+            Wire(_weightEnabled); Wire(_weightPreset); Wire(_weightBasedOn); Wire(_weightFront); Wire(_weightRear);
             Wire(_uiFreeze); Wire(_uiScale); Wire(_uiWidth); Wire(_uiAlpha); Wire(_uiLastTab);
             Wire(_telEnabled); Wire(_telScale); Wire(_telPosition); Wire(_telDebugPick); Wire(_telCells); Wire(_gearDebug);
             Wire(_targetMode); Wire(_targetVehicle); Wire(_perVehicleTunes);
@@ -878,6 +896,13 @@ namespace ApocalypterSteeringMod.Persistence
                 _gearShiftDown.Value = gb.ShiftDownFactor;
                 _gearKickdown.Value = gb.KickdownScale;
 
+                _weightEnabled.Value = WeightSettings.Enabled;
+                _weightPreset.Value = WeightSettings.ActivePreset != null ? WeightSettings.ActivePreset.Name : "Stock";
+                WeightPreset wt = WeightPreset.Custom;
+                _weightBasedOn.Value = wt.BasedOn ?? "";
+                _weightFront.Value = wt.FrontKg;
+                _weightRear.Value = wt.RearKg;
+
                 _uiFreeze.Value = UiSettings.FreezeWhileOpen;
                 _uiScale.Value = UiSettings.PanelScale;
                 _uiWidth.Value = UiSettings.PanelWidth;
@@ -974,6 +999,7 @@ namespace ApocalypterSteeringMod.Persistence
             AssistsSettings.Book.ClearVehicles();
             AlignmentSettings.Book.ClearVehicles();
             GearboxSettings.Book.ClearVehicles();
+            WeightSettings.Book.ClearVehicles();
             string text = _perVehicleTunes != null ? _perVehicleTunes.Value : "";
             if (string.IsNullOrEmpty(text))
             {
@@ -1021,6 +1047,7 @@ namespace ApocalypterSteeringMod.Persistence
                 case PresetCategory.Assists: AssistsSettings.Book.ImportVehicle(name, (AssistsPreset)p); break;
                 case PresetCategory.Alignment: AlignmentSettings.Book.ImportVehicle(name, (AlignmentPreset)p); break;
                 case PresetCategory.Gearbox: GearboxSettings.Book.ImportVehicle(name, (GearboxPreset)p); break;
+                case PresetCategory.Weight: WeightSettings.Book.ImportVehicle(name, (WeightPreset)p); break;
             }
         }
 
@@ -1036,6 +1063,7 @@ namespace ApocalypterSteeringMod.Persistence
             SerializeVehicleBook(sb, PresetCategory.Assists, AssistsSettings.Book.VehicleNames, n => AssistsSettings.Book.VehicleCopy(n));
             SerializeVehicleBook(sb, PresetCategory.Alignment, AlignmentSettings.Book.VehicleNames, n => AlignmentSettings.Book.VehicleCopy(n));
             SerializeVehicleBook(sb, PresetCategory.Gearbox, GearboxSettings.Book.VehicleNames, n => GearboxSettings.Book.VehicleCopy(n));
+            SerializeVehicleBook(sb, PresetCategory.Weight, WeightSettings.Book.VehicleNames, n => WeightSettings.Book.VehicleCopy(n));
             return sb.ToString();
         }
 
@@ -1194,6 +1222,13 @@ namespace ApocalypterSteeringMod.Persistence
             gb.ShiftUpFactor = _gearShiftUp.Value;
             gb.ShiftDownFactor = _gearShiftDown.Value;
             gb.KickdownScale = _gearKickdown.Value;
+
+            WeightSettings.Enabled = _weightEnabled.Value;
+            WeightSettings.SetPresetByName(_weightPreset.Value);
+            WeightPreset wc = WeightPreset.Custom;
+            wc.BasedOn = _weightBasedOn.Value ?? "";
+            wc.FrontKg = _weightFront.Value;
+            wc.RearKg = _weightRear.Value;
 
             UiSettings.FreezeWhileOpen = _uiFreeze.Value;
             UiSettings.PanelScale = _uiScale.Value;

@@ -1866,6 +1866,9 @@ public static class Tests
                 for (int i = 1; i <= 12; i++) g.SetScale(i, 0.6f + i * 0.07f);
                 g.ClutchGripScale = 1.3f; g.ClutchRangeScale = 0.7f; g.ClutchRpmOffset = -150f; g.TransmissionMode = GearboxMode.Manual;
                 break;
+            case PresetCategory.Weight:
+                WeightPreset.Custom.FrontKg = 420f; WeightPreset.Custom.RearKg = -260f; WeightPreset.Custom.BasedOn = "Front ballast";
+                break;
             case PresetCategory.Suspension:
                 SuspensionPreset.Custom.CopyFrom(SuspensionSettings.Book.FindBuiltIn("Race"));
                 SuspensionPreset.Custom.SpringRear = 2.75f; SuspensionPreset.Custom.BasedOn = "Race";
@@ -1902,7 +1905,8 @@ public static class Tests
             case PresetCategory.Drivetrain: return DrivetrainPreset.Custom;
             case PresetCategory.Assists: return AssistsPreset.Custom;
             case PresetCategory.Alignment: return AlignmentPreset.Custom;
-            default: return GearboxPreset.Custom;
+            case PresetCategory.Gearbox: return GearboxPreset.Custom;
+            default: return WeightPreset.Custom;
         }
     }
 
@@ -1922,7 +1926,7 @@ public static class Tests
             allRoundTrip &= ok;
             ResetAllCategories();
         }
-        Check(allRoundTrip, "Serialize -> Import -> Serialize is byte-identical for all nine books");
+        Check(allRoundTrip, "Serialize -> Import -> Serialize is byte-identical for all ten books");
         Check(PresetCodec.KeyCount(PresetCategory.Alignment) == 20 && PresetCodec.KeyCount(PresetCategory.Gearbox) == 21,
             "alignment carries 4 camber + caster/toe + 12 position keys; gearbox 12 gear + 9 keys (0.7.0: + Spread/ShiftUp/ShiftDown/Kickdown)");
 
@@ -3609,11 +3613,12 @@ public static class Tests
         Check(kept && oldKeys.Count == 133, "all 133 keys of a real 0.6.4 file survive load + save with their values (no rename, removal or default change)");
         string[] added = { "Drivetrain.Custom|DiffCenterMode", "Gearbox.Custom|SpreadRatios", "Gearbox.Custom|ShiftUpFactor", "Gearbox.Custom|ShiftDownFactor",
             "Gearbox.Custom|KickdownScale", "Telemetry|Cells", "Gearbox|DebugHooks", "Steering.Custom|MaxSteerAngle",
-            "General|ResetOnSaveSwitch", "General|LastSave", "General|LastSaveStamp", "PerVehicle|Tunes" };
+            "General|ResetOnSaveSwitch", "General|LastSave", "General|LastSaveStamp", "PerVehicle|Tunes",
+            "Weight|Enabled", "Weight|Preset", "Weight.Custom|BasedOn", "Weight.Custom|FrontKg", "Weight.Custom|RearKg" };
         bool all = newKeys.Count == oldKeys.Count + added.Length;
         foreach (string k in added) all &= newKeys.ContainsKey(k);
         if (!all) foreach (string k in newKeys.Keys) if (!oldKeys.ContainsKey(k)) Console.WriteLine("  new key: " + k);
-        Check(all, "exactly twelve keys added (0.8.0 adds MaxSteerAngle, ResetOnSaveSwitch, LastSave, LastSaveStamp; 0.9.0 adds PerVehicle|Tunes)");
+        Check(all, "exactly seventeen keys added (0.8.0 adds MaxSteerAngle, ResetOnSaveSwitch, LastSave, LastSaveStamp; 0.9.0 adds PerVehicle|Tunes; 0.10.0 adds the five Weight keys)");
         File.WriteAllText(path, after.Replace("ShiftUpFactor = 1", "ShiftUpFactor = 9").Replace("KickdownScale = 1", "KickdownScale = 0.1").Replace("DiffCenterMode = Stock", "DiffCenterMode = 7"));
         ModConfig.Load(new ConfigFile(path, true));
         Check(Near(GearboxPreset.Custom.ShiftUpFactor, Limits.ShiftFactorMax) && Near(GearboxPreset.Custom.KickdownScale, Limits.KickdownMin)

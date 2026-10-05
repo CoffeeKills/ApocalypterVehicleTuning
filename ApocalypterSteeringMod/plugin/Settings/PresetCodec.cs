@@ -5,7 +5,7 @@ using System.Text;
 
 namespace ApocalypterSteeringMod.Settings
 {
-    /// <summary>The nine preset books the codec can export/import (the Panel tab has none).</summary>
+    /// <summary>The ten preset books the codec can export/import (the Panel tab has none).</summary>
     public enum PresetCategory
     {
         Steering,
@@ -16,7 +16,8 @@ namespace ApocalypterSteeringMod.Settings
         Drivetrain,
         Assists,
         Alignment,
-        Gearbox
+        Gearbox,
+        Weight
     }
 
     /// <summary>
@@ -298,6 +299,12 @@ namespace ApocalypterSteeringMod.Settings
             }
             t[PresetCategory.Gearbox] = gear.ToArray();
 
+            t[PresetCategory.Weight] = new[]
+            {
+                F<WeightPreset>("FrontKg", Limits.WeightKgMin, Limits.WeightKgMax, p => p.FrontKg, (p, v) => p.FrontKg = v),
+                F<WeightPreset>("RearKg", Limits.WeightKgMin, Limits.WeightKgMax, p => p.RearKg, (p, v) => p.RearKg = v)
+            };
+
             // Sorted by key (ordinal) so the text is canonical.
             var keys = new List<PresetCategory>(t.Keys);
             foreach (PresetCategory c in keys)
@@ -376,7 +383,8 @@ namespace ApocalypterSteeringMod.Settings
                 case PresetCategory.Drivetrain: return DrivetrainSettings.Shown;
                 case PresetCategory.Assists: return AssistsSettings.Shown;
                 case PresetCategory.Alignment: return AlignmentSettings.Shown;
-                default: return GearboxSettings.Shown;
+                case PresetCategory.Gearbox: return GearboxSettings.Shown;
+                default: return WeightSettings.Shown;
             }
         }
 
@@ -393,7 +401,8 @@ namespace ApocalypterSteeringMod.Settings
                 case PresetCategory.Drivetrain: return new DrivetrainPreset();
                 case PresetCategory.Assists: return new AssistsPreset();
                 case PresetCategory.Alignment: return new AlignmentPreset();
-                default: return new GearboxPreset();
+                case PresetCategory.Gearbox: return new GearboxPreset();
+                default: return new WeightPreset();
             }
         }
 
@@ -594,8 +603,10 @@ namespace ApocalypterSteeringMod.Settings
                     return Make(AssistsSettings.Book, () => new AssistsPreset { Name = "Import" });
                 case PresetCategory.Alignment:
                     return Make(AlignmentSettings.Book, () => new AlignmentPreset { Name = "Import" });
-                default:
+                case PresetCategory.Gearbox:
                     return Make(GearboxSettings.Book, () => new GearboxPreset { Name = "Import" });
+                default:
+                    return Make(WeightSettings.Book, () => new WeightPreset { Name = "Import" });
             }
         }
 
