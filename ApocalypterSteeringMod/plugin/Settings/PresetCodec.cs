@@ -186,6 +186,7 @@ namespace ApocalypterSteeringMod.Settings
                 B<SteeringPreset>("TractionClampEnabled", p => p.TractionClampEnabled, (p, v) => p.TractionClampEnabled = v),
                 F<SteeringPreset>("SlipAngleDeg", Limits.SlipMin, Limits.SlipMax, p => p.SlipAngleDeg, (p, v) => p.SlipAngleDeg = v),
                 F<SteeringPreset>("OppositeLockBoost", Limits.OppLockMin, Limits.OppLockMax, p => p.OppositeLockBoost, (p, v) => p.OppositeLockBoost = v),
+                F<SteeringPreset>("MaxSteerAngle", Limits.MaxSteerAngleMin, Limits.MaxSteerAngleMax, p => p.MaxSteerAngle, (p, v) => p.MaxSteerAngle = v),
                 B<SteeringPreset>("LinearityOverride", p => p.LinearityOverride, (p, v) => p.LinearityOverride = v),
                 F<SteeringPreset>("LinearityExponent", Limits.LinExpMin, Limits.LinExpMax, p => p.LinearityExponent, (p, v) => p.LinearityExponent = v)
             };

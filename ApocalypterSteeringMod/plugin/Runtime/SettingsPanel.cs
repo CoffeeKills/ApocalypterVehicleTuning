@@ -877,6 +877,11 @@ namespace ApocalypterSteeringMod.Runtime
                 Limits.OppLockMin, Limits.OppLockMax,
                 () => Shown.OppositeLockBoost, v => EditSteering(p => p.OppositeLockBoost = v),
                 () => SteeringSettings.Reference().OppositeLockBoost, UiStrings.Times);
+            AddSlider(t, "Max steering angle", "0 = each vehicle's own lock; raise it for drift-style extra angle",
+                Limits.MaxSteerAngleMin, Limits.MaxSteerAngleMax,
+                () => Shown.MaxSteerAngle, v => EditSteering(p => p.MaxSteerAngle = v),
+                () => SteeringSettings.Reference().MaxSteerAngle,
+                v => v < 0.1f ? "own" : v.ToString("0") + "°");
 
             AddSectionTitle(c, "Game setting");
             Text gameHint = AddOption(c, "Follow game's steering speed", "",

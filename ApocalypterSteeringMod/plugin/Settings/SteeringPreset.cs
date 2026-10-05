@@ -50,6 +50,10 @@ namespace ApocalypterSteeringMod.Settings
         public bool LinearityOverride;
         public float LinearityExponent = 1f;
 
+        // 0.8.0: override the vehicle's own steering lock (degrees; 0 = the vehicle's own).
+        // High values give drift-style extra angle; the whole steer pipeline uses this cap.
+        public float MaxSteerAngle = 0f;
+
         // Custom only: the built-in preset this was copied from ("" = none).
         // Persisted so the preset's curves can be restored after a restart.
         public string BasedOn { get; set; } = "";
@@ -182,6 +186,7 @@ namespace ApocalypterSteeringMod.Settings
             OppositeLockBoost = src.OppositeLockBoost;
             LinearityOverride = src.LinearityOverride;
             LinearityExponent = src.LinearityExponent;
+            MaxSteerAngle = src.MaxSteerAngle;
         }
 
         /// <summary>A real tunable preset by config name (never Custom / Vanilla), or null.</summary>

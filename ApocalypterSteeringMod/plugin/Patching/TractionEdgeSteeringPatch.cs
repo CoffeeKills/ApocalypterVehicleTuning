@@ -85,7 +85,10 @@ namespace ApocalypterSteeringMod.Patching
             }
 
             float speedNorm = vc.Speed / 50f;
-            float maxSteer = __instance.maximumSteerAngle;
+            // 0.8.0: the preset's MaxSteerAngle overrides the vehicle's own lock (0 = the
+            // vehicle's own; high values for drift tunes). The whole pipeline — curve,
+            // linearity, traction bounds, rate limiting — uses this cap.
+            float maxSteer = preset.MaxSteerAngle > 0.1f ? preset.MaxSteerAngle : __instance.maximumSteerAngle;
             float smoothTime = __instance.speedSensitiveSmoothingCurve.Evaluate(speedNorm) * preset.SmoothingScale;
 
             // Lock-at-speed: the vehicle's own curve, or the preset's editable one.

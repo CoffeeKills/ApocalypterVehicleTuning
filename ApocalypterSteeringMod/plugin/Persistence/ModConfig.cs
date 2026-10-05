@@ -27,7 +27,7 @@ namespace ApocalypterSteeringMod.Persistence
         private static ConfigEntry<string> _steerPreset;
         private static ConfigEntry<bool> _matchGameSteeringSpeed;
         private static ConfigEntry<string> _steerBasedOn;
-        private static ConfigEntry<float> _steerRate, _steerSmoothing, _steerSlip, _steerOppLock, _steerLinExp;
+        private static ConfigEntry<float> _steerRate, _steerSmoothing, _steerSlip, _steerOppLock, _steerLinExp, _steerMaxAngle;
         private static ConfigEntry<bool> _steerUseVehicleCurve;
         private static ConfigEntry<string> _steerLockCurve, _steerReturnCurve;
         // Legacy v0.3.x curve knobs — bound for one-time migration, then removed.
@@ -101,6 +101,9 @@ namespace ApocalypterSteeringMod.Persistence
         private static ConfigEntry<float> _telScale;
         private static ConfigEntry<string> _telPosition;
         private static ConfigEntry<bool> _gearDebug;     // 0.7.7
+        private static ConfigEntry<bool> _resetOnSaveSwitch;   // 0.8.0
+        private static ConfigEntry<string> _lastSave;
+        private static ConfigEntry<long> _lastSaveStamp;
         private static ConfigEntry<string> _telCells;   // 0.7.4
 
         private static ConfigEntry<string> _toggleKey;
@@ -232,6 +235,8 @@ namespace ApocalypterSteeringMod.Persistence
                 "Replace the vehicle's input linearity curve with pow(|input|, exponent).");
             _steerLinExp = BindRange("Steering.Custom", "LinearityExponent", 1f, Limits.LinExpMin, Limits.LinExpMax,
                 "Input linearity exponent (1 = linear, below 1 = sharper near center, above 1 = gentler).");
+            _steerMaxAngle = BindRange("Steering.Custom", "MaxSteerAngle", 0f, Limits.MaxSteerAngleMin, Limits.MaxSteerAngleMax,
+                "Override the vehicle's own steering lock in degrees (0 = each vehicle's own). High values give drift-style extra angle.");
 
             // Legacy v0.3.x keys — read once for migration, then removed.
             _legacySteerCurveScale = BindRange("Steering.Custom", "SpeedCurveScale", 1f, Limits.CurveScaleMin, Limits.CurveScaleMax, "Legacy.");
@@ -427,6 +432,10 @@ namespace ApocalypterSteeringMod.Persistence
             _telPosition = _config.Bind("Telemetry", "Position", "TopLeft", "Screen corner: TopLeft, TopRight, BottomLeft, BottomRight.");
             _telDebugPick = _config.Bind("Telemetry", "DebugPick", false,
                 "Diagnostic (0.6.4): log the telemetry vehicle pick once per second. Off unless you are chasing a wrong telemetry car.");
+            _resetOnSaveSwitch = _config.Bind("General", "ResetOnSaveSwitch", false,
+                "When the loaded save slot differs from the previous session's, turn every tuning category off (the save's serialized vehicle state can fight the config). False = only log the switch.");
+            _lastSave = _config.Bind("General", "LastSave", "", "The save slot the mod last ran with (tracked automatically).");
+            _lastSaveStamp = _config.Bind("General", "LastSaveStamp", 0L, "Timestamp of the tracked save slot (tracked automatically).");
             _gearDebug = _config.Bind("Gearbox", "DebugHooks", false,
                 "Diagnostic (0.7.7): log every shift-controller hook with the captured type, gear count and mode. Off unless chasing a shifting bug.");
             _telCells = _config.Bind("Telemetry", "Cells", TelemetryCells.DefaultText,
@@ -445,7 +454,7 @@ namespace ApocalypterSteeringMod.Persistence
             Wire(_steerEnabled); Wire(_steerPreset); Wire(_matchGameSteeringSpeed); Wire(_steerBasedOn);
             Wire(_steerRate); Wire(_steerSmoothing); Wire(_steerUseVehicleCurve); Wire(_steerLockCurve);
             Wire(_steerReturnCurve); Wire(_steerTraction);
-            Wire(_steerSlip); Wire(_steerOppLock); Wire(_steerLinearityOverride); Wire(_steerLinExp);
+            Wire(_steerSlip); Wire(_steerOppLock); Wire(_steerLinearityOverride); Wire(_steerLinExp); Wire(_steerMaxAngle);
             Wire(_suspEnabled); Wire(_suspPreset); Wire(_suspSplit); Wire(_suspBasedOn);
             Wire(_suspSpringF); Wire(_suspSpringR); Wire(_suspHeightF); Wire(_suspHeightR);
             Wire(_suspBumpF); Wire(_suspBumpR); Wire(_suspReboundF); Wire(_suspReboundR);
@@ -662,6 +671,54 @@ namespace ApocalypterSteeringMod.Persistence
 
         // ---------------------------------------------------------------- save / push
 
+        /// <summary>
+        /// 0.8.0: called on scene load with the detected save slot. Logs the first save and any
+        /// switch; with [General] ResetOnSaveSwitch on, a switch turns every category off
+        /// ("this is an old save — cancel the config").
+        /// </summary>
+        public static void NoteLoadedSave(string name, long stamp)
+        {
+            if (string.IsNullOrEmpty(name) || _config == null)
+            {
+                return;
+            }
+            bool switched = !string.IsNullOrEmpty(_lastSave.Value) && !string.Equals(_lastSave.Value, name, StringComparison.Ordinal);
+            if (switched)
+            {
+                if (Plugin.Log != null)
+                {
+                    Plugin.Log.LogInfo("Save switched: '" + name + "' (the previous session ran '" + _lastSave.Value + "').");
+                }
+                if (_resetOnSaveSwitch.Value)
+                {
+                    ApocalypterSteeringMod.Runtime.SettingsPanel.TurnEverythingOff();
+                    if (Plugin.Log != null)
+                    {
+                        Plugin.Log.LogInfo("ResetOnSaveSwitch: every tuning category is off for the new save.");
+                    }
+                }
+            }
+            else if (!string.Equals(_lastSave.Value, name, StringComparison.Ordinal))
+            {
+                if (Plugin.Log != null)
+                {
+                    Plugin.Log.LogInfo("Loaded save: '" + name + "'.");
+                }
+            }
+            bool wasSyncing = _syncing;
+            _syncing = true;
+            try
+            {
+                _lastSave.Value = name;
+                _lastSaveStamp.Value = stamp;
+            }
+            finally
+            {
+                _syncing = wasSyncing;
+            }
+            _config.Save();
+        }
+
         public static void Save()
         {
             if (_config == null)
@@ -702,6 +759,7 @@ namespace ApocalypterSteeringMod.Persistence
                 _steerOppLock.Value = sc.OppositeLockBoost;
                 _steerLinearityOverride.Value = sc.LinearityOverride;
                 _steerLinExp.Value = sc.LinearityExponent;
+                _steerMaxAngle.Value = sc.MaxSteerAngle;
 
                 _suspEnabled.Value = SuspensionSettings.Enabled;
                 _suspPreset.Value = SuspensionSettings.ActivePreset != null ? SuspensionSettings.ActivePreset.Name : "Stock";
@@ -907,6 +965,7 @@ namespace ApocalypterSteeringMod.Persistence
             sc.OppositeLockBoost = _steerOppLock.Value;
             sc.LinearityOverride = _steerLinearityOverride.Value;
             sc.LinearityExponent = _steerLinExp.Value;
+            sc.MaxSteerAngle = _steerMaxAngle.Value;
             // Restore the BasedOn preset's curves first (fallback for missing or
             // garbage config strings), then override with parsed config values.
             sc.RestoreBaseCurve();

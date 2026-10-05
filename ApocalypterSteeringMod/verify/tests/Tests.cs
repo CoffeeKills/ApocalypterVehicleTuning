@@ -7,6 +7,7 @@ using HutongGames.PlayMaker.Actions;
 using NWH.WheelController3D;
 using ApocalypterSteeringMod.Persistence;
 using ApocalypterSteeringMod.Runtime;
+using ApocalypterSteeringMod.Game;
 using ApocalypterSteeringMod.Settings;
 using BepInEx.Configuration;
 using NWH.Common.Vehicles;
@@ -302,6 +303,9 @@ public static class Tests
 
         Console.WriteLine("0.6.4 parked-car frozen input (telemetry pick)");
         TestFrozenInputPick();
+
+        Console.WriteLine("0.8.0 max steer angle + save tracking");
+        TestSaveAndSteerExtras(dir);
 
         Console.WriteLine("0.7.0 shift controller: pure shift-point math");
         TestShiftMath();
@@ -2748,6 +2752,53 @@ public static class Tests
     /// the strip showed that car's zeros until the player steered. 0.6.4: only input that
     /// changed recently (2 s hold) is live.
     /// </summary>
+    private static void TestSaveAndSteerExtras(string dir)
+    {
+        // MaxSteerAngle config round-trip + clamp.
+        ResetAllCategories();
+        string path = Path.Combine(dir, "steer-max.cfg");
+        ModConfig.Load(new ConfigFile(path, true));
+        SteeringSettings.Enabled = true;
+        SteeringPreset c = SteeringSettings.BeginEdit();
+        c.MaxSteerAngle = 52f;
+        ModConfig.Save();
+        c.MaxSteerAngle = 0f;
+        ModConfig.Load(new ConfigFile(path, true));
+        Check(Near(SteeringPreset.Custom.MaxSteerAngle, 52f), "MaxSteerAngle round-trips through the config");
+        File.WriteAllText(path, File.ReadAllText(path).Replace("MaxSteerAngle = 52", "MaxSteerAngle = 900"));
+        ModConfig.Load(new ConfigFile(path, true));
+        Check(Near(SteeringPreset.Custom.MaxSteerAngle, Limits.MaxSteerAngleMax), "MaxSteerAngle clamps to the limit");
+
+        // SaveTracker: the newest SaveGameN.es3 wins; a missing directory is null.
+        string saves = Path.Combine(dir, "saves");
+        Directory.CreateDirectory(saves);
+        File.WriteAllText(Path.Combine(saves, "SaveGame1.es3"), "a");
+        File.WriteAllText(Path.Combine(saves, "SaveGame2.es3"), "b");
+        File.SetLastWriteTimeUtc(Path.Combine(saves, "SaveGame2.es3"), new DateTime(2024, 1, 1));
+        File.SetLastWriteTimeUtc(Path.Combine(saves, "SaveGame1.es3"), new DateTime(2026, 1, 1));
+        Check(Path.GetFileName(SaveTracker.NewestSave(saves)) == "SaveGame1.es3", "NewestSave: the newest slot wins");
+        Check(SaveTracker.NewestSave(Path.Combine(dir, "nope")) == null, "NewestSave: a missing directory is null");
+
+        // NoteLoadedSave: the same slot changes nothing; a switch with ResetOnSaveSwitch resets everything.
+        string cfg2 = Path.Combine(dir, "saveswitch.cfg");
+        ModConfig.Load(new ConfigFile(cfg2, true));
+        SteeringSettings.Enabled = true;
+        SuspensionSettings.Enabled = true;
+        AssistsSettings.Enabled = true;
+        ModConfig.NoteLoadedSave("SaveGame2.es3", 0L);
+        Check(SteeringSettings.Enabled && SuspensionSettings.Enabled && AssistsSettings.Enabled, "same save slot: nothing changes");
+        string txt = File.ReadAllText(cfg2);
+        File.WriteAllText(cfg2, txt.Replace("ResetOnSaveSwitch = false", "ResetOnSaveSwitch = true"));
+        ModConfig.Load(new ConfigFile(cfg2, true));
+        SteeringSettings.Enabled = true;
+        SuspensionSettings.Enabled = true;
+        AssistsSettings.Enabled = true;
+        ModConfig.NoteLoadedSave("SaveGame1.es3", 0L);   // the switch
+        Check(!SteeringSettings.Enabled && !SuspensionSettings.Enabled && !AssistsSettings.Enabled,
+            "ResetOnSaveSwitch: a save switch turns every category off (cancel the config for the old save)");
+        ResetAllCategories();
+    }
+
     private static void TestFrozenInputPick()
     {
         UnityEngine.Object.Registry.Clear();
@@ -3545,11 +3596,12 @@ public static class Tests
         }
         Check(kept && oldKeys.Count == 133, "all 133 keys of a real 0.6.4 file survive load + save with their values (no rename, removal or default change)");
         string[] added = { "Drivetrain.Custom|DiffCenterMode", "Gearbox.Custom|SpreadRatios", "Gearbox.Custom|ShiftUpFactor", "Gearbox.Custom|ShiftDownFactor",
-            "Gearbox.Custom|KickdownScale", "Telemetry|Cells", "Gearbox|DebugHooks" };
+            "Gearbox.Custom|KickdownScale", "Telemetry|Cells", "Gearbox|DebugHooks", "Steering.Custom|MaxSteerAngle",
+            "General|ResetOnSaveSwitch", "General|LastSave", "General|LastSaveStamp" };
         bool all = newKeys.Count == oldKeys.Count + added.Length;
         foreach (string k in added) all &= newKeys.ContainsKey(k);
         if (!all) foreach (string k in newKeys.Keys) if (!oldKeys.ContainsKey(k)) Console.WriteLine("  new key: " + k);
-        Check(all, "exactly seven keys added: DiffCenterMode, SpreadRatios, ShiftUpFactor, ShiftDownFactor, KickdownScale, Cells, DebugHooks");
+        Check(all, "exactly eleven keys added (0.8.0 adds MaxSteerAngle, ResetOnSaveSwitch, LastSave, LastSaveStamp)");
         File.WriteAllText(path, after.Replace("ShiftUpFactor = 1", "ShiftUpFactor = 9").Replace("KickdownScale = 1", "KickdownScale = 0.1").Replace("DiffCenterMode = Stock", "DiffCenterMode = 7"));
         ModConfig.Load(new ConfigFile(path, true));
         Check(Near(GearboxPreset.Custom.ShiftUpFactor, Limits.ShiftFactorMax) && Near(GearboxPreset.Custom.KickdownScale, Limits.KickdownMin)

@@ -52,6 +52,8 @@ namespace ApocalypterSteeringMod
         {
             // Stay out of the game's post-load spawn wave (docs/crash-2026-10-04.md).
             VehicleTuner.NotifySceneLoaded();
+            SaveTracker.Refresh();
+            ModConfig.NoteLoadedSave(SaveTracker.CurrentName, SaveTracker.CurrentStamp);
             EnsureRunner("scene " + scene.name);
         }
 

@@ -214,6 +214,20 @@ public static class PrefixTests
             SteeringSettings.Select(SteeringPreset.Vanilla);
             Check(TractionEdgeSteeringPatch.Prefix(s), "Vanilla preset -> vanilla code runs");
             SteeringSettings.Select(SteeringPreset.Custom);
+
+            // 0.8.0: the MaxSteerAngle override raises the lock for drift tunes.
+            s.angle = 0f;
+            vc.input.Steering = 1f;
+            vc.Speed = 20f;
+            vc.vehicleRigidbody.velocity = new Vector3(0f, 0f, 20f);
+            vc.vehicleRigidbody.angularVelocity = new Vector3(0f, 0f, 0f);
+            SteeringPreset.Custom.TractionClampEnabled = false;
+            SteeringPreset.Custom.MaxSteerAngle = 45f;
+            TractionEdgeSteeringPatch.Prefix(s);
+            SteeringPreset.Custom.MaxSteerAngle = 0f;
+            SteeringPreset.Custom.TractionClampEnabled = true;
+            Check(s.angle <= 45.001f && s.angle > 44f,
+                "MaxSteerAngle 45 overrides a 30-deg car's lock (angle " + s.angle.ToString("0.0") + ")");
         }
         catch (Exception ex)
         {

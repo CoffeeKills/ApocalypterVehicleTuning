@@ -18,6 +18,7 @@ namespace ApocalypterSteeringMod.Settings
         public const float OppLockMin = 1f, OppLockMax = 5f;
         public const float ReturnScaleMin = 0.1f, ReturnScaleMax = 1f;  // legacy v0.3.x key only
         public const float LinExpMin = 0.1f, LinExpMax = 5f;
+        public const float MaxSteerAngleMin = 0f, MaxSteerAngleMax = 70f;
 
         // Suspension fine-tune sliders (legacy v3.1 multiplier on top of the preset).
         public const float UserMin = 0.5f, UserMax = 2f;
