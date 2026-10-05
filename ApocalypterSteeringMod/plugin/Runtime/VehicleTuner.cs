@@ -122,6 +122,8 @@ namespace ApocalypterSteeringMod.Runtime
             public DrivetrainData Drivetrain;
             public AeroData Aero;
             public GearboxData Gearbox;
+            public WeightData Weight;
+            public float MassRatio = 1f;    // weight's mass scale currently baked into the springs
             public AssistHandles Assists;
             public bool HasTyreWear;
             public bool AlignmentMoved;     // wheel positions currently offset (wheelbase/trackWidth stale)
@@ -145,7 +147,8 @@ namespace ApocalypterSteeringMod.Runtime
             Drivetrain = 16,
             Assists = 32,
             Alignment = 64,
-            Gearbox = 128
+            Gearbox = 128,
+            Weight = 256
         }
 
         private readonly Dictionary<VehicleController, VehicleRecord> _records = new Dictionary<VehicleController, VehicleRecord>();
@@ -154,7 +157,7 @@ namespace ApocalypterSteeringMod.Runtime
         private readonly List<VehicleController> _dead = new List<VehicleController>();
         private float _nextScan;
         private bool _suspApplied, _aeroApplied, _brakesApplied, _gripApplied, _drivetrainApplied, _assistsApplied,
-            _alignmentApplied, _gearboxApplied;
+            _alignmentApplied, _gearboxApplied, _weightApplied;
 
         /// <summary>Number of vehicles currently tracked (shown in the panel).</summary>
         public int TrackedVehicles
@@ -284,6 +287,11 @@ namespace ApocalypterSteeringMod.Runtime
                 if (_gearboxApplied) { RestoreAllGearbox(); _gearboxApplied = false; }
                 TrimPendingGearbox();
             }
+
+            // Weight LAST: its spring rescale delta-composes with the suspension
+            // block's same-scan writes (see RescaleSpringsForMass).
+            if (WeightSettings.Enabled) { if (!_weightApplied) RefreshBaselines(Category.Weight); ApplyAllWeight(); _weightApplied = true; }
+            else if (_weightApplied) { RestoreAllWeight(); _weightApplied = false; }
         }
 
         /// <summary>Forget destroyed vehicles (allocation-free: reuses _dead).</summary>
@@ -566,6 +574,8 @@ namespace ApocalypterSteeringMod.Runtime
             catch (Exception ex) { record.Aero = null; incomplete = true; LogFault("Aero capture", vc, ex); }
             try { record.Gearbox = CaptureGearbox(vc); }
             catch (Exception ex) { record.Gearbox = null; incomplete = true; LogFault("Gearbox capture", vc, ex); }
+            try { record.Weight = CaptureWeight(vc, record); }
+            catch (Exception ex) { record.Weight = null; incomplete = true; LogFault("Weight capture", vc, ex); }
             try { record.Assists = CreateAssistHandles(vc); }
             catch (Exception ex) { record.Assists = null; incomplete = true; LogFault("Assists capture", vc, ex); }
             try { record.HasTyreWear = HasTyreWearComponent(vc); }
@@ -632,7 +642,8 @@ namespace ApocalypterSteeringMod.Runtime
             Grip,
             Drivetrain,
             Alignment,
-            Gearbox
+            Gearbox,
+            Weight
         }
 
         /// <summary>
@@ -676,7 +687,7 @@ namespace ApocalypterSteeringMod.Runtime
                         {
                             continue;
                         }
-                        wk.Value.SpringForce = u.SpringMaxForce;
+                        wk.Value.SpringForce = u.SpringMaxForce / r.MassRatio;   // weight's mass scale is baked into the live value
                         wk.Value.SpringLength = u.SpringMaxLength;
                         wk.Value.BumpRate = u.DamperBumpRate;
                         wk.Value.ReboundRate = u.DamperReboundRate;
@@ -749,6 +760,16 @@ namespace ApocalypterSteeringMod.Runtime
                     if (r.Vc.powertrain != null && (r.Gearbox == null || !r.Gearbox.PendingTrim))
                     {
                         r.Gearbox = CaptureGearbox(r.Vc);
+                    }
+                    break;
+
+                case Category.Weight:
+                    // Re-read the stock mass properties on every toggle-on: the game
+                    // may have changed the mass since (cargo, fuel). Unlike aero there
+                    // is no shipped module to protect — every WeightData is ours.
+                    if (r.Vc.vehicleRigidbody != null)
+                    {
+                        r.Weight = CaptureWeight(r.Vc, r);
                     }
                     break;
             }
@@ -1377,8 +1398,9 @@ namespace ApocalypterSteeringMod.Runtime
             if (_drivetrainApplied) { RestoreAllDrivetrain(); }
             if (_alignmentApplied) { RestoreAllAlignment(); }
             if (_gearboxApplied) { RestoreAllGearbox(); }
+            if (_weightApplied) { RestoreAllWeight(); }
             _suspApplied = _aeroApplied = _brakesApplied = _gripApplied = _drivetrainApplied = _assistsApplied = false;
-            _alignmentApplied = _gearboxApplied = false;
+            _alignmentApplied = _gearboxApplied = _weightApplied = false;
         }
     }
 }

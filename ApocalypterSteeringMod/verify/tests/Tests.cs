@@ -81,6 +81,27 @@ public static class Tests
 
     private static bool Near(float a, float b, float eps = 1e-3f) { return Math.Abs(a - b) <= eps; }
 
+    // The tuner's weight capture (0.10.0) onboards a WeightLiftModule into every
+    // captured vehicle, so module-list checks must filter by type.
+    private static int CountOf<T>(VehicleController vc) where T : NWH.VehiclePhysics2.VehicleComponent
+    {
+        int n = 0;
+        foreach (NWH.VehiclePhysics2.VehicleComponent c in vc.moduleManager.Components)
+        {
+            if (c is T) n++;
+        }
+        return n;
+    }
+
+    private static T FindOf<T>(VehicleController vc) where T : NWH.VehiclePhysics2.VehicleComponent
+    {
+        foreach (NWH.VehiclePhysics2.VehicleComponent c in vc.moduleManager.Components)
+        {
+            if (c is T) return (T)c;
+        }
+        return null;
+    }
+
     private static VehicleController MakeCar(out FakeWheel[] wheels, float pivotZ)
     {
         var vc = new VehicleController();
@@ -508,17 +529,17 @@ public static class Tests
         AeroSettings.SetPresetByName("Race");
         AeroPreset race = AeroSettings.ActivePreset;
         tuner.ReapplyNow();
-        AerodynamicsModule with = (AerodynamicsModule)vcWith.moduleManager.Components[0];
+        AerodynamicsModule with = FindOf<AerodynamicsModule>(vcWith);
         Check(Near(with.frontalCd, 0.4f * race.DragScale), "module Cd scaled");
         Check(Near(with.downforcePoints[0].maxForce, 5000f * race.DownforceScale), "downforce point scaled");
-        Check(vcWith.moduleManager.Components.Count == 1, "no extra module onboarded");
+        Check(CountOf<AerodynamicsModule>(vcWith) == 1, "no extra module onboarded");
 
         // (b) Vehicle WITHOUT a module: onboarded on apply, disabled on restore, reused.
         var vcWithout = MakeCar(out FakeWheel[] _, 0f);
         UnityEngine.Object.Registry.Add(vcWithout);
         tuner.ReapplyNow();
-        Check(vcWithout.moduleManager.Components.Count == 1, "module onboarded for vehicle without one");
-        AerodynamicsModule added = (AerodynamicsModule)vcWithout.moduleManager.Components[0];
+        Check(CountOf<AerodynamicsModule>(vcWithout) == 1, "module onboarded for vehicle without one");
+        AerodynamicsModule added = FindOf<AerodynamicsModule>(vcWithout);
         Check(added.state.isEnabled, "onboarded module enabled");
         Check(Near(added.frontalCd, 0.35f * (race.DragScale - 1f)), "onboarded module Cd = default x the preset's EXCESS drag (0.5.0)");
 
@@ -529,7 +550,7 @@ public static class Tests
 
         AeroSettings.Enabled = true;
         tuner.ApplyLive();
-        Check(vcWithout.moduleManager.Components.Count == 1, "re-enable reuses the onboarded module (no duplicates)");
+        Check(CountOf<AerodynamicsModule>(vcWithout) == 1, "re-enable reuses the onboarded module (no duplicates)");
         Check(added.state.isEnabled, "re-enable re-enables the same module");
         AeroSettings.ResetAll();
         AeroSettings.Enabled = false;
@@ -765,7 +786,7 @@ public static class Tests
         NWH.VehiclePhysics2.Modules.ManagerVehicleComponent.OnboardEnablesState = false;
         Check(!threw, "vehicle without a module manager does not break the apply pass");
         Check(!mod.simulateDrag && !mod.simulateDownforce, "Race never switches on effects the designer turned off");
-        AerodynamicsModule added = (AerodynamicsModule)vcNone.moduleManager.Components[0];
+        AerodynamicsModule added = FindOf<AerodynamicsModule>(vcNone);
         Check(added.IsActive && added.simulateDrag, "onboarded module is initialised and active (state settings said enabled)");
 
         // Back to Stock while enabled: the vehicle had no aero, so the module must go inert.
@@ -781,7 +802,7 @@ public static class Tests
         tuner.ApplyLive();
         added.VC_Enable(false);   // e.g. NWH LOD switching the module back on after our restore
         Check(!added.simulateDrag && !added.simulateDownforce, "restored onboarded module is inert even if something re-enables it");
-        Check(vcNone.moduleManager.Components.Count == 1, "still exactly one onboarded module");
+        Check(CountOf<AerodynamicsModule>(vcNone) == 1, "still exactly one onboarded aero module");
         AeroSettings.ResetAll();
     }
 
@@ -1097,18 +1118,18 @@ public static class Tests
         // Street = x0.8 downforce, x1.0 ("stock") drag: nothing to add to a vehicle without aero.
         AeroSettings.SetPresetByName("Street");
         tuner.ReapplyNow();
-        Check(vc.moduleManager.Components.Count == 0, "Street (drag x1.0) onboards nothing on an aero-less vehicle (0.4.0: full 0.35 Cd)");
+        Check(CountOf<AerodynamicsModule>(vc) == 0, "Street (drag x1.0) onboards nothing on an aero-less vehicle (0.4.0: full 0.35 Cd)");
 
         // Less drag than stock cannot ADD drag.
         AeroPreset custom = AeroSettings.BeginEdit();
         custom.DragScale = 0.8f;
         custom.DownforceScale = 1.5f;
         tuner.ApplyLive();
-        Check(vc.moduleManager.Components.Count == 0, "drag x0.8 (+ downforce x1.5) adds no module/drag (0.4.0 added 0.28 Cd)");
+        Check(CountOf<AerodynamicsModule>(vc) == 0, "drag x0.8 (+ downforce x1.5) adds no module/drag (0.4.0 added 0.28 Cd)");
 
         custom.DragScale = 1.2f;
         tuner.ApplyLive();
-        AerodynamicsModule m = vc.moduleManager.Components.Count == 1 ? (AerodynamicsModule)vc.moduleManager.Components[0] : null;
+        AerodynamicsModule m = CountOf<AerodynamicsModule>(vc) == 1 ? FindOf<AerodynamicsModule>(vc) : null;
         Check(m != null && m.simulateDrag && !m.simulateDownforce && Near(m.frontalCd, 0.35f * 0.2f) && Near(m.sideCd, 1.05f * 0.2f),
             "drag x1.2 onboards drag = default Cd x 0.2 (continuous at x1.0), never downforce");
 
@@ -1278,7 +1299,7 @@ public static class Tests
         AeroSettings.SetPresetByName("Race");
         bool threw = false;
         try { tuner.ApplyLive(); } catch (Exception) { threw = true; }
-        Check(!threw && dead.moduleManager.Components.Count == 0,
+        Check(!threw && CountOf<AerodynamicsModule>(dead) == 0,
             "ApplyLive skips a vehicle destroyed since the last scan (0.5.0 onboarded aero into it)");
         Check(tuner.TrackedVehicles == 0, "destroyed vehicle forgotten by ApplyLive, not only by the 2 s scan");
         AeroSettings.ResetAll();
@@ -2008,7 +2029,7 @@ public static class Tests
         Check(GearboxPreset.Custom.GearCount == 12 && Near(GearboxPreset.Custom.Scale(3), 0.25f), "gear count clamped to 12, gear factor to 0.25");
         Check(GearboxPreset.Custom.TransmissionMode == GearboxMode.Stock && UiSettings.TelemetryPosition == TelemetryCorner.TopLeft,
             "numeric / unknown enum names fall back (Stock, TopLeft)");
-        Check(Near(UiSettings.PanelWidth, 1000f) && Near(UiSettings.PanelScale, 0.3f) && UiSettings.LastTab == 7, "panel width/scale/last tab clamped");
+        Check(Near(UiSettings.PanelWidth, 1000f) && Near(UiSettings.PanelScale, 0.3f) && UiSettings.LastTab == 8, "panel width/scale/last tab clamped");
         Check(ModConfig.ParseGearboxMode(" manual ") == GearboxMode.Manual && UiSettings.ParseCorner("topright") == TelemetryCorner.TopRight,
             "names parse case/space-tolerant");
         Check(UiSettings.ClampTab(-3) == 0 && UiSettings.ClampTab(10) == 0 && UiSettings.ClampTab(7) == 7, "LastTab parse: garbage -> first tab");
@@ -3568,7 +3589,7 @@ public static class Tests
         Check(GearboxSettings.Enabled && GearboxSettings.ActivePreset == gc && gc.GearCount == 7 && Near(gc.Scale(2), 1.1f) && gc.TransmissionMode == GearboxMode.Manual
               && Near(gc.ShiftUpFactor, 1f) && Near(gc.ShiftDownFactor, 1f) && Near(gc.KickdownScale, 1f) && !gc.SpreadRatios,
             "0.6.4 cfg: gearbox kept (now live: the gate is gone), new shift knobs at their neutral 1");
-        Check(AlignmentSettings.Enabled && UiSettings.TelemetryEnabled && Near(UiSettings.PanelWidth, 300f) && UiSettings.LastTab == 7
+        Check(AlignmentSettings.Enabled && UiSettings.TelemetryEnabled && Near(UiSettings.PanelWidth, 300f) && UiSettings.LastTab == 8
               && TargetSettings.Mode == TargetMode.Selected && TargetSettings.SelectedName == "Duke(Clone)6792"
               && TelemetryCells.Serialize() == TelemetryCells.DefaultText,
             "0.6.4 cfg: alignment, UI, telemetry, target kept; the new [Telemetry] Cells key defaults to Speed;Rpm;Gear;SlipFront");
@@ -3578,12 +3599,6 @@ public static class Tests
         bool kept = true;
         foreach (KeyValuePair<string, string> kv in oldKeys)
         {
-            // The one documented 0.7.1 exception: a stored tab index beyond the new 8-tab
-            // panel clamps to the first tab (the old Gearbox tab no longer exists).
-            if (kv.Key == "UI|LastTab")
-            {
-                continue;
-            }
             string nv;
             if (!newKeys.TryGetValue(kv.Key, out nv) || nv != kv.Value)
             {

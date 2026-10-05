@@ -34,7 +34,7 @@ namespace ApocalypterSteeringMod.Runtime
                     continue;
                 }
                 WheelData b = wk.Value;
-                u.SpringMaxForce = b.SpringForce * (b.IsFront ? p.SpringFront : p.SpringRear);
+                u.SpringMaxForce = b.SpringForce * (b.IsFront ? p.SpringFront : p.SpringRear) * r.MassRatio;
                 u.SpringMaxLength = b.SpringLength * (b.IsFront ? p.RideHeightFront : p.RideHeightRear);
                 u.DamperBumpRate = b.BumpRate * (b.IsFront ? p.BumpFront : p.BumpRear);
                 u.DamperReboundRate = b.ReboundRate * (b.IsFront ? p.ReboundFront : p.ReboundRear);
@@ -58,7 +58,7 @@ namespace ApocalypterSteeringMod.Runtime
                 {
                     continue;
                 }
-                u.SpringMaxForce = wk.Value.SpringForce;
+                u.SpringMaxForce = wk.Value.SpringForce * r.MassRatio;
                 u.SpringMaxLength = wk.Value.SpringLength;
                 u.DamperBumpRate = wk.Value.BumpRate;
                 u.DamperReboundRate = wk.Value.ReboundRate;

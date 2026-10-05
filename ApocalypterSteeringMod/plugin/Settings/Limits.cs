@@ -66,12 +66,16 @@ namespace ApocalypterSteeringMod.Settings
         public const float ShiftFactorMin = 0.5f, ShiftFactorMax = 1.5f;         // x upshift / downshift RPM
         public const float KickdownMin = 0.5f, KickdownMax = 2f;                 // x the 15 % kickdown raise
 
+        // Weight (0.10.0): kg of ballast at each axle; negative kg = balloon lift.
+        public const float WeightKgMin = -1000f, WeightKgMax = 2000f;
+        public const float WeightLiftCapFactor = 0.8f;                 // lift clamp: x stockMass x gravity
+
         // Panel / telemetry (0.6.1 widened).
         public const float PanelScaleMin = 0.3f, PanelScaleMax = 3f;
         public const float PanelWidthMin = 300f, PanelWidthMax = 1000f;
         public const float PanelWidthDefault = 460f;
         public const float PanelAlphaMin = 0.15f, PanelAlphaMax = 1f;
-        public const int LastTabMin = 0, LastTabMax = 7;
+        public const int LastTabMin = 0, LastTabMax = 8;
         public const float TelemetryScaleMin = 0.3f, TelemetryScaleMax = 3f;
     }
 }
