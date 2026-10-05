@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Convenience project for IDEs. The reference build is verify/run.sh (csc, no NuGet). -->
+  <PropertyGroup>
+    <TargetFrameworks>netstandard2.0;net8.0</TargetFrameworks>
+    <LangVersion>9</LangVersion>
+    <Nullable>disable</Nullable>
+    <RootNamespace>SPO.Vehicle</RootNamespace>
+  </PropertyGroup>
+</Project>

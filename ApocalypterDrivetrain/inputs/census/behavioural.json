@@ -1,0 +1,307 @@
+{
+  "schema": "spo-behavioural/1",
+  "note": "Source 6 (authored, not generated). NWH behaviours the game or the mods rely on, beyond member existence. Member names are from the mod harness stubs (verify/mod-harness/stubs/GameStubs.cs, copied from decompiled NWH with file:line cites) and the decoded FSM data (inputs/fsm-template-dump.md); the census resolves every listed member against the real DLLs. 'stance': keep = SPO must reproduce it; replace = SPO provides it natively (the NWH version goes away); must-not-have = an NWH behaviour SPO must make impossible (a horrid-states item). Test sketches become real tests in the milestone named.",
+  "behaviours": [
+    {
+      "id": "B1",
+      "title": "FSM shift requests: input.ShiftInto / ShiftUp / ShiftDown",
+      "behaviour": "The game never writes transmission.Gear. INPUT_GearChange / INPUT_HShifter write input.ShiftInto (int: -1 = R, 0 = N, 1..5); INPUT_ShiftUpDown writes ShiftUp/ShiftDown = true. NWH's ManualShift consumes them each update; ShiftInto's 'no request' sentinel is -999 (stub :91) and anything > -100 is a request (stub :341).",
+      "reliedOnBy": "game FSMs (196 + 14 + 14 writes), the tuning mod's shift controller",
+      "members": [
+        {
+          "kind": "member",
+          "type": "NWH.VehiclePhysics2.VehicleController",
+          "path": "input.ShiftInto"
+        },
+        {
+          "kind": "member",
+          "type": "NWH.VehiclePhysics2.VehicleController",
+          "path": "input.ShiftUp"
+        },
+        {
+          "kind": "member",
+          "type": "NWH.VehiclePhysics2.VehicleController",
+          "path": "input.ShiftDown"
+        }
+      ],
+      "stance": "keep",
+      "milestone": "A1",
+      "testSketch": "Drive the SPO transmission with the exact FSM write sequences from template_dump (R, N, 1..5 one-shots; H-shifter hold/release; up/down pulses) and assert the engaged gear after each; a request is consumed exactly once; the -999 sentinel never shifts; an out-of-range request (e.g. 9 on a 5-speed) is clamped/ignored and gear index stays valid."
+    },
+    {
+      "id": "B2",
+      "title": "Gear list layout [reverse..., 0 (neutral), forward...] and the Gear index",
+      "behaviour": "TransmissionComponent.gears is a List<float> laid out reverse ratios first, then 0 for neutral, then forward ratios (stub :299); Gear is -1.. for reverse, 0 neutral, 1.. forward, mapped onto that list. NWH indexes gears[gearIndex] unguarded.",
+      "reliedOnBy": "the tuning mod (gear ratio editing, 12-gear configs), CheckTag FSM (finalGearRatio)",
+      "members": [
+        {
+          "kind": "member",
+          "type": "NWH.VehiclePhysics2.Powertrain.TransmissionComponent",
+          "path": "gears"
+        },
+        {
+          "kind": "member",
+          "type": "NWH.VehiclePhysics2.Powertrain.TransmissionComponent",
+          "path": "Gear"
+        },
+        {
+          "kind": "member",
+          "type": "NWH.VehiclePhysics2.VehicleController",
+          "path": "powertrain.transmission.finalGearRatio"
+        }
+      ],
+      "stance": "keep (layout) / must-not-have (unguarded index)",
+      "milestone": "A1",
+      "testSketch": "Property test: for random gear lists (1-3 reverse, 1-12 forward) and random shift sequences, the gear index always maps inside the list; shrinking the list while in a high gear clamps instead of throwing."
+    },
+    {
+      "id": "B3",
+      "title": "Shift delegate reassignment on transmissionType change",
+      "behaviour": "NWH reassigns shiftDelegate (Manual/Automatic/CVT) whenever transmissionType changes (stub :318-326, :487-495), silently replacing any delegate a mod installed. CheckTag writes transmissionType (28 writes).",
+      "reliedOnBy": "nothing should — the tuning mod needed a delegate guard because of it",
+      "members": [
+        {
+          "kind": "member",
+          "type": "NWH.VehiclePhysics2.Powertrain.TransmissionComponent",
+          "path": "shiftDelegate"
+        },
+        {
+          "kind": "member",
+          "type": "NWH.VehiclePhysics2.Powertrain.TransmissionComponent",
+          "path": "transmissionType"
+        },
+        {
+          "kind": "member",
+          "type": "NWH.VehiclePhysics2.VehicleController",
+          "path": "powertrain.transmission.transmissionType"
+        }
+      ],
+      "stance": "must-not-have",
+      "milestone": "A1",
+      "testSketch": "Toggle transmissionType through every value 1000x with an SPO shift policy installed; assert the policy object is never replaced and no shift happens as a side effect of the toggle."
+    },
+    {
+      "id": "B4",
+      "title": "Automatic gear skipping (the 12-gear 'launch from gear 8' bug)",
+      "behaviour": "NWH's AutomaticShift can jump several gears at once (stub :355-390), e.g. launching a 12-speed from gear 8.",
+      "reliedOnBy": "nothing — a known bug class",
+      "members": [
+        {
+          "kind": "member",
+          "type": "NWH.VehiclePhysics2.Powertrain.TransmissionComponent",
+          "path": "UpshiftRPM"
+        },
+        {
+          "kind": "member",
+          "type": "NWH.VehiclePhysics2.Powertrain.TransmissionComponent",
+          "path": "DownshiftRPM"
+        }
+      ],
+      "stance": "must-not-have",
+      "milestone": "A1",
+      "testSketch": "No-hunting grid: every (gear count 4..12) x (throttle 0..1) x (load) launch from standstill starts in gear 1 and never changes by more than one gear per shift event (kickdown excepted, bounded and explicit)."
+    },
+    {
+      "id": "B5",
+      "title": "Live powertrain relinking: Output / OutputB",
+      "behaviour": "PowertrainComponent.Output (and DifferentialComponent.OutputB) can be reassigned at runtime to re-route torque (stub :152, :539); the tuning mod rewires drivetrain layouts live.",
+      "reliedOnBy": "the tuning mod (layout rewiring)",
+      "members": [
+        {
+          "kind": "member",
+          "type": "NWH.VehiclePhysics2.Powertrain.PowertrainComponent",
+          "path": "Output"
+        },
+        {
+          "kind": "member",
+          "type": "NWH.VehiclePhysics2.Powertrain.DifferentialComponent",
+          "path": "OutputB"
+        }
+      ],
+      "stance": "keep",
+      "milestone": "A2",
+      "testSketch": "Layout rewiring pass: switch FWD -> RWD -> AWD -> back while driving (harness), assert torque reaches exactly the wheels of the active layout, no NaN, no lost/duplicated torque (sum of wheel torques == driveline output within tolerance)."
+    },
+    {
+      "id": "B6",
+      "title": "Torque and brake modifier lists",
+      "behaviour": "EngineComponent.powerModifiers and Brakes.brakeTorqueModifiers are lists of delegates evaluated every update (stub :253, :753); mods append to them (ABS/TCS-style assists).",
+      "reliedOnBy": "the tuning mod (assists)",
+      "members": [
+        {
+          "kind": "member",
+          "type": "NWH.VehiclePhysics2.Powertrain.EngineComponent",
+          "path": "powerModifiers"
+        },
+        {
+          "kind": "member",
+          "type": "NWH.VehiclePhysics2.Brakes",
+          "path": "brakeTorqueModifiers"
+        }
+      ],
+      "stance": "replace (SPO assist layer) — keep the lists working while NWH is still in charge of that subsystem",
+      "milestone": "A2 / A4",
+      "testSketch": "A modifier returning 0.5 halves engine torque / brake torque that tick; removing it restores the original; an exception inside a modifier is contained (vehicle stays drivable)."
+    },
+    {
+      "id": "B7",
+      "title": "WheelUAPI setters take effect live",
+      "behaviour": "Writes to NWH.Common.Vehicles.WheelUAPI setters (SpringMaxForce, SpringMaxLength, DamperBumpRate, DamperReboundRate, friction grip/stiffness, SteerAngle) and the FSMs' WheelController writes (Radius, Mass, Width, spring.maxLength, forwardFriction.grip) change the next physics step.",
+      "reliedOnBy": "the tuning mod (suspension/grip presets), game FSMs (846 WheelController writes)",
+      "members": [
+        {
+          "kind": "member",
+          "type": "NWH.Common.Vehicles.WheelUAPI",
+          "path": "SpringMaxForce"
+        },
+        {
+          "kind": "member",
+          "type": "NWH.Common.Vehicles.WheelUAPI",
+          "path": "SpringMaxLength"
+        },
+        {
+          "kind": "member",
+          "type": "NWH.Common.Vehicles.WheelUAPI",
+          "path": "DamperBumpRate"
+        },
+        {
+          "kind": "member",
+          "type": "NWH.Common.Vehicles.WheelUAPI",
+          "path": "DamperReboundRate"
+        },
+        {
+          "kind": "member",
+          "type": "NWH.Common.Vehicles.WheelUAPI",
+          "path": "LateralFrictionGrip"
+        },
+        {
+          "kind": "member",
+          "type": "NWH.Common.Vehicles.WheelUAPI",
+          "path": "LongitudinalFrictionGrip"
+        },
+        {
+          "kind": "member",
+          "type": "NWH.Common.Vehicles.WheelUAPI",
+          "path": "SteerAngle"
+        },
+        {
+          "kind": "member",
+          "type": "NWH.WheelController3D.WheelController",
+          "path": "Radius"
+        },
+        {
+          "kind": "member",
+          "type": "NWH.WheelController3D.WheelController",
+          "path": "spring.maxLength"
+        }
+      ],
+      "stance": "keep",
+      "milestone": "A3",
+      "testSketch": "Change each parameter mid-drive in the harness; the very next tick's force uses the new value; extreme values (0, negative, huge, NaN) are rejected or clamped at the boundary and the vehicle stays recoverable."
+    },
+    {
+      "id": "B8",
+      "title": "Exit zeroes throttle/brakes; other inputs go stale",
+      "behaviour": "The Drive FSM's exit state writes input.Throttle = 0 and input.Brakes = 0 (fsm-template-dump.md), but nothing resets steering, handbrake, clutch or a pending shift request — the 'stale input after exit' trap.",
+      "reliedOnBy": "game FSMs",
+      "members": [
+        {
+          "kind": "member",
+          "type": "NWH.VehiclePhysics2.VehicleController",
+          "path": "input.Throttle"
+        },
+        {
+          "kind": "member",
+          "type": "NWH.VehiclePhysics2.VehicleController",
+          "path": "input.Brakes"
+        },
+        {
+          "kind": "member",
+          "type": "NWH.VehiclePhysics2.VehicleController",
+          "path": "input.Steering"
+        },
+        {
+          "kind": "member",
+          "type": "NWH.VehiclePhysics2.VehicleController",
+          "path": "input.Handbrake"
+        },
+        {
+          "kind": "member",
+          "type": "NWH.VehiclePhysics2.VehicleController",
+          "path": "input.Clutch"
+        }
+      ],
+      "stance": "keep the writes working; must-not-have the stale state (SPO inputs expire to neutral after N ticks without a write)",
+      "milestone": "A1 (inputs) / A4 (safety nets)",
+      "testSketch": "Replay enter -> drive -> exit; after exit, with no further writes, every SPO input decays to neutral within N ticks; re-entry starts from neutral."
+    },
+    {
+      "id": "B9",
+      "title": "Fuel cans write FuelModuleWrapper.module.amount",
+      "behaviour": "UseCan FSMs set NWH.VehiclePhysics2.Modules.Fuel.FuelModuleWrapper.module.amount (53 writes); the engine stops when fuel is empty.",
+      "reliedOnBy": "game FSMs",
+      "members": [
+        {
+          "kind": "member",
+          "type": "NWH.VehiclePhysics2.Modules.Fuel.FuelModuleWrapper",
+          "path": "module.amount"
+        }
+      ],
+      "stance": "keep (NWH's module stays in place under inside-out)",
+      "milestone": "A2",
+      "testSketch": "Set amount to 0 with the engine running: SPO engine stops within one tick and restarts after amount > 0 + EngineStartStop; negative/NaN amount is clamped."
+    },
+    {
+      "id": "B10",
+      "title": "Engine-part swaps rewrite the gearbox: CheckTag + VehicleController.SetGearArrayByValue",
+      "behaviour": "The engine-part FSMs (CheckTag, state 'vehPart', one per engine prefab, e.g. '594cc I2 23HP 39Nm Gasoline') call VehicleController.SetGearArrayByValue via CallMethod (16 calls) and set transmissionType / UpshiftRPM / DownshiftRPM / finalGearRatio and engine parameters by SetProperty. SetGearArrayByValue is not part of stock NWH Vehicle Physics 2 as far as the builder knows: the game's NWH DLL is probably developer-modified (consistent with SPEC §9: no version stamp). Found by the M0a FSM census (builder preview, 2026-10-05).",
+      "reliedOnBy": "game FSMs (engine swaps)",
+      "members": [
+        {
+          "kind": "method",
+          "type": "NWH.VehiclePhysics2.VehicleController",
+          "path": "SetGearArrayByValue"
+        },
+        {
+          "kind": "member",
+          "type": "NWH.VehiclePhysics2.VehicleController",
+          "path": "powertrain.engine.maxPower"
+        },
+        {
+          "kind": "member",
+          "type": "NWH.VehiclePhysics2.VehicleController",
+          "path": "powertrain.transmission.finalGearRatio"
+        }
+      ],
+      "stance": "keep (SPO's transmission must accept a new gear array at runtime, mid-session, safely)",
+      "milestone": "A1",
+      "testSketch": "Swap engines (and thus gear arrays: 4..12 forward gears) while parked, while driving in a high gear, and while a shift is pending; gear index stays valid, no auto-skip, no NaN, the new ratios apply on the next tick."
+    },
+    {
+      "id": "B11",
+      "title": "Floating origin while driving: NWH.Common.FloatingOrigin added on enter, destroyed on exit",
+      "behaviour": "The Drive FSM AddComponent's NWH.Common.FloatingOrigin.FloatingOrigin when the player enters a vehicle and DestroyComponent's it on exit (56 FSM references), and sets distanceThreshold (14 writes); the InCar FSM toggles its 'enabled'. While present, NWH shifts the world origin once the player is farther than the threshold — every root transform, including PhysX rigidbodies, jumps by the same offset. Found by the M0a FSM census (builder preview).",
+      "reliedOnBy": "game FSMs (Drive, InCar, DriveUse)",
+      "members": [
+        {
+          "kind": "type",
+          "type": "NWH.Common.FloatingOrigin.FloatingOrigin",
+          "path": ""
+        },
+        {
+          "kind": "member",
+          "type": "NWH.Common.FloatingOrigin.FloatingOrigin",
+          "path": "distanceThreshold"
+        },
+        {
+          "kind": "member",
+          "type": "NWH.Common.FloatingOrigin.FloatingOrigin",
+          "path": "enabled"
+        }
+      ],
+      "stance": "keep — SPO must tolerate origin shifts: no world-space state carried across a shift in Track A; Track B needs an explicit origin/region contract (SPEC R5)",
+      "milestone": "A1 (inputs/state) / A3 (wheel contact history) / B2",
+      "testSketch": "Shift the origin by (5000, 0, -3000) mid-drive in the harness: velocities, wheel/suspension state, gear and engine state are unchanged; no impulse spike; the next tick's forces equal the no-shift run's within float tolerance."
+    }
+  ]
+}

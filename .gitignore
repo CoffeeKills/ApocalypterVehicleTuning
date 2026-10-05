@@ -3,11 +3,14 @@ ApocalypterSource/
 *.zip
 **/bin/
 **/obj/
+**/.cache/
 ApocalypterSteeringMod/verify/out/
+ApocalypterDrivetrain/verify/out/
 
 # Decompiled third-party excerpts (NWH Vehicle Physics 2) - audit reference only,
 # never published.
 ApocalypterSteeringMod/gamecode/
+ApocalypterDrivetrain/gamecode/
 
 # Local extraction tooling and generated wiki - never published.
 tools/

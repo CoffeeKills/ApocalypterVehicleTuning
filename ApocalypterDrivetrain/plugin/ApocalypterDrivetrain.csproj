@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Real build: dotnet build -c Release. Set GameDir to your Apocalypter install
+       (or pass -p:GameDir="D:\SteamLibrary\steamapps\common\Apocalypter").
+       verify/run.sh does NOT use this file; it compiles the same sources against stubs. -->
+  <PropertyGroup>
+    <TargetFramework>net472</TargetFramework>
+    <AssemblyName>ApocalypterDrivetrain</AssemblyName>
+    <RootNamespace>ApocalypterDrivetrain</RootNamespace>
+    <LangVersion>9</LangVersion>
+    <Nullable>disable</Nullable>
+    <Version>0.1.0</Version>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <GameDir Condition="'$(GameDir)' == ''">C:\Program Files (x86)\Steam\steamapps\common\Apocalypter</GameDir>
+    <ManagedDir>$(GameDir)\Apocalypter_Data\Managed</ManagedDir>
+    <BepInExCore>$(GameDir)\BepInEx\core</BepInExCore>
+    <!-- SPO.Vehicle's pure interfaces; adjust when the bundle is merged into the mods repo. -->
+    <SpoVehicleDir Condition="'$(SpoVehicleDir)' == ''">..\inputs\SPO.Vehicle</SpoVehicleDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="$(SpoVehicleDir)\HostInterfaces.cs" Link="SPO\HostInterfaces.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="BepInEx"><HintPath>$(BepInExCore)\BepInEx.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="0Harmony"><HintPath>$(BepInExCore)\0Harmony.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine"><HintPath>$(ManagedDir)\UnityEngine.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.CoreModule"><HintPath>$(ManagedDir)\UnityEngine.CoreModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.InputLegacyModule"><HintPath>$(ManagedDir)\UnityEngine.InputLegacyModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="NWH.VehiclePhysics2"><HintPath>$(ManagedDir)\NWH.VehiclePhysics2.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="NWH.Common"><HintPath>$(ManagedDir)\NWH.Common.dll</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+</Project>
