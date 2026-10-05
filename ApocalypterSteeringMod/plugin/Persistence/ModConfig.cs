@@ -100,12 +100,19 @@ namespace ApocalypterSteeringMod.Persistence
         private static ConfigEntry<bool> _telDebugPick;
         private static ConfigEntry<float> _telScale;
         private static ConfigEntry<string> _telPosition;
+        private static ConfigEntry<bool> _gearDebug;     // 0.7.7
         private static ConfigEntry<string> _telCells;   // 0.7.4
 
         private static ConfigEntry<string> _toggleKey;
         // Read by Apocasetter via Chainloader (not wired to OnSettingChanged — we never read it).
         private static ConfigEntry<bool> _apocasetter;
         private static ConfigEntry<string> _targetMode, _targetVehicle;
+
+        /// <summary>The [Gearbox] DebugHooks diagnostic flag (0.7.7; read by the hook logger).</summary>
+        public static bool GearboxDebugHooks
+        {
+            get { return _gearDebug != null && _gearDebug.Value; }
+        }
 
         public static string ToggleKeyString
         {
@@ -420,6 +427,8 @@ namespace ApocalypterSteeringMod.Persistence
             _telPosition = _config.Bind("Telemetry", "Position", "TopLeft", "Screen corner: TopLeft, TopRight, BottomLeft, BottomRight.");
             _telDebugPick = _config.Bind("Telemetry", "DebugPick", false,
                 "Diagnostic (0.6.4): log the telemetry vehicle pick once per second. Off unless you are chasing a wrong telemetry car.");
+            _gearDebug = _config.Bind("Gearbox", "DebugHooks", false,
+                "Diagnostic (0.7.7): log every shift-controller hook with the captured type, gear count and mode. Off unless chasing a shifting bug.");
             _telCells = _config.Bind("Telemetry", "Cells", TelemetryCells.DefaultText,
                 "What the telemetry strip shows, ';'-separated names: Speed, Rpm, Gear, SlipFront, SlipRear, LatG, LongG, Steering, Throttle, Brakes. Up to " + TelemetryCells.MaxCells + "; unknown names are dropped.");
         }
@@ -473,7 +482,7 @@ namespace ApocalypterSteeringMod.Persistence
             Wire(_gearClutchGrip); Wire(_gearClutchRange); Wire(_gearClutchRpm);
             Wire(_gearShiftUp); Wire(_gearShiftDown); Wire(_gearKickdown); Wire(_gearSpread);
             Wire(_uiFreeze); Wire(_uiScale); Wire(_uiWidth); Wire(_uiAlpha); Wire(_uiLastTab);
-            Wire(_telEnabled); Wire(_telScale); Wire(_telPosition); Wire(_telDebugPick); Wire(_telCells);
+            Wire(_telEnabled); Wire(_telScale); Wire(_telPosition); Wire(_telDebugPick); Wire(_telCells); Wire(_gearDebug);
             Wire(_targetMode); Wire(_targetVehicle);
         }
 

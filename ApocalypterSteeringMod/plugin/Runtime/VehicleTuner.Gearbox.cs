@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Reflection;
+using ApocalypterSteeringMod.Persistence;
 using ApocalypterSteeringMod.Settings;
 using HutongGames.PlayMaker;
 using NWH.VehiclePhysics2;
@@ -443,7 +444,7 @@ namespace ApocalypterSteeringMod.Runtime
             t.shiftDelegate = d.Shifter.Delegate;
             d.Hooked = true;
             Controlled[t] = d.Shifter;
-            if (Plugin.Log != null)
+            if (Plugin.Log != null && ModConfig.GearboxDebugHooks)
             {
                 Plugin.Log.LogInfo("Shift controller hooked on '" + VehicleName(t.vehicleController) + "' (type "
                     + t.transmissionType + ", " + t.forwardGearCount + " forward gears, mode "

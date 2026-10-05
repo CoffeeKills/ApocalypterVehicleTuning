@@ -3545,11 +3545,11 @@ public static class Tests
         }
         Check(kept && oldKeys.Count == 133, "all 133 keys of a real 0.6.4 file survive load + save with their values (no rename, removal or default change)");
         string[] added = { "Drivetrain.Custom|DiffCenterMode", "Gearbox.Custom|SpreadRatios", "Gearbox.Custom|ShiftUpFactor", "Gearbox.Custom|ShiftDownFactor",
-            "Gearbox.Custom|KickdownScale", "Telemetry|Cells" };
+            "Gearbox.Custom|KickdownScale", "Telemetry|Cells", "Gearbox|DebugHooks" };
         bool all = newKeys.Count == oldKeys.Count + added.Length;
         foreach (string k in added) all &= newKeys.ContainsKey(k);
         if (!all) foreach (string k in newKeys.Keys) if (!oldKeys.ContainsKey(k)) Console.WriteLine("  new key: " + k);
-        Check(all, "exactly six keys added: DiffCenterMode, SpreadRatios, ShiftUpFactor, ShiftDownFactor, KickdownScale, Cells");
+        Check(all, "exactly seven keys added: DiffCenterMode, SpreadRatios, ShiftUpFactor, ShiftDownFactor, KickdownScale, Cells, DebugHooks");
         File.WriteAllText(path, after.Replace("ShiftUpFactor = 1", "ShiftUpFactor = 9").Replace("KickdownScale = 1", "KickdownScale = 0.1").Replace("DiffCenterMode = Stock", "DiffCenterMode = 7"));
         ModConfig.Load(new ConfigFile(path, true));
         Check(Near(GearboxPreset.Custom.ShiftUpFactor, Limits.ShiftFactorMax) && Near(GearboxPreset.Custom.KickdownScale, Limits.KickdownMin)
