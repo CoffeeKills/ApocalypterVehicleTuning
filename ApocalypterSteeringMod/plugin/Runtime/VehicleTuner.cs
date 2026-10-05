@@ -996,7 +996,16 @@ namespace ApocalypterSteeringMod.Runtime
             public float Rpm;
             public string Gear;
             public float FrontSlip;   // mean |LateralSlip| of the front wheels (NWH's normalised slip)
+            public float RearSlip;    // mean |LateralSlip| of the rear wheels
+            public float LatG;        // |yaw rate| x speed / g
+            public float LongG;       // speed delta per second / g (smoothed)
+            public float SteeringDeg; // mean front wheel steer angle
+            public float Throttle;    // 0..1 input
+            public float Brakes;      // 0..1 input
         }
+
+        private float _telemetryPrevSpeed = -1f;
+        private float _telemetryPrevTime;
 
         /// <summary>
         /// The driven vehicle's live numbers. False when no vehicle is tracked.
@@ -1019,21 +1028,50 @@ namespace ApocalypterSteeringMod.Runtime
             s.SpeedKmh = vc.Speed * 3.6f;
             s.Rpm = vc.powertrain.engine != null ? vc.powertrain.engine.OutputRPM : 0f;
             s.Gear = vc.powertrain.transmission != null ? vc.powertrain.transmission.GearName : "-";
-            float sum = 0f;
-            int n = 0;
+            s.Throttle = vc.input.Throttle;
+            s.Brakes = vc.input.Brakes;
+
+            float frontSlip = 0f, rearSlip = 0f, steer = 0f;
+            int nf = 0, nr = 0, ns = 0;
             VehicleRecord r;
             if (_records.TryGetValue(vc, out r))
             {
                 foreach (KeyValuePair<WheelUAPI, WheelData> wk in r.Wheels)
                 {
-                    if (wk.Key != null && wk.Value.IsFront)
+                    WheelUAPI w = wk.Key;
+                    if (w == null)
                     {
-                        sum += Mathf.Abs(wk.Key.LateralSlip);
-                        n++;
+                        continue;
+                    }
+                    if (wk.Value.IsFront)
+                    {
+                        frontSlip += Mathf.Abs(w.LateralSlip);
+                        nf++;
+                        steer += w.SteerAngle;
+                        ns++;
+                    }
+                    else
+                    {
+                        rearSlip += Mathf.Abs(w.LateralSlip);
+                        nr++;
                     }
                 }
             }
-            s.FrontSlip = n > 0 ? sum / n : 0f;
+            s.FrontSlip = nf > 0 ? frontSlip / nf : 0f;
+            s.RearSlip = nr > 0 ? rearSlip / nr : 0f;
+            s.SteeringDeg = ns > 0 ? steer / ns : 0f;
+
+            float yawRate = vc.vehicleRigidbody != null ? Mathf.Abs(vc.vehicleRigidbody.angularVelocity.y) : 0f;
+            s.LatG = yawRate * Mathf.Abs(vc.Speed) / 9.81f;
+
+            float now = Time.unscaledTime;
+            float dt = now - _telemetryPrevTime;
+            if (_telemetryPrevSpeed >= 0f && dt > 0.001f)
+            {
+                s.LongG = Mathf.Clamp((vc.Speed - _telemetryPrevSpeed) / dt / 9.81f, -2f, 2f);
+            }
+            _telemetryPrevSpeed = vc.Speed;
+            _telemetryPrevTime = now;
             return true;
         }
 

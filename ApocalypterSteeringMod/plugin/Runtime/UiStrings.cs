@@ -139,12 +139,6 @@ namespace ApocalypterSteeringMod.Runtime
         public static readonly string LayoutPasted = "Layout pasted.";
         public static readonly string LayoutPasteFailedFmt = "Not a layout: {0}";
 
-        // 0.7.0 telemetry pins.
-        public static readonly string PinnedFmt = "{0} pinned to the telemetry strip.";
-        public static readonly string PinnedTelemetryOnFmt = "{0} pinned; the telemetry strip is now on.";
-        public static readonly string UnpinnedFmt = "{0} removed from the telemetry strip.";
-        public static readonly string PinsFullFmt = "The telemetry strip holds {0} pinned values. Unpin one first.";
-
         // 0.7.0 gearbox shift controller.
         public static readonly string ShiftedOneFmt = "The mod shifts {0} vehicle (the game's gear display may lag a moment).";
         public static readonly string ShiftedManyFmt = "The mod shifts {0} vehicles (the game's gear display may lag a moment).";
@@ -154,23 +148,6 @@ namespace ApocalypterSteeringMod.Runtime
         public static readonly string TelemetryGearFmt = "Gear {0}";
         public static readonly string TelemetrySlipFmt = "Slip {0}°";
 
-        /// <summary>A pinned slider value in its slider's own units (0.7.0 telemetry pins).</summary>
-        public static string PinValue(ApocalypterSteeringMod.Settings.TelemetryPins.Unit unit, float v)
-        {
-            switch (unit)
-            {
-                case ApocalypterSteeringMod.Settings.TelemetryPins.Unit.Degrees: return Deg(v);
-                case ApocalypterSteeringMod.Settings.TelemetryPins.Unit.DegSigned: return DegSigned(v);
-                case ApocalypterSteeringMod.Settings.TelemetryPins.Unit.CmSigned: return CmSigned(v);
-                case ApocalypterSteeringMod.Settings.TelemetryPins.Unit.Rpm: return string.Format(TelemetryRpmFmt, v.ToString("+0;-0;0"));
-                case ApocalypterSteeringMod.Settings.TelemetryPins.Unit.Count:
-                    return v < 0.5f ? "Own" : string.Format(GearCountFmt, UnityEngine.Mathf.RoundToInt(v));
-                case ApocalypterSteeringMod.Settings.TelemetryPins.Unit.Plain: return v.ToString("0.00");
-                case ApocalypterSteeringMod.Settings.TelemetryPins.Unit.Speed: return SpeedMps(v);
-                case ApocalypterSteeringMod.Settings.TelemetryPins.Unit.Percent: return Percent(v);
-                default: return Times(v);
-            }
-        }
 
         public static string TelemetrySpeed(float kmh) { return string.Format(TelemetrySpeedFmt, UnityEngine.Mathf.RoundToInt(kmh < 0f ? -kmh : kmh)); }
         public static string TelemetryRpm(float rpm) { return string.Format(TelemetryRpmFmt, UnityEngine.Mathf.RoundToInt(rpm < 0f ? 0f : rpm)); }

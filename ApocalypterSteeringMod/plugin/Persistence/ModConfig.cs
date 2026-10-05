@@ -100,7 +100,7 @@ namespace ApocalypterSteeringMod.Persistence
         private static ConfigEntry<bool> _telDebugPick;
         private static ConfigEntry<float> _telScale;
         private static ConfigEntry<string> _telPosition;
-        private static ConfigEntry<string> _telPins;   // 0.7.0
+        private static ConfigEntry<string> _telCells;   // 0.7.4
 
         private static ConfigEntry<string> _toggleKey;
         // Read by Apocasetter via Chainloader (not wired to OnSettingChanged — we never read it).
@@ -187,7 +187,7 @@ namespace ApocalypterSteeringMod.Persistence
             MigrateLegacySteeringCurves(hadLegacySteeringCurves);
             PushAllToRuntime();
             MigrateLegacySuspension();
-            NormalizePins();
+            NormalizeCells();
 
             config.SaveOnConfigSet = autoSave;
             config.Save();
@@ -420,9 +420,8 @@ namespace ApocalypterSteeringMod.Persistence
             _telPosition = _config.Bind("Telemetry", "Position", "TopLeft", "Screen corner: TopLeft, TopRight, BottomLeft, BottomRight.");
             _telDebugPick = _config.Bind("Telemetry", "DebugPick", false,
                 "Diagnostic (0.6.4): log the telemetry vehicle pick once per second. Off unless you are chasing a wrong telemetry car.");
-            _telPins = _config.Bind("Telemetry", "Pins", "",
-                "Slider values shown on the telemetry strip (the pin buttons in the panel), ';'-separated Category.Key names such as "
-                + "Steering.RateMultiplier;Suspension.SpringFront. Up to " + TelemetryPins.MaxPins + "; unknown names are dropped.");
+            _telCells = _config.Bind("Telemetry", "Cells", TelemetryCells.DefaultText,
+                "What the telemetry strip shows, ';'-separated names: Speed, Rpm, Gear, SlipFront, SlipRear, LatG, LongG, Steering, Throttle, Brakes. Up to " + TelemetryCells.MaxCells + "; unknown names are dropped.");
         }
 
         // ---------------------------------------------------------------- wiring
@@ -474,7 +473,7 @@ namespace ApocalypterSteeringMod.Persistence
             Wire(_gearClutchGrip); Wire(_gearClutchRange); Wire(_gearClutchRpm);
             Wire(_gearShiftUp); Wire(_gearShiftDown); Wire(_gearKickdown); Wire(_gearSpread);
             Wire(_uiFreeze); Wire(_uiScale); Wire(_uiWidth); Wire(_uiAlpha); Wire(_uiLastTab);
-            Wire(_telEnabled); Wire(_telScale); Wire(_telPosition); Wire(_telDebugPick); Wire(_telPins);
+            Wire(_telEnabled); Wire(_telScale); Wire(_telPosition); Wire(_telDebugPick); Wire(_telCells);
             Wire(_targetMode); Wire(_targetVehicle);
         }
 
@@ -633,17 +632,17 @@ namespace ApocalypterSteeringMod.Persistence
             }
         }
 
-        /// <summary>0.7.0: the file keeps only the pins that parsed (unknown/duplicate/over-cap dropped on load).</summary>
-        private static void NormalizePins()
+        /// <summary>0.7.4: the file keeps only the cells that parsed (unknown/duplicate/over-cap dropped on load).</summary>
+        private static void NormalizeCells()
         {
-            string clean = TelemetryPins.Serialize();
-            if (!string.Equals(_telPins.Value, clean, StringComparison.Ordinal))
+            string clean = TelemetryCells.Serialize();
+            if (!string.Equals(_telCells.Value, clean, StringComparison.Ordinal))
             {
                 bool wasSyncing = _syncing;
                 _syncing = true;
                 try
                 {
-                    _telPins.Value = clean;
+                    _telCells.Value = clean;
                 }
                 finally
                 {
@@ -815,7 +814,7 @@ namespace ApocalypterSteeringMod.Persistence
                 _telScale.Value = UiSettings.TelemetryScale;
                 _telPosition.Value = UiSettings.TelemetryPosition.ToString();
                 _telDebugPick.Value = UiSettings.TelemetryDebugPick;
-                _telPins.Value = TelemetryPins.Serialize();
+                _telCells.Value = TelemetryCells.Serialize();
                 _targetMode.Value = TargetSettings.Mode.ToString();
                 _targetVehicle.Value = TargetSettings.SelectedName ?? "";
             }
@@ -1034,7 +1033,7 @@ namespace ApocalypterSteeringMod.Persistence
             UiSettings.TelemetryScale = _telScale.Value;
             UiSettings.TelemetryPosition = UiSettings.ParseCorner(_telPosition.Value);
             UiSettings.TelemetryDebugPick = _telDebugPick.Value;
-            TelemetryPins.Load(_telPins.Value);
+            TelemetryCells.Load(_telCells.Value);
             TargetSettings.Mode = TargetSettings.Parse(_targetMode.Value);
             TargetSettings.SelectedName = _targetVehicle.Value ?? "";
 

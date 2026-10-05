@@ -97,13 +97,11 @@ namespace ApocalypterSteeringMod.Runtime
             {
                 () => SteeringSettings.ResetAll(),
                 () => { SuspensionSettings.ResetAll(); _tuner.ReapplyNow(); },
-                () => { AeroSettings.ResetAll(); _tuner.ReapplyNow(); },
+                () => { AlignmentSettings.ResetAll(); GripSettings.ResetAll(); _tuner.ReapplyNow(); },
+                () => { DrivetrainSettings.ResetAll(); GearboxSettings.ResetAll(); _tuner.ReapplyNow(); },
                 () => { BrakesSettings.ResetAll(); _tuner.ReapplyNow(); },
-                () => { GripSettings.ResetAll(); _tuner.ReapplyNow(); },
-                () => { DrivetrainSettings.ResetAll(); _tuner.ReapplyNow(); },
                 () => { AssistsSettings.ResetAll(); _tuner.ReapplyNow(); },
-                () => { AlignmentSettings.ResetAll(); _tuner.ReapplyNow(); },
-                () => { GearboxSettings.ResetAll(); _tuner.ReapplyNow(); },
+                () => { AeroSettings.ResetAll(); _tuner.ReapplyNow(); },
                 () =>
                 {
                     // 0.7.0 audit fix: 0.6.x "reset" turned the strip ON at bottom-left — the
@@ -115,9 +113,8 @@ namespace ApocalypterSteeringMod.Runtime
             };
             _resetLabels = new[]
             {
-                "Reset all steering", "Reset all suspension", "Reset all aero", "Reset all brakes",
-                "Reset all grip", "Reset all drivetrain", "Reset all assists", "Reset all alignment",
-                "Reset all gearbox", "Reset panel settings"
+                "Reset all steering", "Reset all suspension", "Reset wheels & tires", "Reset all drivetrain",
+                "Reset all brakes", "Reset all assists", "Reset all aero", "Reset panel settings"
             };
             Build();
             ApplyDisplaySettings();
@@ -589,7 +586,7 @@ namespace ApocalypterSteeringMod.Runtime
         /// </summary>
         private GameObject AddSlider(RectTransform content, string title, string hint, float min, float max,
             Func<float> get, Action<float> set, Func<float> reference, Func<float, string> format,
-            Func<bool> enabled = null, Func<float, string> readout = null, bool wholeNumbers = false, string pin = null)
+            Func<bool> enabled = null, Func<float, string> readout = null, bool wholeNumbers = false)
         {
             RectTransform row = AddBlock(content, "Row_" + title, PanelLayout.RowHeight, true, out LayoutElement le);
             CanvasGroup group = row.gameObject.AddComponent<CanvasGroup>();
@@ -628,30 +625,6 @@ namespace ApocalypterSteeringMod.Runtime
                 value = UiKit.Label(valRt, "", PanelLayout.ValueFont, UiKit.TextMain, TextAnchor.MiddleCenter, FontStyle.Bold);
             }
 
-            // 0.7.0 (FEATURES §4): the pin toggle adds this value to the telemetry strip.
-            RectTransform pinRt = null;
-            if (pin != null)
-            {
-                TelemetryPins.SetLabel(pin, title);
-                Text pinLabel;
-                Button pinButton = UiKit.MakeButton(row, "Pin", "Pin", UiKit.ChipBase, 11, () =>
-                {
-                    if (_suppress)
-                    {
-                        return;
-                    }
-                    OnPinClicked(pin);
-                }, out pinLabel);
-                pinRt = (RectTransform)pinButton.transform;
-                Image pinImg = (Image)pinButton.targetGraphic;
-                _refreshers.Add(() =>
-                {
-                    bool on = TelemetryPins.IsPinned(pin);
-                    pinImg.color = on ? UiKit.Accent : UiKit.ChipBase;
-                    pinLabel.color = on ? UiKit.TextMain : UiKit.TextMuted;
-                });
-            }
-
             Text resetLabel;
             Button reset = UiKit.MakeButton(row, "Reset", "Reset", UiKit.ChipBase, PanelLayout.ResetFont, () =>
             {
@@ -667,19 +640,15 @@ namespace ApocalypterSteeringMod.Runtime
             bool hasReadout = readout != null;
             _relayouts.Add(c =>
             {
-                PanelLayout.SliderGeom g = PanelLayout.SliderRow(c, hasReadout, pinRt != null);
+                PanelLayout.SliderGeom g = PanelLayout.SliderRow(c, hasReadout);
                 SetHeight(le, g.RowHeight);
                 PanelLayout.Apply(t, g.Title);
                 PanelLayout.Apply(h, g.Hint);
                 PanelLayout.Apply((RectTransform)slider.transform, g.Slider);
                 PanelLayout.Apply(valRt, g.Value);
                 PanelLayout.Apply(resetRt, g.Reset);
-                if (pinRt != null)
-                {
-                    PanelLayout.Apply(pinRt, g.Pin);
-                }
                 // 0.7.0: shrink a title/hint that would overflow its band (it draws over the
-                // pin/Reset/slider otherwise), never below 11 px.
+                // Reset/slider otherwise), never below 11 px.
                 titleText.fontSize = PanelLayout.FitFont(title, g.TitleFont, g.Title.W, true);
                 hintText.fontSize = PanelLayout.FitFont(hint, g.HintFont, g.Hint.W, false);
             });
@@ -859,18 +828,18 @@ namespace ApocalypterSteeringMod.Runtime
             AddSlider(t, "Steering speed", "How fast the wheels turn toward your input",
                 Limits.RateMin, Limits.RateMax,
                 () => Shown.RateMultiplier, v => EditSteering(p => p.RateMultiplier = v),
-                () => SteeringSettings.Reference().RateMultiplier, UiStrings.Times, pin: "Steering.RateMultiplier");
+                () => SteeringSettings.Reference().RateMultiplier, UiStrings.Times);
             AddSlider(t, "Smoothing", "Higher = softer, lazier response",
                 Limits.SmoothMin, Limits.SmoothMax,
                 () => Shown.SmoothingScale, v => EditSteering(p => p.SmoothingScale = v),
-                () => SteeringSettings.Reference().SmoothingScale, UiStrings.Times, pin: "Steering.SmoothingScale");
+                () => SteeringSettings.Reference().SmoothingScale, UiStrings.Times);
             AddOption(t, "Use the vehicle's input curve", "OFF = pow curve with the exponent below",
                 () => !Shown.LinearityOverride, v => EditSteering(p => p.LinearityOverride = !v));
             AddSlider(t, "Centre sensitivity", "Low = twitchy at centre, high = gentle",
                 Limits.LinExpMin, Limits.LinExpMax,
                 () => Shown.LinearityExponent, v => EditSteering(p => p.LinearityExponent = v),
                 () => SteeringSettings.Reference().LinearityExponent, v => v.ToString("0.00"),
-                () => Shown.LinearityOverride, pin: "Steering.LinearityExponent");
+                () => Shown.LinearityOverride);
 
             AddOption(t, "Use the vehicle's own curve", "OFF = use the custom lock curve below",
                 () => Shown.UseVehicleCurve, v => EditSteering(p => p.UseVehicleCurve = v));
@@ -903,11 +872,11 @@ namespace ApocalypterSteeringMod.Runtime
                 Limits.SlipMin, Limits.SlipMax,
                 () => Shown.SlipAngleDeg, v => EditSteering(p => p.SlipAngleDeg = v),
                 () => SteeringSettings.Reference().SlipAngleDeg, v => UiStrings.Deg(v),
-                () => Shown.TractionClampEnabled, pin: "Steering.SlipAngleDeg");
+                () => Shown.TractionClampEnabled);
             AddSlider(t, "Counter-steer speed", "Extra steering speed while catching a slide",
                 Limits.OppLockMin, Limits.OppLockMax,
                 () => Shown.OppositeLockBoost, v => EditSteering(p => p.OppositeLockBoost = v),
-                () => SteeringSettings.Reference().OppositeLockBoost, UiStrings.Times, pin: "Steering.OppositeLockBoost");
+                () => SteeringSettings.Reference().OppositeLockBoost, UiStrings.Times);
 
             AddSectionTitle(c, "Game setting");
             Text gameHint = AddOption(c, "Follow game's steering speed", "",
@@ -1022,13 +991,13 @@ namespace ApocalypterSteeringMod.Runtime
                     setF(p, v);
                     setR(p, v);
                 }),
-                () => getF(SuspensionSettings.Reference()), UiStrings.Times, null, readoutF, pin: "Suspension." + key + "Front");
+                () => getF(SuspensionSettings.Reference()), UiStrings.Times, null, readoutF);
             GameObject front = AddSlider(content, title + " (front)", hint, Limits.SuspFactorMin, Limits.SuspFactorMax,
                 () => getF(SuspensionSettings.Shown), v => EditSuspension(p => setF(p, v)),
-                () => getF(SuspensionSettings.Reference()), UiStrings.Times, null, readoutF, pin: "Suspension." + key + "Front");
+                () => getF(SuspensionSettings.Reference()), UiStrings.Times, null, readoutF);
             GameObject rear = AddSlider(content, title + " (rear)", hint, Limits.SuspFactorMin, Limits.SuspFactorMax,
                 () => getR(SuspensionSettings.Shown), v => EditSuspension(p => setR(p, v)),
-                () => getR(SuspensionSettings.Reference()), UiStrings.Times, null, readoutR, pin: "Suspension." + key + "Rear");
+                () => getR(SuspensionSettings.Reference()), UiStrings.Times, null, readoutR);
 
             BindVisible(both, () => !SuspensionSettings.SplitFrontRear);
             BindVisible(front, () => SuspensionSettings.SplitFrontRear);
@@ -1071,15 +1040,15 @@ namespace ApocalypterSteeringMod.Runtime
             AddSlider(c, "Downforce", "How hard the car is pushed onto the road",
                 Limits.AeroScaleMin, Limits.AeroScaleMax,
                 () => AeroSettings.Shown.DownforceScale, v => EditAero(p => p.DownforceScale = v),
-                () => AeroSettings.Reference().DownforceScale, UiStrings.Times, pin: "Aero.DownforceScale");
+                () => AeroSettings.Reference().DownforceScale, UiStrings.Times);
             AddSlider(c, "Drag", "Air resistance (higher = slower top speed)",
                 Limits.AeroScaleMin, Limits.AeroScaleMax,
                 () => AeroSettings.Shown.DragScale, v => EditAero(p => p.DragScale = v),
-                () => AeroSettings.Reference().DragScale, UiStrings.Times, pin: "Aero.DragScale");
+                () => AeroSettings.Reference().DragScale, UiStrings.Times);
             AddSlider(c, "Downforce speed range", "How fast the downforce keeps growing",
                 Limits.AeroSpeedScaleMin, Limits.AeroSpeedScaleMax,
                 () => AeroSettings.Shown.MaxDownforceSpeedScale, v => EditAero(p => p.MaxDownforceSpeedScale = v),
-                () => AeroSettings.Reference().MaxDownforceSpeedScale, UiStrings.Times, pin: "Aero.MaxDownforceSpeedScale");
+                () => AeroSettings.Reference().MaxDownforceSpeedScale, UiStrings.Times);
 
             Text status = AddNote(content, "Status", 44f, 14);
             _refreshers.Add(() =>
@@ -1130,23 +1099,23 @@ namespace ApocalypterSteeringMod.Runtime
                 Limits.BrakeTorqueMin, Limits.BrakeTorqueMax,
                 () => BrakesSettings.Shown.TorqueScale, v => EditBrakes(p => p.TorqueScale = v),
                 () => BrakesSettings.Reference().TorqueScale, UiStrings.Times, null,
-                v => Absolute(v, _tuner.MeanBaseline(VehicleTuner.Readout.BrakeTorque, true), UiStrings.Torque), pin: "Brakes.TorqueScale");
+                v => Absolute(v, _tuner.MeanBaseline(VehicleTuner.Readout.BrakeTorque, true), UiStrings.Torque));
             AddSlider(c, "Front brakes", "Front axle bite (brake balance)",
                 Limits.BrakeAxleMin, Limits.BrakeAxleMax,
                 () => BrakesSettings.Shown.FrontBrakeScale, v => EditBrakes(p => p.FrontBrakeScale = v),
-                () => BrakesSettings.Reference().FrontBrakeScale, UiStrings.Times, pin: "Brakes.FrontBrakeScale");
+                () => BrakesSettings.Reference().FrontBrakeScale, UiStrings.Times);
             AddSlider(c, "Rear brakes", "Rear axle bite (brake balance)",
                 Limits.BrakeAxleMin, Limits.BrakeAxleMax,
                 () => BrakesSettings.Shown.RearBrakeScale, v => EditBrakes(p => p.RearBrakeScale = v),
-                () => BrakesSettings.Reference().RearBrakeScale, UiStrings.Times, pin: "Brakes.RearBrakeScale");
+                () => BrakesSettings.Reference().RearBrakeScale, UiStrings.Times);
             AddSlider(c, "Handbrake", "Handbrake strength",
                 Limits.BrakeAxleMin, Limits.BrakeAxleMax,
                 () => BrakesSettings.Shown.HandbrakeScale, v => EditBrakes(p => p.HandbrakeScale = v),
-                () => BrakesSettings.Reference().HandbrakeScale, UiStrings.Times, pin: "Brakes.HandbrakeScale");
+                () => BrakesSettings.Reference().HandbrakeScale, UiStrings.Times);
             AddSlider(c, "Pedal response", "Higher = slower brake application",
                 Limits.ActuationMin, Limits.ActuationMax,
                 () => BrakesSettings.Shown.ActuationScale, v => EditBrakes(p => p.ActuationScale = v),
-                () => BrakesSettings.Reference().ActuationScale, UiStrings.Times, pin: "Brakes.ActuationScale");
+                () => BrakesSettings.Reference().ActuationScale, UiStrings.Times);
 
             Text status = AddNote(content, "Status", 44f, 14);
             _refreshers.Add(() =>
@@ -1196,15 +1165,15 @@ namespace ApocalypterSteeringMod.Runtime
             AddSlider(c, "Longitudinal grip", "Grip under acceleration and braking",
                 Limits.GripMin, Limits.GripMax,
                 () => GripSettings.Shown.LongitudinalScale, v => EditGrip(p => p.LongitudinalScale = v),
-                () => GripSettings.Reference().LongitudinalScale, UiStrings.Times, pin: "Grip.LongitudinalScale");
+                () => GripSettings.Reference().LongitudinalScale, UiStrings.Times);
             AddSlider(c, "Lateral grip", "Grip in corners",
                 Limits.GripMin, Limits.GripMax,
                 () => GripSettings.Shown.LateralScale, v => EditGrip(p => p.LateralScale = v),
-                () => GripSettings.Reference().LateralScale, UiStrings.Times, pin: "Grip.LateralScale");
+                () => GripSettings.Reference().LateralScale, UiStrings.Times);
             AddSlider(c, "Tire stiffness", "How quickly the tires reach peak grip",
                 Limits.GripMin, Limits.GripMax,
                 () => GripSettings.Shown.StiffnessScale, v => EditGrip(p => p.StiffnessScale = v),
-                () => GripSettings.Reference().StiffnessScale, UiStrings.Times, pin: "Grip.StiffnessScale");
+                () => GripSettings.Reference().StiffnessScale, UiStrings.Times);
 
             Text status = AddNote(content, "Status", 44f, 14);
             _refreshers.Add(() =>
@@ -1256,35 +1225,35 @@ namespace ApocalypterSteeringMod.Runtime
             AddSlider(c, "Engine power", "How much power the engine makes",
                 Limits.PowerMin, Limits.PowerMax,
                 () => DrivetrainSettings.Shown.PowerScale, v => EditDrivetrain(p => p.PowerScale = v),
-                () => DrivetrainSettings.Reference().PowerScale, UiStrings.Times, pin: "Drivetrain.PowerScale");
+                () => DrivetrainSettings.Reference().PowerScale, UiStrings.Times);
             AddSlider(c, "Rev limit", "The engine's redline",
                 Limits.RevLimitMin, Limits.RevLimitMax,
                 () => DrivetrainSettings.Shown.RevLimiterScale, v => EditDrivetrain(p => p.RevLimiterScale = v),
-                () => DrivetrainSettings.Reference().RevLimiterScale, UiStrings.Times, pin: "Drivetrain.RevLimiterScale");
+                () => DrivetrainSettings.Reference().RevLimiterScale, UiStrings.Times);
             AddSlider(c, "Engine braking", "Off-throttle engine drag",
                 Limits.LossMin, Limits.LossMax,
                 () => DrivetrainSettings.Shown.LossScale, v => EditDrivetrain(p => p.LossScale = v),
-                () => DrivetrainSettings.Reference().LossScale, UiStrings.Times, pin: "Drivetrain.LossScale");
+                () => DrivetrainSettings.Reference().LossScale, UiStrings.Times);
             AddSlider(c, "Turbo / boost", "Forced induction gain (inert on electrics)",
                 Limits.BoostMin, Limits.BoostMax,
                 () => DrivetrainSettings.Shown.BoostScale, v => EditDrivetrain(p => p.BoostScale = v),
-                () => DrivetrainSettings.Reference().BoostScale, UiStrings.Times, pin: "Drivetrain.BoostScale");
+                () => DrivetrainSettings.Reference().BoostScale, UiStrings.Times);
             AddSlider(c, "Final drive", "Overall gearing (higher = shorter)",
                 Limits.FinalDriveMin, Limits.FinalDriveMax,
                 () => DrivetrainSettings.Shown.FinalDriveScale, v => EditDrivetrain(p => p.FinalDriveScale = v),
-                () => DrivetrainSettings.Reference().FinalDriveScale, UiStrings.Times, pin: "Drivetrain.FinalDriveScale");
+                () => DrivetrainSettings.Reference().FinalDriveScale, UiStrings.Times);
             AddSlider(c, "Upshift RPM", "Where the auto box shifts up (kept below redline)",
                 Limits.ShiftRpmMin, Limits.ShiftRpmMax,
                 () => DrivetrainSettings.Shown.UpshiftScale, v => EditDrivetrain(p => p.UpshiftScale = v),
-                () => DrivetrainSettings.Reference().UpshiftScale, UiStrings.Times, pin: "Drivetrain.UpshiftScale");
+                () => DrivetrainSettings.Reference().UpshiftScale, UiStrings.Times);
             AddSlider(c, "Downshift RPM", "Where the auto box shifts down",
                 Limits.ShiftRpmMin, Limits.ShiftRpmMax,
                 () => DrivetrainSettings.Shown.DownshiftScale, v => EditDrivetrain(p => p.DownshiftScale = v),
-                () => DrivetrainSettings.Reference().DownshiftScale, UiStrings.Times, pin: "Drivetrain.DownshiftScale");
+                () => DrivetrainSettings.Reference().DownshiftScale, UiStrings.Times);
             AddSlider(c, "Shift time", "How long a gear change takes",
                 Limits.FactorMin, Limits.FactorMax,
                 () => DrivetrainSettings.Shown.ShiftDurationScale, v => EditDrivetrain(p => p.ShiftDurationScale = v),
-                () => DrivetrainSettings.Reference().ShiftDurationScale, UiStrings.Times, pin: "Drivetrain.ShiftDurationScale");
+                () => DrivetrainSettings.Reference().ShiftDurationScale, UiStrings.Times);
 
             AddSectionTitle(c, "Differentials");
             AddPresetButtons(c, "DiffFront", DiffModeLabels.Length, DiffModeLabels.Length, DiffModeLabels.Length,
@@ -1340,12 +1309,11 @@ namespace ApocalypterSteeringMod.Runtime
             AddSlider(c, "Diff stiffness", "How hard the diff locks",
                 Limits.DiffScaleMin, Limits.DiffScaleMax,
                 () => DrivetrainSettings.Shown.DiffStiffnessScale, v => EditDrivetrain(p => p.DiffStiffnessScale = v),
-                () => DrivetrainSettings.Reference().DiffStiffnessScale, UiStrings.Times, pin: "Drivetrain.DiffStiffnessScale");
+                () => DrivetrainSettings.Reference().DiffStiffnessScale, UiStrings.Times);
             AddSlider(c, "Diff bias (AWD)", "Front/rear split of a centre diff only",
                 Limits.DiffScaleMin, Limits.DiffScaleMax,
                 () => DrivetrainSettings.Shown.DiffBiasScale, v => EditDrivetrain(p => p.DiffBiasScale = v),
-                () => DrivetrainSettings.Reference().DiffBiasScale, UiStrings.Times, () => _tuner.HasCentreDiff(_tuner.FindDrivenVehicle()),
-                pin: "Drivetrain.DiffBiasScale");
+                () => DrivetrainSettings.Reference().DiffBiasScale, UiStrings.Times, () => _tuner.HasCentreDiff(_tuner.FindDrivenVehicle()));
             Text splitNote = AddNote(c, "TorqueSplit", 44f, 13);
             _refreshers.Add(() => splitNote.text = DriveSplitText());
 
@@ -1551,17 +1519,17 @@ namespace ApocalypterSteeringMod.Runtime
                 Limits.SlipThrMin, Limits.SlipThrMax,
                 () => AssistsSettings.Shown.AbsSlipThreshold, v => EditAssists(p => p.AbsSlipThreshold = v),
                 () => AssistsSettings.Reference().AbsSlipThreshold, v => v.ToString("0.00"),
-                () => AssistsSettings.Shown.AbsEnabled, pin: "Assists.AbsSlipThreshold");
+                () => AssistsSettings.Shown.AbsEnabled);
             AddSlider(c, "ABS cutoff speed", "No ABS below this speed",
                 Limits.CutoffSpeedMin, Limits.CutoffSpeedMax,
                 () => AssistsSettings.Shown.AbsCutoffSpeed, v => EditAssists(p => p.AbsCutoffSpeed = v),
                 () => AssistsSettings.Reference().AbsCutoffSpeed, v => UiStrings.SpeedMps(v),
-                () => AssistsSettings.Shown.AbsEnabled, pin: "Assists.AbsCutoffSpeed");
+                () => AssistsSettings.Shown.AbsEnabled);
             AddSlider(c, "ABS release force", "Brake strength while releasing",
                 Limits.CutMultMin, Limits.CutMultMax,
                 () => AssistsSettings.Shown.AbsCutMultiplier, v => EditAssists(p => p.AbsCutMultiplier = v),
                 () => AssistsSettings.Reference().AbsCutMultiplier, UiStrings.Percent,
-                () => AssistsSettings.Shown.AbsEnabled, pin: "Assists.AbsCutMultiplier");
+                () => AssistsSettings.Shown.AbsEnabled);
 
             AddSectionTitle(c, "TCS");
             AddOption(c, "TCS", "Cuts power while the wheels spin",
@@ -1570,17 +1538,17 @@ namespace ApocalypterSteeringMod.Runtime
                 Limits.SlipThrMin, Limits.SlipThrMax,
                 () => AssistsSettings.Shown.TcsSlipThreshold, v => EditAssists(p => p.TcsSlipThreshold = v),
                 () => AssistsSettings.Reference().TcsSlipThreshold, v => v.ToString("0.00"),
-                () => AssistsSettings.Shown.TcsEnabled, pin: "Assists.TcsSlipThreshold");
+                () => AssistsSettings.Shown.TcsEnabled);
             AddSlider(c, "TCS cutoff speed", "No TCS below this speed",
                 Limits.CutoffSpeedMin, Limits.CutoffSpeedMax,
                 () => AssistsSettings.Shown.TcsCutoffSpeed, v => EditAssists(p => p.TcsCutoffSpeed = v),
                 () => AssistsSettings.Reference().TcsCutoffSpeed, v => UiStrings.SpeedMps(v),
-                () => AssistsSettings.Shown.TcsEnabled, pin: "Assists.TcsCutoffSpeed");
+                () => AssistsSettings.Shown.TcsEnabled);
             AddSlider(c, "TCS cut strength", "Power allowed while spinning",
                 Limits.CutMultMin, Limits.CutMultMax,
                 () => AssistsSettings.Shown.TcsCutMultiplier, v => EditAssists(p => p.TcsCutMultiplier = v),
                 () => AssistsSettings.Reference().TcsCutMultiplier, UiStrings.Percent,
-                () => AssistsSettings.Shown.TcsEnabled, pin: "Assists.TcsCutMultiplier");
+                () => AssistsSettings.Shown.TcsEnabled);
 
             Text status = AddNote(content, "Status", 44f, 14);
             _refreshers.Add(() =>
@@ -1689,8 +1657,7 @@ namespace ApocalypterSteeringMod.Runtime
                     Limits.AlignmentCamberMin, Limits.AlignmentCamberMax,
                     () => AlignmentSettings.Shown.Camber(left),
                     v => EditAlignment(p => AlignmentSettings.SetAxleCamber(p, front, v)),
-                    () => AlignmentSettings.Reference().Camber(left), UiStrings.DegSigned, null, v => CamberStock(left),
-                    pin: "Alignment.Camber" + left);
+                    () => AlignmentSettings.Reference().Camber(left), UiStrings.DegSigned, null, v => CamberStock(left));
                 BindVisible(axle, () => !AlignmentSettings.PerWheel);
             }
             for (int w = 0; w < 4; w++)
@@ -1700,8 +1667,7 @@ namespace ApocalypterSteeringMod.Runtime
                     Limits.AlignmentCamberMin, Limits.AlignmentCamberMax,
                     () => AlignmentSettings.Shown.Camber(role),
                     v => EditAlignment(p => p.SetCamber(role, v)),
-                    () => AlignmentSettings.Reference().Camber(role), UiStrings.DegSigned, null, v => CamberStock(role),
-                    pin: "Alignment.Camber" + role);
+                    () => AlignmentSettings.Reference().Camber(role), UiStrings.DegSigned, null, v => CamberStock(role));
                 BindVisible(row, () => AlignmentSettings.PerWheel);
             }
 
@@ -1713,8 +1679,7 @@ namespace ApocalypterSteeringMod.Runtime
                     Limits.AlignmentCasterMin, Limits.AlignmentCasterMax,
                     () => AlignmentSettings.Shown.Caster(front),
                     v => EditAlignment(p => { if (front) p.CasterF = v; else p.CasterR = v; }),
-                    () => AlignmentSettings.Reference().Caster(front), UiStrings.DegSigned, null, v => GroupStock(front, true),
-                    pin: front ? "Alignment.CasterFront" : "Alignment.CasterRear");
+                    () => AlignmentSettings.Reference().Caster(front), UiStrings.DegSigned, null, v => GroupStock(front, true));
             }
             for (int a = 0; a < 2; a++)
             {
@@ -1723,8 +1688,7 @@ namespace ApocalypterSteeringMod.Runtime
                     Limits.AlignmentToeMin, Limits.AlignmentToeMax,
                     () => AlignmentSettings.Shown.Toe(front),
                     v => EditAlignment(p => { if (front) p.ToeF = v; else p.ToeR = v; }),
-                    () => AlignmentSettings.Reference().Toe(front), UiStrings.DegSigned2, null, v => GroupStock(front, false),
-                    pin: front ? "Alignment.ToeFront" : "Alignment.ToeRear");
+                    () => AlignmentSettings.Reference().Toe(front), UiStrings.DegSigned2, null, v => GroupStock(front, false));
             }
 
             AddSectionTitle(r, "Wheel position");
@@ -1739,8 +1703,7 @@ namespace ApocalypterSteeringMod.Runtime
                         Limits.AlignmentPosMin, Limits.AlignmentPosMax,
                         () => AlignmentSettings.Shown.Pos(left, ax),
                         v => EditAlignment(p => AlignmentSettings.SetAxlePos(p, front, ax, v)),
-                        () => AlignmentSettings.Reference().Pos(left, ax), UiStrings.CmSigned, null, v => PosStock(left, ax),
-                        pin: "Alignment." + PresetCodec.AlignmentPosKey(left, ax));
+                        () => AlignmentSettings.Reference().Pos(left, ax), UiStrings.CmSigned, null, v => PosStock(left, ax));
                     BindVisible(axle, () => !AlignmentSettings.PerWheel);
                 }
             }
@@ -1754,8 +1717,7 @@ namespace ApocalypterSteeringMod.Runtime
                         Limits.AlignmentPosMin, Limits.AlignmentPosMax,
                         () => AlignmentSettings.Shown.Pos(role, ax),
                         v => EditAlignment(p => p.SetPos(role, ax, v)),
-                        () => AlignmentSettings.Reference().Pos(role, ax), UiStrings.CmSigned, null, v => PosStock(role, ax),
-                        pin: "Alignment." + PresetCodec.AlignmentPosKey(role, ax));
+                        () => AlignmentSettings.Reference().Pos(role, ax), UiStrings.CmSigned, null, v => PosStock(role, ax));
                     BindVisible(row, () => AlignmentSettings.PerWheel);
                 }
             }
@@ -1850,7 +1812,7 @@ namespace ApocalypterSteeringMod.Runtime
                 () => GearboxSettings.Shown.GearCount, v => EditGearbox(p => p.GearCount = Mathf.RoundToInt(v)),
                 () => GearboxSettings.Reference().GearCount,
                 v => v < 0.5f ? "Own" : string.Format(UiStrings.GearCountFmt, Mathf.RoundToInt(v)),
-                () => GearboxSettings.Shown.GearCount != 0, null, true, pin: "Gearbox.GearCount");
+                () => GearboxSettings.Shown.GearCount != 0, null, true);
 
             GearGraph graph = GearGraph.Create(c, "Gear ratios",
                 "Bars = each gear's ratio, outlines = the vehicle's own. Click a bar to pick its gear, drag it to change it.",
@@ -1886,7 +1848,7 @@ namespace ApocalypterSteeringMod.Runtime
                     {
                         float stock = _tuner.ReferenceGearStock(gear);
                         return stock > 0f ? UiStrings.Ratio(stock * v) : "";
-                    }, pin: "Gearbox." + PresetCodec.GearKey(gear));
+                    });
                 BindVisible(row, () => gear <= ShownGearCount());
                 Image bg = row.GetComponent<Image>();
                 if (bg != null)
@@ -1916,15 +1878,15 @@ namespace ApocalypterSteeringMod.Runtime
             AddSlider(c, "Clutch capacity", "Torque the clutch holds before slipping",
                 Limits.ClutchGripMin, Limits.ClutchGripMax,
                 () => GearboxSettings.Shown.ClutchGripScale, v => EditGearbox(p => p.ClutchGripScale = v),
-                () => GearboxSettings.Reference().ClutchGripScale, UiStrings.Times, pin: "Gearbox.ClutchGripScale");
+                () => GearboxSettings.Reference().ClutchGripScale, UiStrings.Times);
             AddSlider(c, "Engagement range", "Lower = the clutch bites faster",
                 Limits.ClutchRangeMin, Limits.ClutchRangeMax,
                 () => GearboxSettings.Shown.ClutchRangeScale, v => EditGearbox(p => p.ClutchRangeScale = v),
-                () => GearboxSettings.Reference().ClutchRangeScale, UiStrings.Times, pin: "Gearbox.ClutchRangeScale");
+                () => GearboxSettings.Reference().ClutchRangeScale, UiStrings.Times);
             AddSlider(c, "Engagement point", "RPM where the clutch starts to bite",
                 Limits.ClutchRpmMin, Limits.ClutchRpmMax,
                 () => GearboxSettings.Shown.ClutchRpmOffset, v => EditGearbox(p => p.ClutchRpmOffset = Mathf.Round(v / 10f) * 10f),
-                () => GearboxSettings.Reference().ClutchRpmOffset, v => v.ToString("+0;-0;0") + " rpm", pin: "Gearbox.ClutchRpmOffset");
+                () => GearboxSettings.Reference().ClutchRpmOffset, v => v.ToString("+0;-0;0") + " rpm");
 
             AddSectionTitle(c, "Shifting");
             Text shiftNote = AddNote(c, "ShiftNote", 44f, 13);
@@ -1942,15 +1904,15 @@ namespace ApocalypterSteeringMod.Runtime
             AddSlider(c, "Upshift point", "Automatic: lower = earlier, lazier upshifts",
                 Limits.ShiftFactorMin, Limits.ShiftFactorMax,
                 () => GearboxSettings.Shown.ShiftUpFactor, v => EditGearbox(p => p.ShiftUpFactor = v),
-                () => GearboxSettings.Reference().ShiftUpFactor, UiStrings.Times, null, null, false, "Gearbox.ShiftUpFactor");
+                () => GearboxSettings.Reference().ShiftUpFactor, UiStrings.Times);
             AddSlider(c, "Downshift point", "Automatic: higher = downshifts sooner",
                 Limits.ShiftFactorMin, Limits.ShiftFactorMax,
                 () => GearboxSettings.Shown.ShiftDownFactor, v => EditGearbox(p => p.ShiftDownFactor = v),
-                () => GearboxSettings.Reference().ShiftDownFactor, UiStrings.Times, null, null, false, "Gearbox.ShiftDownFactor");
+                () => GearboxSettings.Reference().ShiftDownFactor, UiStrings.Times);
             AddSlider(c, "Kickdown", "Automatic: how much later it shifts at full throttle",
                 Limits.KickdownMin, Limits.KickdownMax,
                 () => GearboxSettings.Shown.KickdownScale, v => EditGearbox(p => p.KickdownScale = v),
-                () => GearboxSettings.Reference().KickdownScale, UiStrings.Times, null, null, false, "Gearbox.KickdownScale");
+                () => GearboxSettings.Reference().KickdownScale, UiStrings.Times);
 
             Text status = AddNote(content, "Status", 60f, 14);
             _refreshers.Add(() =>
@@ -2092,39 +2054,21 @@ namespace ApocalypterSteeringMod.Runtime
                 () => (int)UiSettings.TelemetryPosition,
                 i => UiSettings.TelemetryPosition = (TelemetryCorner)i);
             Text telNote = AddNote(content, "TelemetryNote", 44f, 13);
-            telNote.text = "The strip never takes clicks and stays visible while you tune. Slip is NWH's normalised slip shown in approximate degrees. Use the Pin button on any slider to add its value to the strip.";
-            AddOption(content, "Pinned values", "ON while sliders are pinned; switch OFF to unpin them all",
-                () => TelemetryPins.Count > 0, v => { if (!v) TelemetryPins.Clear(); }, () => TelemetryPins.Count > 0);
-        }
-
-        // ================================================================ telemetry pins (0.7.0, FEATURES §4)
-
-        /// <summary>
-        /// Pin/unpin a slider value on the telemetry strip. Pinning switches the strip on (a pin on a
-        /// hidden strip would look like a dead button); the status line says what happened.
-        /// </summary>
-        private void OnPinClicked(string pin)
-        {
-            bool was = TelemetryPins.IsPinned(pin);
-            if (!TelemetryPins.Toggle(pin))
+            telNote.text = "The strip never takes clicks and stays visible while you tune. Slip is NWH's normalised slip shown in approximate degrees.";
+            AddSectionTitle(content, "Strip contents");
+            for (int i = 0; i < TelemetryCells.All.Length; i++)
             {
-                _status.text = string.Format(UiStrings.PinsFullFmt, TelemetryPins.MaxPins);
-                return;
+                TelemetryCell cell = TelemetryCells.All[i];
+                AddOption(content, TelemetryCells.Label(cell), TelemetryCells.Description(cell),
+                    () => TelemetryCells.IsOn(cell), v =>
+                    {
+                        if (v)
+                        {
+                            UiSettings.TelemetryEnabled = true;
+                        }
+                        TelemetryCells.Set(cell, v);
+                    }, () => UiSettings.TelemetryEnabled);
             }
-            if (was)
-            {
-                _status.text = string.Format(UiStrings.UnpinnedFmt, TelemetryPins.Label(pin));
-            }
-            else if (!UiSettings.TelemetryEnabled)
-            {
-                UiSettings.TelemetryEnabled = true;
-                _status.text = string.Format(UiStrings.PinnedTelemetryOnFmt, TelemetryPins.Label(pin));
-            }
-            else
-            {
-                _status.text = string.Format(UiStrings.PinnedFmt, TelemetryPins.Label(pin));
-            }
-            Refresh();
         }
 
         // ================================================================ footer: reset, copy/paste, all off

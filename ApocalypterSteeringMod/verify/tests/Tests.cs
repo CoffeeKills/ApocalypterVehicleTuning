@@ -316,7 +316,7 @@ public static class Tests
         TestDriftAndCentre();
 
         Console.WriteLine("0.7.0 telemetry pins");
-        TestTelemetryPins(dir);
+        TestTelemetryCells(dir);
 
         Console.WriteLine("0.7.0 tighter panel layout (300 / 400 / 460 / 800 / 1000 px)");
         TestLayout070();
@@ -3291,97 +3291,81 @@ public static class Tests
         UnityEngine.Object.Registry.Clear();
     }
 
-    private static void TestTelemetryPins(string dir)
+    private static void TestTelemetryCells(string dir)
     {
         ResetAllCategories();
-        TelemetryPins.Clear();
-        Check(TelemetryPins.IsKnown("Steering.RateMultiplier") && TelemetryPins.IsKnown("Suspension.SpringFront") && TelemetryPins.IsKnown("Gearbox.Gear3Scale")
-              && TelemetryPins.IsKnown("Gearbox.ShiftUpFactor") && TelemetryPins.IsKnown("Alignment.PosXFL") && TelemetryPins.IsKnown("Gearbox.GearCount"),
-            "pin keys = Category.ConfigKey of every slider (spec examples resolve)");
-        Check(!TelemetryPins.IsKnown("Steering.LockCurve") && !TelemetryPins.IsKnown("Assists.AbsEnabled") && !TelemetryPins.IsKnown("Gearbox.SpreadRatios") && !TelemetryPins.IsKnown("Bogus.Key")
-              && !TelemetryPins.IsKnown("Steering.") && !TelemetryPins.IsKnown("RateMultiplier") && !TelemetryPins.IsKnown("Panel.Width"),
-            "curves, switches, unknown categories/keys are not pinnable");
-        int dropped = TelemetryPins.Load("Steering.RateMultiplier; Bogus.Key ;Suspension.SpringFront;Steering.RateMultiplier;;Gearbox.Gear12Scale");
-        Check(TelemetryPins.Count == 3 && dropped == 2 && TelemetryPins.Serialize() == "Steering.RateMultiplier;Suspension.SpringFront;Gearbox.Gear12Scale",
-            "load drops unknown keys and duplicates, keeps order; serialize round-trips");
-        TelemetryPins.Clear();
-        string[] many = { "Steering.RateMultiplier", "Steering.SmoothingScale", "Steering.SlipAngleDeg", "Steering.OppositeLockBoost", "Steering.LinearityExponent",
-            "Aero.DragScale", "Aero.DownforceScale", "Brakes.TorqueScale", "Grip.LateralScale", "Grip.LongitudinalScale", "Drivetrain.PowerScale",
-            "Drivetrain.FinalDriveScale", "Gearbox.Gear1Scale" };
+        Check(TelemetryCells.DefaultText == "Speed;Rpm;Gear;SlipFront", "the default strip shows speed, RPM, gear and front slip");
+        Check(TelemetryCells.Parse("latg", TelemetryCell.Speed) == TelemetryCell.LatG && TelemetryCells.Parse("Bogus", TelemetryCell.Speed) == TelemetryCell.Speed,
+            "cell names parse case-insensitive; unknown falls back");
+        Check(TelemetryCells.All.Length == 10, "ten readouts available");
+        int dropped = TelemetryCells.Load("Speed; Bogus ;Rpm;Speed;;SlipFront");
+        Check(TelemetryCells.Count == 3 && dropped == 2 && TelemetryCells.Serialize() == "Speed;Rpm;SlipFront",
+            "load drops unknown names and duplicates, keeps order; serialize round-trips");
         bool okToggle = true;
-        for (int i = 0; i < 12; i++) okToggle &= TelemetryPins.Toggle(many[i]);
-        Check(okToggle && !TelemetryPins.Toggle(many[12]) && TelemetryPins.Count == TelemetryPins.MaxPins, "at most 12 pins: the 13th is refused");
-        Check(TelemetryPins.Toggle(many[0]) && !TelemetryPins.IsPinned(many[0]) && TelemetryPins.Count == 11, "toggle again unpins");
-        Check(TelemetryPins.Load(string.Join(";", many)) == 1 && TelemetryPins.Count == 12, "an over-long config list keeps the first 12");
+        for (int i = 0; i < 8; i++) okToggle &= TelemetryCells.Set((TelemetryCell)i, true);
+        Check(okToggle && !TelemetryCells.Set(TelemetryCell.Brakes, true) && TelemetryCells.Count == TelemetryCells.MaxCells,
+            "at most " + TelemetryCells.MaxCells + " cells: the 9th is refused");
+        Check(TelemetryCells.Set(TelemetryCell.Speed, false) && !TelemetryCells.IsOn(TelemetryCell.Speed) && TelemetryCells.Count == 7,
+            "turning a cell off removes it");
+        Check(TelemetryCells.Label(TelemetryCell.Rpm) == "Engine RPM" && TelemetryCells.Label(TelemetryCell.Brakes) == "Brakes", "cell labels");
+        var s = new VehicleTuner.TelemetrySample();
+        s.SpeedKmh = 132.4f; s.Rpm = 2450f; s.Gear = "3"; s.FrontSlip = 2.14f; s.RearSlip = 1.8f;
+        s.LatG = 0.42f; s.LongG = 0.31f; s.SteeringDeg = 12f; s.Throttle = 0.85f; s.Brakes = 0.3f;
+        Check(TelemetryStrip.CellText(TelemetryCell.Speed, s) == "132 km/h" && TelemetryStrip.CellText(TelemetryCell.Rpm, s) == "2450 rpm"
+              && TelemetryStrip.CellText(TelemetryCell.Gear, s) == "Gear 3" && TelemetryStrip.CellText(TelemetryCell.SlipFront, s) == "SlipF 2.1°"
+              && TelemetryStrip.CellText(TelemetryCell.SlipRear, s) == "SlipR 1.8°" && TelemetryStrip.CellText(TelemetryCell.LatG, s) == "Lat 0.42g"
+              && TelemetryStrip.CellText(TelemetryCell.LongG, s) == "Long 0.31g" && TelemetryStrip.CellText(TelemetryCell.Steering, s) == "Steer 12°"
+              && TelemetryStrip.CellText(TelemetryCell.Throttle, s) == "Thr 85%" && TelemetryStrip.CellText(TelemetryCell.Brakes, s) == "Brk 30%",
+            "cell value formatting");
 
-        SuspensionSettings.SetPresetByName("Race");
-        float v;
-        Check(TelemetryPins.TryGetValue("Suspension.SpringFront", out v) && Near(v, SuspensionSettings.Book.FindBuiltIn("Race").SpringFront),
-            "a pin shows the value of the preset the tab shows (Race)");
-        SuspensionSettings.BeginEdit().SpringFront = 2.25f;
-        Check(TelemetryPins.TryGetValue("Suspension.SpringFront", out v) && Near(v, 2.25f), "... and follows a slider edit (Custom)");
-        Check(TelemetryPins.UnitOf("Alignment.CamberFL") == TelemetryPins.Unit.DegSigned && TelemetryPins.UnitOf("Alignment.PosYRR") == TelemetryPins.Unit.CmSigned
-              && TelemetryPins.UnitOf("Gearbox.GearCount") == TelemetryPins.Unit.Count && TelemetryPins.UnitOf("Assists.TcsCutoffSpeed") == TelemetryPins.Unit.Speed
-              && TelemetryPins.UnitOf("Brakes.TorqueScale") == TelemetryPins.Unit.Factor, "pins use their slider's units");
-        Check(UiStrings.PinValue(TelemetryPins.Unit.Factor, 1.4f) == UiStrings.Times(1.4f) && UiStrings.PinValue(TelemetryPins.Unit.Count, 0f) == "Own"
-              && UiStrings.PinValue(TelemetryPins.Unit.Rpm, 200f) == "+200 rpm", "pin value formatting");
-        Check(TelemetryPins.Label("Suspension.SpringFront") == "Spring front" && TelemetryPins.Humanize("Gear3Scale") == "Gear 3 scale"
-              && TelemetryPins.Humanize("CamberFL") == "Camber FL", "labels: the key in words until the panel registers the slider title");
-        TelemetryPins.SetLabel("Suspension.SpringFront", "Stiffness (front)");
-        Check(TelemetryPins.Label("Suspension.SpringFront") == "Stiffness (front)", "the panel's slider title wins once registered");
-
-        // Strip geometry: fixed row + two pins per 26 px row, inside the 440 px strip, no overlaps.
-        bool geo = Near(TelemetryStrip.StripHeight(0), 32f) && Near(TelemetryStrip.StripHeight(12), 32f + 2f + 6f * 26f) && Near(TelemetryStrip.StripHeight(3), 32f + 2f + 52f);
-        for (int i = 0; i < 4 + 12; i++)
+        // Strip geometry: one 32 px row per up-to-six cells; every cell inside the strip, no overlaps.
+        bool geo = Near(TelemetryStrip.StripHeight(0), 32f) && Near(TelemetryStrip.StripHeight(6), 32f) && Near(TelemetryStrip.StripHeight(8), 64f);
+        for (int count = 1; count <= 8; count++)
         {
-            PanelLayout.Band bi = TelemetryStrip.CellBand(i);
-            geo &= bi.Inside(TelemetryStrip.Width, TelemetryStrip.StripHeight(12));
-            for (int j = 0; j < i; j++) geo &= !bi.Overlaps(TelemetryStrip.CellBand(j));
+            for (int i = 0; i < count; i++)
+            {
+                PanelLayout.Band bi = TelemetryStrip.CellBand(count, i);
+                geo &= bi.Inside(TelemetryStrip.Width, TelemetryStrip.StripHeight(count));
+                for (int j = 0; j < i; j++) geo &= !bi.Overlaps(TelemetryStrip.CellBand(count, j));
+            }
         }
-        Check(geo, "strip grows by one 26 px row per two pins; every cell inside the strip, none overlapping");
+        Check(geo, "strip rows: up to six per row, a second row beyond; every cell inside the strip, none overlapping");
 
-        // 0.7.2: the corner mapping — at every corner and pin count the pin rows sit strictly
-        // further from the corner than the fixed row (the fix for the pin row overlapping the
-        // main strip on real screens).
+        // Corner mapping: every mapped cell stays inside the strip at every corner and count.
         bool cornerMap = true;
         foreach (TelemetryCorner c in new[] { TelemetryCorner.TopLeft, TelemetryCorner.TopRight, TelemetryCorner.BottomLeft, TelemetryCorner.BottomRight })
         {
             bool top = TelemetryStrip.CornerAnchor(c).y > 0.5f;
-            for (int pins = 1; pins <= TelemetryPins.MaxPins && cornerMap; pins++)
+            for (int count = 1; count <= 8 && cornerMap; count++)
             {
-                float h = TelemetryStrip.StripHeight(pins);
-                for (int i = 0; i < 4 && cornerMap; i++)
+                float h = TelemetryStrip.StripHeight(count);
+                for (int i = 0; i < count && cornerMap; i++)
                 {
-                    PanelLayout.Band bi = TelemetryStrip.CellBand(i);
-                    Vector2 pi = TelemetryStrip.CellAnchoredPosition(c, i, h);
-                    float fixedNear = top ? -pi.y : pi.y;
-                    float fixedFar = fixedNear + bi.H;
-                    for (int j = 4; j < 4 + pins && cornerMap; j++)
-                    {
-                        PanelLayout.Band bj = TelemetryStrip.CellBand(j);
-                        Vector2 pj = TelemetryStrip.CellAnchoredPosition(c, j, h);
-                        float pinNear = top ? -pj.y : pj.y;
-                        float pinFar = pinNear + bj.H;
-                        cornerMap &= top ? pinNear >= fixedFar : pinFar <= fixedNear;
-                    }
+                    PanelLayout.Band b = TelemetryStrip.CellBand(count, i);
+                    Vector2 p = TelemetryStrip.CellAnchoredPosition(c, count, i, h);
+                    float near = top ? -p.y : p.y;
+                    float far = top ? -p.y + b.H : p.y + b.H;
+                    // 0.01 px epsilon: the per-cell width rounds, so the last cell can exceed by 3e-5 px.
+                    bool okCell = near >= 0f && far <= h && p.x >= 0f && p.x + b.W <= TelemetryStrip.Width + 0.01f;
+                    cornerMap &= okCell;
                 }
             }
         }
-        Check(cornerMap, "corner mapping: pin rows never overlap the fixed row, at any corner and pin count");
+        Check(cornerMap, "corner mapping: every cell stays inside the strip at every corner and count");
 
         // Config round trip.
-        string path = Path.Combine(dir, "pins.cfg");
+        string path = Path.Combine(dir, "cells.cfg");
         ModConfig.Load(new ConfigFile(path, true));
-        TelemetryPins.Load("Steering.RateMultiplier;Gearbox.KickdownScale");
+        TelemetryCells.Load("Speed;LatG;LongG");
         ModConfig.Save();
-        TelemetryPins.Clear();
+        TelemetryCells.Load(TelemetryCells.DefaultText);
         ModConfig.Load(new ConfigFile(path, true));
-        Check(TelemetryPins.Serialize() == "Steering.RateMultiplier;Gearbox.KickdownScale", "[Telemetry] Pins round-trips through the config");
-        File.WriteAllText(path, File.ReadAllText(path).Replace("Pins = Steering.RateMultiplier;Gearbox.KickdownScale", "Pins = Nope.Nothing;Steering.RateMultiplier"));
+        Check(TelemetryCells.Serialize() == "Speed;LatG;LongG", "[Telemetry] Cells round-trips through the config");
+        File.WriteAllText(path, File.ReadAllText(path).Replace("Cells = Speed;LatG;LongG", "Cells = Nope;Speed"));
         ModConfig.Load(new ConfigFile(path, true));
-        Check(TelemetryPins.Serialize() == "Steering.RateMultiplier" && File.ReadAllText(path).Contains("Pins = Steering.RateMultiplier")
-              && !File.ReadAllText(path).Contains("Nope.Nothing"), "unknown pin keys are dropped on load (runtime and file)");
-        TelemetryPins.Clear();
+        Check(TelemetryCells.Serialize() == "Speed" && File.ReadAllText(path).Contains("Cells = Speed")
+              && !File.ReadAllText(path).Contains("Nope"), "unknown cell names are dropped on load (runtime and file)");
+        TelemetryCells.Load(TelemetryCells.DefaultText);
         ResetAllCategories();
     }
 
@@ -3393,17 +3377,11 @@ public static class Tests
             float c = PanelLayout.ContentWidth(W);
             bool rowOk = true;
             foreach (bool readout in new[] { false, true })
-                foreach (bool pin in new[] { false, true })
                 {
-                    PanelLayout.SliderGeom g = PanelLayout.SliderRow(c, readout, pin);
+                    PanelLayout.SliderGeom g = PanelLayout.SliderRow(c, readout);
                     rowOk &= g.Title.Inside(c, g.RowHeight) && g.Hint.Inside(c, g.RowHeight) && g.Slider.Inside(c, g.RowHeight)
                              && g.Value.Inside(c, g.RowHeight) && g.Reset.Inside(c, g.RowHeight);
                     rowOk &= NoOverlap(g.Title, g.Slider, g.Value, g.Reset) && NoOverlap(g.Hint, g.Slider, g.Value, g.Reset);
-                    if (pin)
-                    {
-                        rowOk &= g.Pin.Inside(c, g.RowHeight) && NoOverlap(g.Pin, g.Title, g.Hint, g.Slider) && !g.Pin.Overlaps(g.Value) && !g.Pin.Overlaps(g.Reset)
-                                 && Near(g.Pin.W, 26f) && Near(g.Pin.H, 26f);
-                    }
                     rowOk &= g.Slider.W >= 80f && g.Title.W >= 100f;
                 }
             PanelLayout.SwitchRowGeom o = PanelLayout.OptionRow(c), m = PanelLayout.MasterRow(c);
@@ -3465,8 +3443,9 @@ public static class Tests
               && Near(gc.ShiftUpFactor, 1f) && Near(gc.ShiftDownFactor, 1f) && Near(gc.KickdownScale, 1f) && !gc.SpreadRatios,
             "0.6.4 cfg: gearbox kept (now live: the gate is gone), new shift knobs at their neutral 1");
         Check(AlignmentSettings.Enabled && UiSettings.TelemetryEnabled && Near(UiSettings.PanelWidth, 300f) && UiSettings.LastTab == 7
-              && TargetSettings.Mode == TargetMode.Selected && TargetSettings.SelectedName == "Duke(Clone)6792" && TelemetryPins.Count == 0,
-            "0.6.4 cfg: alignment, UI, telemetry, target kept; a stored tab 8 (the old Gearbox tab) clamps to the last tab");
+              && TargetSettings.Mode == TargetMode.Selected && TargetSettings.SelectedName == "Duke(Clone)6792"
+              && TelemetryCells.Serialize() == TelemetryCells.DefaultText,
+            "0.6.4 cfg: alignment, UI, telemetry, target kept; the new [Telemetry] Cells key defaults to Speed;Rpm;Gear;SlipFront");
         ModConfig.Save();
         string after = File.ReadAllText(path);
         var newKeys = ReadKeys(after);
@@ -3488,11 +3467,11 @@ public static class Tests
         }
         Check(kept && oldKeys.Count == 133, "all 133 keys of a real 0.6.4 file survive load + save with their values (no rename, removal or default change)");
         string[] added = { "Drivetrain.Custom|DiffCenterMode", "Gearbox.Custom|SpreadRatios", "Gearbox.Custom|ShiftUpFactor", "Gearbox.Custom|ShiftDownFactor",
-            "Gearbox.Custom|KickdownScale", "Telemetry|Pins" };
+            "Gearbox.Custom|KickdownScale", "Telemetry|Cells" };
         bool all = newKeys.Count == oldKeys.Count + added.Length;
         foreach (string k in added) all &= newKeys.ContainsKey(k);
         if (!all) foreach (string k in newKeys.Keys) if (!oldKeys.ContainsKey(k)) Console.WriteLine("  new key: " + k);
-        Check(all, "exactly six keys added: DiffCenterMode, SpreadRatios, ShiftUpFactor, ShiftDownFactor, KickdownScale, Pins");
+        Check(all, "exactly six keys added: DiffCenterMode, SpreadRatios, ShiftUpFactor, ShiftDownFactor, KickdownScale, Cells");
         File.WriteAllText(path, after.Replace("ShiftUpFactor = 1", "ShiftUpFactor = 9").Replace("KickdownScale = 1", "KickdownScale = 0.1").Replace("DiffCenterMode = Stock", "DiffCenterMode = 7"));
         ModConfig.Load(new ConfigFile(path, true));
         Check(Near(GearboxPreset.Custom.ShiftUpFactor, Limits.ShiftFactorMax) && Near(GearboxPreset.Custom.KickdownScale, Limits.KickdownMin)

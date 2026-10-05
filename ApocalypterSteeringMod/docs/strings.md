@@ -60,7 +60,7 @@ specifiers (`"0.00"`) appear in the sweep but are never shown. Display strings b
    its note) and the `Truck` preset (Name = Label = `Truck`, plus its Description); Drivetrain
    centre-diff buttons (the same `Stock` / `Open` / `Locked` / `LSD` labels), `Drivetrain layout`
    section (`Custom layout`, the template buttons `RWD`, `FWD`, `AWD`, `4x4 locked`,
-   `Copy this vehicle's layout`, `Paste layout`); Settings tab `Pinned values` option.
+   `Copy this vehicle's layout`, `Paste layout`); Settings tab "Strip contents" cell options.
    **Telemetry pin cells** show two texts: the label (the slider's own title once the panel was
    built — the same string as in the panel, so one translation covers both — else the config key
    in words, e.g. `Spring front`) and the value in the slider's units (the existing `Times`,
@@ -124,7 +124,7 @@ Every dynamic string is a `string.Format` template using only `{0}` (repeated `{
 | `LayoutUnfitFmt` | why the vehicle keeps its own drivetrain (English) | layout status (0.7.0) |
 | `LayoutCopied` / `LayoutCopyNone` / `LayoutPasted` | — | no placeholder; footer status (0.7.0) |
 | `TargetMissingFmt` | the selected vehicle's name | "… (not here)" while it has not spawned (0.7.0) |
-| `PinnedFmt` / `PinnedTelemetryOnFmt` / `UnpinnedFmt` | a slider title | footer status after a pin click (0.7.0) |
+| (pin strings removed in 0.7.4 with the pin feature) | — | — |
 | `PinsFullFmt` | the pin cap (12) | footer status (0.7.0) |
 
 **Conventions**

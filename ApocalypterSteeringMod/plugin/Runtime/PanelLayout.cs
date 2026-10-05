@@ -59,9 +59,6 @@ namespace ApocalypterSteeringMod.Runtime
         public const int ResetFont = 14;                                 // 0.6.x 13
         public const int FooterFont = 15, FooterResetFont = 16, DoneFont = 19, StatusFont = 14;
 
-        // Per-slider pin toggle (FEATURES §4): a 26 x 26 button left of Reset.
-        public const float PinSize = 26f, PinGap = 6f;
-
         /// <summary>Notes keep their call-site size + 1 (0.7.0 §5).</summary>
         public static int NoteFont(int size)
         {
@@ -216,20 +213,18 @@ namespace ApocalypterSteeringMod.Runtime
         {
             public bool Stacked;
             public float RowHeight;
-            public Band Title, Hint, Slider, Value, Reset, Pin;
-            public bool HasPin;
+            public Band Title, Hint, Slider, Value, Reset;
             public int TitleFont, HintFont;
         }
 
         /// <summary>
-        /// A slider row. 0.7.0 §5: 50 px wide / 86 px stacked (0.6.x 58 / 100), +1..2 px fonts, and
-        /// (§4) an optional 26 px pin toggle between the value and Reset.
-        /// Wide: label 16..316 (title top, hint bottom) | slider from 328 | value | pin | Reset.
-        /// Narrow (stacked): title + pin + Reset / hint / slider + value.
+        /// A slider row. 0.7.0 §5: 50 px wide / 86 px stacked (0.6.x 58 / 100), +1..2 px fonts.
+        /// Wide: label 16..316 (title top, hint bottom) | slider from 328 | value | Reset.
+        /// Narrow (stacked): title + Reset / hint / slider + value.
         /// </summary>
-        public static SliderGeom SliderRow(float c, bool hasReadout, bool hasPin = false)
+        public static SliderGeom SliderRow(float c, bool hasReadout)
         {
-            var g = new SliderGeom { HasPin = hasPin };
+            var g = new SliderGeom();
             if (Wide(c))
             {
                 g.RowHeight = RowHeight;
@@ -238,11 +233,6 @@ namespace ApocalypterSteeringMod.Runtime
                 const float resetW = 62f, resetH = 28f;
                 g.Reset = new Band(c - 12f - resetW, (RowHeight - resetH) / 2f, resetW, resetH);
                 float right = g.Reset.X - 4f;
-                if (hasPin)
-                {
-                    g.Pin = new Band(g.Reset.X - PinGap - PinSize, (RowHeight - PinSize) / 2f, PinSize, PinSize);
-                    right = g.Pin.X - 4f;
-                }
                 float vw = hasReadout ? 150f : 86f;
                 g.Value = new Band(right - vw, 0f, vw, RowHeight);
                 g.Slider = new Band(328f, 3f, g.Value.X - 4f - 328f, RowHeight - 6f);
@@ -256,13 +246,8 @@ namespace ApocalypterSteeringMod.Runtime
             float valW = hasReadout ? 130f : 80f;
             g.Reset = new Band(c - side - rw, 6f, rw, rh);
             float titleRight = g.Reset.X - 8f;
-            if (hasPin)
-            {
-                g.Pin = new Band(g.Reset.X - PinGap - PinSize, 6f, PinSize, PinSize);
-                titleRight = g.Pin.X - 8f;
-            }
             g.Title = new Band(side, 6f, titleRight - side, 24f);
-            g.Hint = new Band(side, 32f, c - 2f * side, 16f);    // below Reset/pin (6..32), above the slider (50)
+            g.Hint = new Band(side, 32f, c - 2f * side, 16f);    // below Reset (6..32), above the slider (50)
             g.Value = new Band(c - side - valW, 48f, valW, 34f);
             g.Slider = new Band(side, 50f, c - 2f * side - valW - 10f, 32f);
             g.TitleFont = TitleFontNarrow;
