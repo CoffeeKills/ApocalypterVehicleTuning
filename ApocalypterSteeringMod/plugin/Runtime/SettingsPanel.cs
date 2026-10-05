@@ -25,17 +25,17 @@ namespace ApocalypterSteeringMod.Runtime
     {
         private const float Dimmed = 0.35f;
 
-        public const int TabCount = 8;
+        public const int TabCount = 9;
         public static readonly string[] TabNames =
         {
-            "Steering", "Suspension", "Wheels", "Drivetrain", "Brakes", "Assists", "Aero", "Settings"
+            "Steering", "Suspension", "Wheels", "Drivetrain", "Brakes", "Assists", "Aero", "Weight", "Settings"
         };
         // Preset book behind each tab (merged tabs and the Settings tab have none:
         // copy/paste needs exactly one book).
         private static readonly PresetCategory?[] TabCategory =
         {
             PresetCategory.Steering, PresetCategory.Suspension, null, null,
-            PresetCategory.Brakes, PresetCategory.Assists, PresetCategory.Aero, null
+            PresetCategory.Brakes, PresetCategory.Assists, PresetCategory.Aero, PresetCategory.Weight, null
         };
         private static readonly string[] DiffModeLabels = { "Stock", "Open", "Locked", "LSD" };
         private static readonly string[] ModeLabels = { "Stock", "Manual", "Automatic" };
@@ -102,6 +102,7 @@ namespace ApocalypterSteeringMod.Runtime
                 () => { BrakesSettings.ResetAll(); _tuner.ReapplyNow(); },
                 () => { AssistsSettings.ResetAll(); _tuner.ReapplyNow(); },
                 () => { AeroSettings.ResetAll(); _tuner.ReapplyNow(); },
+                () => { WeightSettings.ResetAll(); _tuner.ReapplyNow(); },
                 () =>
                 {
                     // 0.7.0 audit fix: 0.6.x "reset" turned the strip ON at bottom-left — the
@@ -114,7 +115,7 @@ namespace ApocalypterSteeringMod.Runtime
             _resetLabels = new[]
             {
                 "Reset all steering", "Reset all suspension", "Reset wheels & tires", "Reset all drivetrain",
-                "Reset all brakes", "Reset all assists", "Reset all aero", "Reset panel settings"
+                "Reset all brakes", "Reset all assists", "Reset all aero", "Reset all weight", "Reset panel settings"
             };
             Build();
             ApplyDisplaySettings();
@@ -177,7 +178,8 @@ namespace ApocalypterSteeringMod.Runtime
             _pages[4] = BuildPage(_win, "BrakesPage", 4, BuildBrakes);
             _pages[5] = BuildPage(_win, "AssistsPage", 5, BuildAssists);
             _pages[6] = BuildPage(_win, "AeroPage", 6, BuildAero);
-            _pages[7] = BuildPage(_win, "SettingsPage", 7, BuildPanelTab);
+            _pages[7] = BuildPage(_win, "WeightPage", 7, BuildWeight);
+            _pages[8] = BuildPage(_win, "SettingsPage", 8, BuildPanelTab);
         }
 
         // ================================================================ merged tabs (0.7.1)
@@ -739,6 +741,7 @@ namespace ApocalypterSteeringMod.Runtime
         private void EditAssists(Action<AssistsPreset> edit) { Edit(AssistsSettings.Book, edit); }
         private void EditAlignment(Action<AlignmentPreset> edit) { Edit(AlignmentSettings.Book, edit); }
         private void EditGearbox(Action<GearboxPreset> edit) { Edit(GearboxSettings.Book, edit); }
+        private void EditWeight(Action<WeightPreset> edit) { Edit(WeightSettings.Book, edit); }
 
         private void ModeChanged()
         {
@@ -1064,6 +1067,60 @@ namespace ApocalypterSteeringMod.Runtime
                     : n == 0
                         ? "No vehicles found yet. Settings apply as soon as one spawns."
                         : VehicleStatus(n, UiStrings.AppliedOneAeroFmt, UiStrings.AppliedManyAeroFmt);
+            });
+        }
+
+        // ================================================================ weight tab
+
+        private void BuildWeight(RectTransform content)
+        {
+            AddMasterSwitch(content, "Weight tuning", "OFF = every vehicle keeps its original weight.",
+                () => WeightSettings.Enabled, v =>
+                {
+                    WeightSettings.Enabled = v;
+                    _tuner.ReapplyNow();
+                });
+
+            CanvasGroup body = AddGroup(content, "Body", out RectTransform c);
+            BindGroup(body, () => WeightSettings.Enabled);
+
+            AddSectionTitle(c, "Preset");
+            WeightPreset[] presets = WeightPreset.Presets;
+            AddPresetButtons(c, "Presets", presets.Length, 3, 2,
+                i => PresetButtonLabel(WeightSettings.Book, presets[i]),
+                () => Array.IndexOf(presets, WeightSettings.ActivePreset),
+                i =>
+                {
+                    WeightSettings.Book.Select(presets[i]);
+                    _tuner.ApplyLive();
+                });
+
+            Text desc = AddNote(c, "Description", 50f);
+            _refreshers.Add(() =>
+            {
+                WeightPreset p = WeightSettings.Shown;
+                desc.text = p == WeightPreset.Custom ? CustomDescription(WeightSettings.Book) : p.Description;
+            });
+
+            AddSectionTitle(c, "Tuning");
+            AddSlider(c, "Front weight", "Positive kg = real ballast at the front; negative kg = balloon lift pulling that axle up",
+                Limits.WeightKgMin, Limits.WeightKgMax,
+                () => WeightSettings.Shown.FrontKg, v => EditWeight(p => p.FrontKg = v),
+                () => WeightSettings.Reference().FrontKg, UiStrings.Kg, null, null, true);
+            AddSlider(c, "Rear weight", "Positive kg = real ballast at the rear; negative kg = balloon lift pulling that axle up",
+                Limits.WeightKgMin, Limits.WeightKgMax,
+                () => WeightSettings.Shown.RearKg, v => EditWeight(p => p.RearKg = v),
+                () => WeightSettings.Reference().RearKg, UiStrings.Kg, null, null, true);
+
+            Text status = AddNote(content, "Status", 44f, 14);
+            _refreshers.Add(() =>
+            {
+                int n = _tuner.TargetedCount;
+                status.text = !WeightSettings.Enabled
+                    ? "Weight tuning is off. Vehicles use their original weight."
+                    : n == 0
+                        ? "No vehicles found yet. Settings apply as soon as one spawns."
+                        : VehicleStatus(n, UiStrings.AppliedOneWeightFmt, UiStrings.AppliedManyWeightFmt);
             });
         }
 
@@ -2124,7 +2181,7 @@ namespace ApocalypterSteeringMod.Runtime
             return true;        // second click inside the window: confirm
         }
 
-        /// <summary>Switch all nine tuning categories off (the panel's "Turn everything off").</summary>
+        /// <summary>Switch all ten tuning categories off (the panel's "Turn everything off").</summary>
         public static void TurnEverythingOff()
         {
             SteeringSettings.Enabled = false;
@@ -2136,6 +2193,7 @@ namespace ApocalypterSteeringMod.Runtime
             AssistsSettings.Enabled = false;
             AlignmentSettings.Enabled = false;
             GearboxSettings.Enabled = false;
+            WeightSettings.Enabled = false;
         }
 
         private void OnAllOffClicked()
@@ -2163,7 +2221,8 @@ namespace ApocalypterSteeringMod.Runtime
                 case PresetCategory.Drivetrain: return DrivetrainSettings.Shown;
                 case PresetCategory.Assists: return AssistsSettings.Shown;
                 case PresetCategory.Alignment: return AlignmentSettings.Shown;
-                default: return GearboxSettings.Shown;
+                case PresetCategory.Gearbox: return GearboxSettings.Shown;
+                default: return WeightSettings.Shown;
             }
         }
 

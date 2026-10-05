@@ -2117,9 +2117,10 @@ public static class Tests
         Check(Near(PanelLayout.ScaleFactor(1080f, 1f), 1f) && Near(PanelLayout.ScaleFactor(2160f, 1f), 2f) && Near(PanelLayout.ScaleFactor(1080f, 0.5f), 0.5f),
             "scale factor = Screen.height / 1080 x PanelScale (x1 renders like 0.5.0)");
 
-        Check(PanelLayout.TabForDigit(1) == 0 && PanelLayout.TabForDigit(8) == 7 && PanelLayout.TabForDigit(0) == 7 && PanelLayout.TabForDigit(9) == -1,
-            "digit hotkeys: 1..8 -> tabs 1..8, 0 -> tab 8 (Settings)");
-        Check(SettingsPanel.TabCount == 8 && SettingsPanel.TabNames.Length == 8 && SettingsPanel.TabNames[7] == "Settings", "eight tabs, Settings last");
+        Check(PanelLayout.TabForDigit(1) == 0 && PanelLayout.TabForDigit(8) == 7 && PanelLayout.TabForDigit(9) == 8 && PanelLayout.TabForDigit(0) == 8 && PanelLayout.TabForDigit(10) == -1,
+            "digit hotkeys: 1..9 -> tabs 1..9, 0 -> tab 9 (Settings)");
+        Check(SettingsPanel.TabCount == 9 && SettingsPanel.TabNames.Length == 9 && SettingsPanel.TabNames[7] == "Weight" && SettingsPanel.TabNames[8] == "Settings",
+            "nine tabs, Weight second-last, Settings last");
 
         Check(GearGraph.RouteDrag(true, 3, true) == GearGraph.DragRoute.MoveBar && GearGraph.RouteDrag(true, -1, true) == GearGraph.DragRoute.ScrollList
               && GearGraph.RouteDrag(false, 3, true) == GearGraph.DragRoute.ScrollList && GearGraph.RouteDrag(true, -1, false) == GearGraph.DragRoute.None,

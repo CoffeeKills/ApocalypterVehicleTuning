@@ -42,6 +42,10 @@ namespace ApocalypterSteeringMod.Runtime
         public static string Px(float v) { return string.Format(PxFmt, UnityEngine.Mathf.RoundToInt(v)); }
         public static string Ratio(float r) { return string.Format(RatioFmt, r.ToString("0.000")); }
 
+        // 0.10.0 weight tab: signed whole kilograms ("+400 kg", "-250 kg", "0 kg").
+        public static readonly string KgFmt = "{0} kg";
+        public static string Kg(float kg) { return string.Format(KgFmt, kg.ToString("+0;-0;0")); }
+
         // ---- preset semantics -------------------------------------------------
 
         // {0} = the built-in preset's Label the Custom slot was copied from.
@@ -115,6 +119,13 @@ namespace ApocalypterSteeringMod.Runtime
         public static readonly string GearCountFmt = "{0} gears";
         public static readonly string AppliedOneGearFmt = "Applied to {0} vehicle.";
         public static readonly string AppliedManyGearFmt = "Applied to {0} vehicles.";
+
+        // ---- weight tab (0.10.0) ---------------------------------------------------
+
+        public static readonly string AppliedOneWeightFmt =
+            "Applied to {0} vehicle. Springs are re-scaled with the mass so ballast does not bottom them out.";
+        public static readonly string AppliedManyWeightFmt =
+            "Applied to {0} vehicles. Springs are re-scaled with the mass so ballast does not bottom them out.";
 
         // ---- telemetry strip (0.6.0) ------------------------------------------------
 
