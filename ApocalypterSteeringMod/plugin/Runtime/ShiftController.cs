@@ -317,6 +317,7 @@ namespace ApocalypterSteeringMod.Runtime
                 {
                     // Drive/neutral/reverse stays NWH's (incl. the game's DNR type and reverse gears).
                     StockDelegate(vc);
+                    NoteStuckNeutral(vc, t, gear, speed, throttle);
                     return;
                 }
                 int dnr = DnrFromNeutralOrReverse(gear, speed, throttle, vc.input.InputSwappedBrakes, t.dnrSpeedThreshold);
@@ -374,6 +375,43 @@ namespace ApocalypterSteeringMod.Runtime
             {
                 _lastShift = _clock;
                 ShiftCount++;
+            }
+        }
+
+        // -------------------------------------------------------------- diagnostics (0.7.5)
+
+        private float _neutralThrottleTime;
+        private float _lastNeutralLog;
+
+        /// <summary>
+        /// The user report "wheels don't turn when the game loads with a custom gearbox enabled"
+        /// had no fault lines, so this logs the stuck state directly: a controller that has been
+        /// in neutral with the throttle held for 10+ s reports the DNR type, the gear, the
+        /// throttle/speed and whose delegate is running. One line per 10 s.
+        /// </summary>
+        private void NoteStuckNeutral(VehicleController vc, TransmissionComponent t, int gear, float speed, float throttle)
+        {
+            if (throttle > PedalDeadZone)
+            {
+                _neutralThrottleTime += vc.fixedDeltaTime;
+                if (_neutralThrottleTime - _lastNeutralLog >= 10f)
+                {
+                    _lastNeutralLog = _neutralThrottleTime;
+                    if (Plugin.Log != null)
+                    {
+                        bool ownDelegate = StockDelegate != null && StockDelegate.Target is TransmissionComponent;
+                        Plugin.Log.LogWarning("Shift controller: '" + VehicleTuner.VehicleName(vc) + "' has been in neutral for "
+                            + _neutralThrottleTime.ToString("0") + "s while throttle = " + throttle.ToString("0.00")
+                            + ", speed = " + speed.ToString("0.0") + " m/s, gear = " + gear
+                            + ", dnr = " + t.automaticTransmissionDNRShiftType
+                            + ", running " + (ownDelegate ? "the game's own delegate" : "the fallback delegate")
+                            + ", forward gears = " + t.forwardGearCount + ", isShifting = " + t.isShifting);
+                    }
+                }
+            }
+            else
+            {
+                _neutralThrottleTime = 0f;
             }
         }
     }

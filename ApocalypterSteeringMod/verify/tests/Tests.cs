@@ -3162,6 +3162,41 @@ public static class Tests
         for (int i = 0; i < 500; i++) { av.Speed = 10f + (i % 50) * 0.5f; del(av); }
         long bytes = GC.GetAllocatedBytesForCurrentThread() - before;
         Check(bytes == 0, "the controller's per-tick path allocates nothing (" + bytes + " bytes over 500 ticks)");
+
+        // 12. 0.7.5: enabled AT LOAD (the user report: loading with a custom gearbox on leaves
+        // the wheels dead, while enabling it after load works). The load path differs: the first
+        // capture happens during the spawn wave, and the game's init FSMs flip transmissionType
+        // AFTER the tuner's first apply. Simulate the whole sequence: settings already on before
+        // the first scan, a type flip mid-wave (guard re-hooks), then a drive ramp.
+        UnityEngine.Object.Registry.Clear();
+        VehicleController lv = MakeShiftCar(TransmissionComponent.TransmissionShiftType.Automatic, "LoadCase");
+        TransmissionComponent lt = lv.powertrain.transmission;
+        UnityEngine.Object.Registry.Add(lv);
+        GearboxSettings.Enabled = true;                       // the cfg is on at startup
+        GearboxSettings.SetPresetByName("Truck");
+        var tL = new VehicleTuner();
+        tL.ReapplyNow();                                       // first scan + apply during the wave
+        Check(!lt.HasNwhDelegate && tL.ShiftControlledCount == 1, "enabled at load: the controller is hooked on the first apply");
+        TransmissionComponent.AfterDelegateReassign = VehicleTuner.RehookIfControlled;
+        lt.transmissionType = TransmissionComponent.TransmissionShiftType.Manual;    // the game's setting FSM, mid-wave
+        lt.SimulateForwardStep();
+        lt.transmissionType = TransmissionComponent.TransmissionShiftType.Automatic;
+        lt.SimulateForwardStep();
+        TransmissionComponent.AfterDelegateReassign = null;
+        Check(!lt.HasNwhDelegate, "after the mid-wave type flips the controller is still the delegate (guard)");
+        // The player gets in and launches: N -> 1 through the game's own DNR, then up through the box.
+        lv.input.Throttle = 0.8f;
+        lv.Speed = 0f;
+        lt.SimulateForwardStep();
+        Check(lt.Gear == 1, "throttle from neutral engages 1st (" + lt.Gear + ")");
+        var loadSeq = new List<int>();
+        int loadRev = Ramp(lv, 0f, 60f, 0.02f, 0.8f, loadSeq);
+        int loadMax = 0;
+        foreach (int g in loadSeq) if (g > loadMax) loadMax = g;
+        Check(loadMax == 12 && loadRev == 0, "the load-path box drives up through all 12 gears, never back (" + loadMax + " reached, " + loadRev + " reversals)");
+        GearboxSettings.Enabled = false;
+        tL.ApplyLive();
+        TransmissionComponent.AfterDelegateReassign = null;
         ResetAllCategories();
         tA.ApplyLive();
         UnityEngine.Object.Registry.Clear();

@@ -439,6 +439,12 @@ namespace ApocalypterSteeringMod.Runtime
             t.shiftDelegate = d.Shifter.Delegate;
             d.Hooked = true;
             Controlled[t] = d.Shifter;
+            if (Plugin.Log != null)
+            {
+                Plugin.Log.LogInfo("Shift controller hooked on '" + VehicleName(t.vehicleController) + "' (type "
+                    + t.transmissionType + ", " + t.forwardGearCount + " forward gears, mode "
+                    + (GearboxSettings.ActivePreset != null ? GearboxSettings.ActivePreset.TransmissionMode.ToString() : "?") + ")");
+            }
         }
 
         /// <summary>Put the captured delegate back (only if ours is still installed).</summary>
