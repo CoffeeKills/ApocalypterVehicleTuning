@@ -2951,6 +2951,9 @@ public static class Tests
         TransmissionComponent ht = hv.powertrain.transmission;
         ht.gears = new List<float> { -2.216f, 0f, 3.274f, 0.98f, 0.7f, 0.5f, 0.4f };
         ht.Gear = 1;
+        // Sequential (the hunting mechanism on a wide step; gear-skipping is modeled in the
+        // 0.7.3 launch test instead).
+        ht.allowUpshiftGearSkipping = false;
         hv.Speed = 2900f / (27.3f * 3.274f * 6f);   // 2900 rpm in 1st
         for (int i = 0; i < 100; i++) { ht.SimulateForwardStep(); hv.Speed = 2900f / (27.3f * 3.274f * 6f); }
         Check(ht.NwhAutoShifts > 50, "control: NWH's raw automatic on a x0.3 ratio step hunts 1<->2 (" + ht.NwhAutoShifts + " shifts in 100 ticks; each shift opens the clutch = revs, no drive)");
@@ -3040,6 +3043,37 @@ public static class Tests
         tuner.ApplyLive();
         Check(tt.HasNwhDelegate && tt.transmissionType == TransmissionComponent.TransmissionShiftType.Manual && tt.gears.Count == 7,
             "OFF after the change: the game's new type and NWH's delegate for it stay (no stale restore)");
+
+        // 5b. 0.7.3: the instant re-hook. The game's auto-gearbox setting flips transmissionType
+        // (Auto -> Manual -> Auto): each flip makes NWH re-assign its own delegate, and on the
+        // second flip its gear-skipping automatic runs the tuned 12-gear box — from a launch it
+        // lands in a tall gear in one ShiftInto (the "launching from gear 8" report). The guard
+        // re-installs the controller in the same tick, so the window is zero.
+        GearboxSettings.Enabled = true;
+        GearboxSettings.SetPresetByName("Truck");
+        tuner.ApplyLive();
+        Check(tuner.ShiftControlledCount == 1 && !tt.HasNwhDelegate, "Truck hooked again");
+        float launchSpeed = 3800f / (27.3f * 3.274f * 6f);   // 3800 rpm (no-slip) in 1st: above the upshift point
+        tv.Speed = launchSpeed;
+        tt.Gear = 1;
+        TransmissionComponent.AfterDelegateReassign = null;   // the window WITHOUT the guard
+        tt.transmissionType = TransmissionComponent.TransmissionShiftType.Manual;
+        tt.SimulateForwardStep();
+        tt.transmissionType = TransmissionComponent.TransmissionShiftType.Automatic;
+        tt.SimulateForwardStep();
+        int skipped = tt.Gear;
+        bool gear8Launch = skipped >= 4;
+        tt.Gear = 1;
+        TransmissionComponent.AfterDelegateReassign = VehicleTuner.RehookIfControlled;   // the guard (the Harmony postfix)
+        tt.transmissionType = TransmissionComponent.TransmissionShiftType.Manual;
+        tt.SimulateForwardStep();
+        tt.transmissionType = TransmissionComponent.TransmissionShiftType.Automatic;
+        tt.SimulateForwardStep();
+        bool guarded = !tt.HasNwhDelegate && tt.Gear <= 2;
+        TransmissionComponent.AfterDelegateReassign = null;
+        tt.Gear = 1;
+        Check(gear8Launch, "without the guard, the game's skipping automatic lands the 12-gear box in gear " + skipped + " from a launch (the report)");
+        Check(guarded, "with the guard, the controller is back in the same tick and the box shifts one gear at a time (" + tt.Gear + ")");
 
         // 6. Manual-type car, mode Stock: the vehicle's own ManualShift does the shifting.
         GearboxSettings.Enabled = true;

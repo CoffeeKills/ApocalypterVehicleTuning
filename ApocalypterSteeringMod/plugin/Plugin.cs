@@ -1,4 +1,5 @@
 using ApocalypterSteeringMod.Game;
+using ApocalypterSteeringMod.Patching;
 using ApocalypterSteeringMod.Persistence;
 using ApocalypterSteeringMod.Runtime;
 using ApocalypterSteeringMod.Settings;
@@ -31,6 +32,7 @@ namespace ApocalypterSteeringMod
             Harmony harmony = new Harmony(PluginInfo.PLUGIN_GUID);
             harmony.PatchAll();
             InputBlocker.Install();
+            ShiftDelegateGuard.Install(harmony);
 
             SceneManager.sceneLoaded += OnSceneLoaded;
             EnsureRunner("Awake");

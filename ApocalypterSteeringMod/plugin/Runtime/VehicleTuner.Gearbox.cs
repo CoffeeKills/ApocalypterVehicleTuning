@@ -438,6 +438,7 @@ namespace ApocalypterSteeringMod.Runtime
             d.Type = t.transmissionType;
             t.shiftDelegate = d.Shifter.Delegate;
             d.Hooked = true;
+            Controlled[t] = d.Shifter;
         }
 
         /// <summary>Put the captured delegate back (only if ours is still installed).</summary>
@@ -448,6 +449,33 @@ namespace ApocalypterSteeringMod.Runtime
                 t.shiftDelegate = d.Shifter.StockDelegate;
             }
             d.Hooked = false;
+            Controlled.Remove(t);
+        }
+
+        // ---- 0.7.3: the instant re-hook ----------------------------------------------
+        // NWH's ForwardStep re-assigns its own shift delegate whenever transmissionType
+        // changes (:405-408) — the game's CheckTag FSM writes the type, and until the next
+        // ApplyLive pass (up to 2 s) the game's own automatic ran the tuned box. With 12
+        // tightly-spaced gears its gear-skipping branch (:617-632) lands the box in a tall
+        // gear from a standstill ("launching from gear 8"). The Harmony postfix on
+        // AssignShiftDelegate (Patching/ShiftDelegateGuard.cs) re-installs the controller in
+        // the same tick, so the window is zero.
+
+        /// <summary>Transmissions whose shifting the mod currently owns (the guard's lookup).</summary>
+        internal static readonly Dictionary<TransmissionComponent, ShiftController> Controlled =
+            new Dictionary<TransmissionComponent, ShiftController>();
+
+        /// <summary>
+        /// If this transmission is controlled, put its controller delegate back (called from
+        /// the Harmony postfix after NWH re-assigns its own; also testable directly).
+        /// </summary>
+        public static void RehookIfControlled(TransmissionComponent t)
+        {
+            ShiftController c;
+            if (t != null && Controlled.TryGetValue(t, out c) && c != null && t.shiftDelegate != c.Delegate)
+            {
+                t.shiftDelegate = c.Delegate;
+            }
         }
 
         /// <summary>

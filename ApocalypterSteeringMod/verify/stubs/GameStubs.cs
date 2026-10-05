@@ -342,8 +342,19 @@ namespace NWH.VehiclePhysics2.Powertrain
         }
 
         public int NwhAutoShifts;   // test hook: shifts NWH's own automatic attempted
-        // Reduced AutomaticShift (:590-700): Auto DNR from neutral, then the sequential
-        // non-variable branch (raw UpshiftRPM / DownshiftRPM on the reference RPM).
+        public bool isSequential;
+        public bool allowUpshiftGearSkipping = true;   // :136 (NWH skips gears up when they stay drivable)
+        private float _lastTotalRatio = 1f;
+
+        /// <summary>
+        /// Mirrors the mod's Harmony postfix on AssignShiftDelegate: the test registers the
+        /// re-hook here so a type change cannot leave the game's skipping automatic in charge.
+        /// </summary>
+        public static System.Action<TransmissionComponent> AfterDelegateReassign;
+
+        // Reduced AutomaticShift (:590-700): Auto DNR from neutral, then NWH's skipping upshift
+        // branch when allowed (:617-632) — the mechanism that lands a tuned 12-gear box in a
+        // high gear when the mod's controller is briefly unhooked.
         private void AutomaticShift(NWH.VehiclePhysics2.VehicleController vc)
         {
             int gear = Gear;
@@ -353,7 +364,29 @@ namespace NWH.VehiclePhysics2.Powertrain
                 return;
             }
             if (gear < 0) return;
-            if (gear < forwardGearCount && _referenceShiftRPM > _upshiftRPM) { NwhAutoShifts++; ShiftInto(gear + 1); }
+            if (gear < forwardGearCount && _referenceShiftRPM > _upshiftRPM)
+            {
+                int target = gear;
+                if (!isSequential && allowUpshiftGearSkipping)
+                {
+                    while (target < forwardGearCount)
+                    {
+                        target++;
+                        float landing = Math.Abs((_referenceShiftRPM / _lastTotalRatio) * gears[target + reverseGearCount] * finalGearRatio);
+                        float margin = Mathf.Clamp01(shiftDuration) * (_upshiftRPM - _downshiftRPM) * 0.25f;
+                        if (landing < _downshiftRPM + margin)
+                        {
+                            target--;
+                            break;
+                        }
+                    }
+                }
+                else
+                {
+                    target = gear + 1;
+                }
+                if (target != gear) { NwhAutoShifts++; ShiftInto(target); }
+            }
             else if (_referenceShiftRPM < _downshiftRPM && gear != 1) { NwhAutoShifts++; ShiftInto(gear - 1); }
         }
 
@@ -454,10 +487,15 @@ namespace NWH.VehiclePhysics2.Powertrain
             if (_prevTransmissionType != transmissionType)
             {
                 AssignShiftDelegate();
+                if (AfterDelegateReassign != null)
+                {
+                    AfterDelegateReassign(this);
+                }
             }
             _prevTransmissionType = transmissionType;
             UpdateGearCounts();
             float ratio = gears[gearIndex] * finalGearRatio;
+            _lastTotalRatio = ratio;
             if (vehicleController != null)
             {
                 _referenceShiftRPM = TestRpmPerMps > 0f ? Math.Abs(vehicleController.Speed * TestRpmPerMps * ratio) : TestReferenceRpm;
