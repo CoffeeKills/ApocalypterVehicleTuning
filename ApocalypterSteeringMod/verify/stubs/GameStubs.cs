@@ -730,6 +730,8 @@ namespace NWH.VehiclePhysics2
         }
         public virtual void VC_LoadStateFromStateSettings() { }
         public virtual void UpdateLOD() { }
+        public virtual void VC_FixedUpdate() { }
+        public virtual void VC_SetVehicleController(VehicleController vc) { vehicleController = vc; }
     }
 
     public class VehicleController : NWH.Common.Vehicles.Vehicle

@@ -126,6 +126,7 @@ namespace UnityEngine
         public bool IsChildOf(Transform parent) { return false; }
         public void SetAsLastSibling() { }
         public Vector3 InverseTransformPoint(Vector3 p) { return p; }
+        public Vector3 TransformPoint(Vector3 p) { return p; }
         public Vector3 InverseTransformDirection(Vector3 d) { return d; }
         public IEnumerator GetEnumerator() { return null; }
     }
@@ -174,9 +175,12 @@ namespace UnityEngine
         public Vector3(float x, float y, float z) { this.x = x; this.y = y; this.z = z; }
         public static Vector3 one { get { return new Vector3(1, 1, 1); } }
         public static Vector3 forward { get { return new Vector3(0, 0, 1); } }
+        public static Vector3 up { get { return new Vector3(0, 1, 0); } }
         public static Vector3 zero { get { return default(Vector3); } }
         public static Vector3 operator +(Vector3 a, Vector3 b) { return new Vector3(a.x + b.x, a.y + b.y, a.z + b.z); }
         public static Vector3 operator -(Vector3 a, Vector3 b) { return new Vector3(a.x - b.x, a.y - b.y, a.z - b.z); }
+        public static Vector3 operator *(Vector3 a, float d) { return new Vector3(a.x * d, a.y * d, a.z * d); }
+        public static Vector3 operator /(Vector3 a, float d) { return new Vector3(a.x / d, a.y / d, a.z / d); }
     }
 
     public struct Color
@@ -333,6 +337,9 @@ namespace UnityEngine
         public Vector3 velocity { get; set; }
         public Vector3 angularVelocity { get; set; }
         public float mass { get; set; }
+        public Vector3 centerOfMass { get; set; }
+        public Vector3 inertiaTensor { get; set; }
+        public void AddForceAtPosition(Vector3 force, Vector3 position) { }
     }
 
     public sealed class Canvas : Behaviour
