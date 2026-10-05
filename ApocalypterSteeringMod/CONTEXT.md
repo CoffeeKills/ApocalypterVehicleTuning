@@ -14,8 +14,7 @@
 
 ## Current state (2026-10-05)
 
-- **Returned bundle: 0.7.0-alpha** (PluginInfo "0.7.0"), reworked by the third-party pass and **not yet merged, built or installed**. Harness: **610 tests (592 logic + 18 prefix)**, green on .NET SDK 8.0.131. FEATURES §1–§5 are done (see the FEATURES.md checklist and README "Changes in 0.7.0-alpha"). `GearboxSettings.ComingSoon` is gone.
-- **Previous shipped build: 0.6.4-alpha.**
+- **Shipped/installed: 0.7.0-alpha** (PluginInfo "0.7.0", commit 00cf2be). Harness: **610 tests (592 logic + 18 prefix)**, green on .NET SDK 8.0.131 (verified here after the merge; the 3rd-party pass also ran it on Linux). FEATURES §1–§5 are done (see the FEATURES.md checklist and README "Changes in 0.7.0-alpha"). `GearboxSettings.ComingSoon` is gone. Release zip `ApocalypterVehicleTuning-0.7.0-alpha.zip` + refreshed audit zip at the repo root; the AI's returned bundle is recycled to temp.
 - **Shifting:** the mod's `ShiftController` is installed as NWH's `transmission.shiftDelegate` while Gearbox changes shifting, and restored by instance on OFF. There is no PlayMaker `SetProperty` patch, and `transmissionType` is never written (README §2.15).
 - **New config keys (6, additive):** `DiffCenterMode`, `SpreadRatios`, `ShiftUpFactor`, `ShiftDownFactor`, `KickdownScale`, `[Telemetry] Pins`.
 - **Harness fixture:** `verify/tests/fixtures/v064.cfg`, a real 0.6.4 cfg, ships with the harness.
