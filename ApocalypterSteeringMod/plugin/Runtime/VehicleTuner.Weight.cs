@@ -25,6 +25,8 @@ namespace ApocalypterSteeringMod.Runtime
             public Vector3 FrontPoint;    // local space (mean of that axle's wheel positions)
             public Vector3 RearPoint;
             public WeightLiftModule Lift; // null = could not be onboarded (no moduleManager)
+            public float LastFrontKg;     // the axle split the last mass-property write used
+            public float LastRearKg;
         }
 
         private void ApplyAllWeight()
@@ -100,15 +102,22 @@ namespace ApocalypterSteeringMod.Runtime
                 return;
             }
             float ratio = WeightMath.MassRatio(d.StockMass, p.FrontKg, p.RearKg);
-            // Mass-property writes re-run the PhysX mass matrix: skip them when the
-            // ratio is unchanged (the fields already carry it from the last apply).
-            if (Mathf.Abs(ratio - r.MassRatio) > 1e-4f)
+            // Mass-property writes re-run the PhysX mass matrix: skip them when
+            // the ratio AND the axle split are unchanged (the fields already
+            // carry those values from the last apply). Ratio alone is not enough:
+            // front ballast and rear ballast share a ratio but different COMs.
+            bool sameInput = Mathf.Abs(ratio - r.MassRatio) <= 1e-4f
+                && Mathf.Abs(d.LastFrontKg - p.FrontKg) <= 1e-3f
+                && Mathf.Abs(d.LastRearKg - p.RearKg) <= 1e-3f;
+            if (!sameInput)
             {
                 rb.mass = WeightMath.ComputeMass(d.StockMass, p.FrontKg, p.RearKg);
                 rb.centerOfMass = WeightMath.ComputeCom(d.StockCom, d.StockMass, d.FrontPoint, d.RearPoint, p.FrontKg, p.RearKg);
                 // Diagonal only: a stock off-diagonal tensor is approximated by its
                 // diagonal, and inertiaTensorRotation is never touched.
                 rb.inertiaTensor = d.StockInertia * ratio;
+                d.LastFrontKg = p.FrontKg;
+                d.LastRearKg = p.RearKg;
             }
             RescaleSpringsForMass(r, ratio);   // early-outs internally when unchanged
 
