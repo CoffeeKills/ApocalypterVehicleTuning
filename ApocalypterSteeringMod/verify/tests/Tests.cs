@@ -352,6 +352,9 @@ public static class Tests
         Console.WriteLine("0.9.0 per-vehicle tunes: book semantics + blob round-trip");
         TestPerVehicleTunes(dir);
 
+        Console.WriteLine("0.10.0 weight: math, presets, ballast, balloons, spring rescale");
+        TestWeight();
+
         Console.WriteLine("0.7.0 audit fixes (UI)");
         TestAudit070();
 
@@ -1281,6 +1284,7 @@ public static class Tests
         AssistsSettings.ResetAll();
         AlignmentSettings.ResetAll();
         GearboxSettings.ResetAll();
+        WeightSettings.ResetAll();
     }
 
     private static void TestAudit060(string dir)
@@ -2166,11 +2170,12 @@ public static class Tests
         SettingsPanel.ConfirmTwoClick(ref armed, 20f);
         Check(!SettingsPanel.ConfirmTwoClick(ref armed, 24f), "an expired arm re-arms instead of confirming");
         SteeringSettings.Enabled = SuspensionSettings.Enabled = AeroSettings.Enabled = BrakesSettings.Enabled = GripSettings.Enabled = true;
-        DrivetrainSettings.Enabled = AssistsSettings.Enabled = AlignmentSettings.Enabled = GearboxSettings.Enabled = true;
+        DrivetrainSettings.Enabled = AssistsSettings.Enabled = AlignmentSettings.Enabled = GearboxSettings.Enabled = WeightSettings.Enabled = true;
         SettingsPanel.TurnEverythingOff();
         Check(!SteeringSettings.Enabled && !SuspensionSettings.Enabled && !AeroSettings.Enabled && !BrakesSettings.Enabled && !GripSettings.Enabled
-              && !DrivetrainSettings.Enabled && !AssistsSettings.Enabled && !AlignmentSettings.Enabled && !GearboxSettings.Enabled,
-            "'Turn everything off' switches all nine categories off");
+              && !DrivetrainSettings.Enabled && !AssistsSettings.Enabled && !AlignmentSettings.Enabled && !GearboxSettings.Enabled
+              && !WeightSettings.Enabled,
+            "'Turn everything off' switches all ten categories off");
         ResetAllCategories();
     }
 
@@ -3702,6 +3707,11 @@ public static class Tests
         DrivetrainPreset.Custom.BasedOn = "";
         DrivetrainPreset.Custom.PowerScale = 2.2f;
         DrivetrainSettings.Book.SaveVehicle("Duke(Clone)1");
+        WeightSettings.Book.SetByName("Custom");
+        WeightPreset.Custom.BasedOn = "Front ballast";
+        WeightPreset.Custom.FrontKg = 420f;
+        WeightPreset.Custom.RearKg = -260f;
+        WeightSettings.Book.SaveVehicle("Duke(Clone)1");
         ModConfig.Save();
         string after = File.ReadAllText(path);
         string blob = BlobLine(after);
@@ -3713,6 +3723,8 @@ public static class Tests
             "a gearbox tune for the same car sits beside the steering one");
         Check(blob.Contains("Duke(Clone)1|Drivetrain|AVT1|Drivetrain|Custom|BasedOn=|BoostScale=") && blob.Contains("PowerScale=2.2"),
             "an identity-sourced tune exports an empty origin");
+        Check(blob.Contains("Duke(Clone)1|Weight|AVT1|Weight|Custom|BasedOn=Front ballast|FrontKg=420|RearKg=-260"),
+            "a weight tune rides the same blob: category, origin and both kg values");
         Check(!after.Contains("\nDuke(Clone)1|Gearbox"), "the multi-line blob is escaped onto one physical line by BepInEx");
 
         // (c) Reload: every book repopulates, values and origins survive.
@@ -3727,8 +3739,11 @@ public static class Tests
         Check(gd != null && Near(gd.KickdownScale, 1.4f) && gd.BasedOn == "Truck"
               && dd != null && Near(dd.PowerScale, 2.2f) && dd.BasedOn == "",
             "reload: gearbox + drivetrain tunes for the same car keep values and origin");
+        WeightPreset wd = WeightSettings.Book.VehicleCopy("Duke(Clone)1");
+        Check(wd != null && Near(wd.FrontKg, 420f) && Near(wd.RearKg, -260f) && wd.BasedOn == "Front ballast",
+            "reload: the weight tune for the same car keeps values and origin");
         Check(SteeringSettings.Book.VehicleNames.Count == 2 && GearboxSettings.Book.VehicleNames.Count == 1
-              && DrivetrainSettings.Book.VehicleNames.Count == 1,
+              && DrivetrainSettings.Book.VehicleNames.Count == 1 && WeightSettings.Book.VehicleNames.Count == 1,
             "each book keeps only its own tunes");
         Check(!SuspensionSettings.Book.HasVehicle("Duke(Clone)1") && !AeroSettings.Book.HasVehicle("Duke(Clone)1"),
             "a tune never leaks into another category's book");
@@ -3773,6 +3788,122 @@ public static class Tests
         AssistsSettings.Book.ClearVehicles();
         AlignmentSettings.Book.ClearVehicles();
         GearboxSettings.Book.ClearVehicles();
+        WeightSettings.Book.ClearVehicles();
+        ResetAllCategories();
+    }
+
+    // ================================================================ 0.10.0
+
+    private static void TestWeight()
+    {
+        // (a) Pure math.
+        Check(Near(WeightMath.ComputeMass(1200f, 400f, 0f), 1600f) && Near(WeightMath.ComputeMass(1200f, -250f, -250f), 1200f)
+              && Near(WeightMath.ComputeMass(1200f, 400f, 300f), 1900f),
+            "ballast adds real kg; balloons never subtract mass");
+        Check(Near(WeightMath.MassRatio(1200f, 400f, 0f), 4f / 3f) && Near(WeightMath.MassRatio(0.0005f, 400f, 0f), 1f),
+            "MassRatio guards a zero/near-zero stock mass");
+        Vector3 com = WeightMath.ComputeCom(new Vector3(0f, 0.4f, 0f), 1200f, new Vector3(0f, 0f, 2.6f), new Vector3(0f, 0f, 0f), 400f, 0f);
+        Check(Near(com.z, 0.65f) && Near(com.y, 0.3f), "the COM moves toward the ballasted axle, weighted by mass");
+        Vector3 fallback = WeightMath.ComputeCom(new Vector3(0f, 0.4f, 0f), 0f, new Vector3(0f, 0f, 2.6f), new Vector3(0f, 0f, 0f), 0f, 0f);
+        Check(fallback.x == 0f && fallback.y == 0.4f && fallback.z == 0f, "a zero-mass vehicle keeps its stock COM");   // stub Vector3 has no ==
+        float fn, rn;
+        WeightMath.LiftFor(-1000f, -500f, 1200f, 0.8f, out fn, out rn);
+        Check(Near(fn + rn, 1200f * 9.81f * 0.8f) && Near(fn / rn, 2f), "balloon lift is clamped at stockMass*g*cap, shared proportionally");
+        WeightMath.LiftFor(-250f, -250f, 1200f, 0.8f, out fn, out rn);
+        Check(Near(fn, 250f * 9.81f) && Near(rn, 250f * 9.81f), "under the cap each balloon lifts its own |kg| x g");
+        WeightMath.LiftFor(400f, 0f, 1200f, 0.8f, out fn, out rn);
+        Check(Near(fn, 0f) && Near(rn, 0f), "positive ballast produces no lift");
+
+        // (b) Presets + kg strings.
+        Check(Near(WeightPreset.Stock.FrontKg, 0f) && Near(WeightPreset.Stock.RearKg, 0f), "Stock keeps the vehicle's own weight");
+        Check(WeightPreset.Presets.Length == 6
+              && WeightPreset.Presets[1].Label == "Front ballast" && Near(WeightPreset.Presets[1].FrontKg, 400f) && Near(WeightPreset.Presets[1].RearKg, 0f)
+              && WeightPreset.Presets[2].Label == "Rear ballast" && Near(WeightPreset.Presets[2].FrontKg, 0f) && Near(WeightPreset.Presets[2].RearKg, 400f)
+              && WeightPreset.Presets[3].Label == "Full load" && Near(WeightPreset.Presets[3].FrontKg, 300f) && Near(WeightPreset.Presets[3].RearKg, 300f)
+              && WeightPreset.Presets[4].Label == "Lift" && Near(WeightPreset.Presets[4].FrontKg, -250f) && Near(WeightPreset.Presets[4].RearKg, -250f),
+            "presets: Front ballast +400/0, Rear ballast 0/+400, Full load +300/+300, Lift -250/-250");
+        Check(UiStrings.Kg(400f) == "+400 kg" && UiStrings.Kg(-250f) == "-250 kg" && UiStrings.Kg(0f) == "0 kg",
+            "Kg reads signed whole kilograms");
+
+        // (c) On a vehicle (suspension OFF).
+        UnityEngine.Object.Registry.Clear();
+        var tuner = new VehicleTuner();
+        ResetAllCategories();
+        VehicleController vc = MakeCar(out FakeWheel[] w, -1.3f);
+        Rigidbody rb = vc.vehicleRigidbody;
+        rb.mass = 1200f;
+        rb.centerOfMass = new Vector3(0f, 0.4f, 0f);
+        rb.inertiaTensor = new Vector3(1000f, 800f, 1200f);
+        UnityEngine.Object.Registry.Add(vc);
+        tuner.ReapplyNow();
+        Check(CountOf<WeightLiftModule>(vc) == 1, "capture onboards exactly one WeightLiftModule");
+        WeightSettings.Enabled = true;
+        WeightSettings.SetPresetByName("Front ballast");
+        tuner.ApplyLive();
+        Check(Near(rb.mass, 1600f) && Near(rb.centerOfMass.y, 0.3f) && Near(rb.centerOfMass.z, 0.65f),
+            "front ballast: mass 1200->1600, COM toward the front axle (z 0->0.65, y 0.4->0.3)");
+        Check(Near(rb.inertiaTensor.x, 4000f / 3f) && Near(rb.inertiaTensor.y, 3200f / 3f) && Near(rb.inertiaTensor.z, 1600f),
+            "inertia scales by the mass ratio (diagonal only)");
+        Check(Near(w[0].SpringMaxForce, 40000f) && Near(w[1].SpringMaxForce, 40000f) && Near(w[2].SpringMaxForce, 40000f) && Near(w[3].SpringMaxForce, 40000f),
+            "suspension OFF: springs scale absolutely (30000 x 4/3)");
+        Check(Near(FindOf<WeightLiftModule>(vc).FrontLiftN, 0f) && Near(FindOf<WeightLiftModule>(vc).RearLiftN, 0f),
+            "positive ballast produces no lift");
+        WeightSettings.SetPresetByName("Rear ballast");
+        tuner.ApplyLive();
+        Check(Near(rb.mass, 1600f) && Near(rb.centerOfMass.z, 0f), "rear ballast pulls the COM back instead");
+        WeightSettings.SetPresetByName("Lift");
+        tuner.ApplyLive();
+        WeightLiftModule m = FindOf<WeightLiftModule>(vc);
+        Check(Near(rb.mass, 1200f) && Near(w[0].SpringMaxForce, 30000f), "balloons alone change neither mass nor springs");
+        Check(m != null && Near(m.FrontLiftN, 250f * 9.81f) && Near(m.RearLiftN, 250f * 9.81f),
+            "balloons write lift targets into the onboarded module");
+        Check(m != null && Near(m.FrontPoint.z, 2.6f) && Near(m.RearPoint.z, 0f), "lift acts at the axle points (local)");
+        WeightSettings.Enabled = false;
+        tuner.ApplyLive();
+        Check(Near(rb.mass, 1200f) && Near(rb.centerOfMass.y, 0.4f) && Near(rb.centerOfMass.z, 0f) && Near(w[0].SpringMaxForce, 30000f)
+              && Near(rb.inertiaTensor.x, 1000f),
+            "weight OFF restores stock mass, COM, inertia and springs");
+        Check(Near(FindOf<WeightLiftModule>(vc).FrontLiftN, 0f) && Near(FindOf<WeightLiftModule>(vc).RearLiftN, 0f),
+            "weight OFF zeroes the lift targets");
+
+        // (d) Suspension ON: the rescale delta-composes over the suspension scan.
+        SuspensionSettings.Enabled = true;
+        SuspensionSettings.SetPresetByName("Race");
+        float springF = SuspensionSettings.Spring(true);
+        tuner.ApplyLive();
+        Check(Near(w[0].SpringMaxForce, 30000f * springF), "Race suspension writes its own scale at ratio 1");
+        WeightSettings.Enabled = true;
+        WeightSettings.SetPresetByName("Front ballast");
+        tuner.ApplyLive();
+        Check(Near(w[0].SpringMaxForce, 30000f * springF * 4f / 3f) && Near(rb.mass, 1600f),
+            "weight ON composes over the suspension scan (delta: no double-scale)");
+        SuspensionSettings.Enabled = false;
+        tuner.ApplyLive();
+        Check(Near(w[0].SpringMaxForce, 40000f), "suspension OFF leaves the weight-scaled springs (baseline x ratio)");
+        SuspensionSettings.Enabled = true;
+        tuner.ApplyLive();
+        Check(Near(w[0].SpringMaxForce, 30000f * springF * 4f / 3f) && Near(rb.mass, 1600f),
+            "turning suspension ON while weight is applied does not double-scale (baseline divides by MassRatio)");
+        WeightSettings.Enabled = false;
+        tuner.ApplyLive();
+        Check(Near(w[0].SpringMaxForce, 30000f * springF) && Near(rb.mass, 1200f),
+            "weight OFF while suspension is ON: the delta restores exactly (Weight runs last)");
+
+        // (e) Hazard: while weight is OFF the game changes the mass (cargo); enabling re-reads it.
+        rb.mass = 1500f;
+        WeightSettings.Enabled = true;
+        WeightSettings.SetPresetByName("Full load");
+        tuner.ApplyLive();
+        Check(Near(rb.mass, 2100f) && Near(w[0].SpringMaxForce, 30000f * springF * 1.4f),
+            "enabling weight re-captures the game's current mass (cargo) and re-scales from it");
+        WeightSettings.Enabled = false;
+        tuner.ApplyLive();
+        Check(Near(rb.mass, 1500f) && Near(w[0].SpringMaxForce, 30000f * springF),
+            "weight OFF restores the re-captured mass, not the first-sight one");
+        Check(CountOf<WeightLiftModule>(vc) == 1, "re-captures never re-onboard the lift module");
+        SuspensionSettings.Enabled = false;
+        tuner.ApplyLive();
+        Check(Near(w[0].SpringMaxForce, 30000f), "everything off: stock springs and the game's mass survive");
         ResetAllCategories();
     }
 
