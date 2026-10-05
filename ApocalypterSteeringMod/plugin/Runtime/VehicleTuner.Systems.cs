@@ -16,7 +16,7 @@ namespace ApocalypterSteeringMod.Runtime
 
         private void ApplyAllSuspension()
         {
-            TargetPass(AppliedCat.Suspension, ApplySuspension, RestoreSuspension);
+            TargetPass(AppliedCat.Suspension, r => SuspensionSettings.Book.ForVehicle(VehicleName(r.Vc)), ApplySuspension, RestoreSuspension);
         }
 
         private void RestoreAllSuspension()
@@ -24,7 +24,7 @@ namespace ApocalypterSteeringMod.Runtime
             RestorePass(AppliedCat.Suspension, RestoreSuspension);
         }
 
-        private static void ApplySuspension(VehicleRecord r)
+        private static void ApplySuspension(VehicleRecord r, SuspensionPreset p)
         {
             foreach (KeyValuePair<WheelUAPI, WheelData> wk in r.Wheels)
             {
@@ -34,19 +34,18 @@ namespace ApocalypterSteeringMod.Runtime
                     continue;
                 }
                 WheelData b = wk.Value;
-                u.SpringMaxForce = b.SpringForce * SuspensionSettings.Spring(b.IsFront);
-                u.SpringMaxLength = b.SpringLength * SuspensionSettings.RideHeight(b.IsFront);
-                u.DamperBumpRate = b.BumpRate * SuspensionSettings.Bump(b.IsFront);
-                u.DamperReboundRate = b.ReboundRate * SuspensionSettings.Rebound(b.IsFront);
+                u.SpringMaxForce = b.SpringForce * (b.IsFront ? p.SpringFront : p.SpringRear);
+                u.SpringMaxLength = b.SpringLength * (b.IsFront ? p.RideHeightFront : p.RideHeightRear);
+                u.DamperBumpRate = b.BumpRate * (b.IsFront ? p.BumpFront : p.BumpRear);
+                u.DamperReboundRate = b.ReboundRate * (b.IsFront ? p.ReboundFront : p.ReboundRear);
             }
             foreach (KeyValuePair<WheelGroup, GroupData> gk in r.Groups)
             {
                 WheelGroup g = gk.Key;
-                if (g == null)
+                if (g != null)
                 {
-                    continue;
+                    g.antiRollBarForce = gk.Value.ArbForce * (gk.Value.IsFront ? p.ArbFront : p.ArbRear);
                 }
-                g.antiRollBarForce = gk.Value.ArbForce * SuspensionSettings.Arb(gk.Value.IsFront);
             }
         }
 
@@ -121,7 +120,7 @@ namespace ApocalypterSteeringMod.Runtime
         private void ApplyAllAero()
         {
             AeroPreset p = AeroSettings.ActivePreset ?? AeroPreset.Stock;
-            TargetPass(AppliedCat.Aero, ApplyAero, p, RestoreAero);
+            TargetPass(AppliedCat.Aero, r => AeroSettings.Book.ForVehicle(VehicleName(r.Vc)), ApplyAero, RestoreAero);
         }
 
         private void RestoreAllAero()
@@ -280,7 +279,7 @@ namespace ApocalypterSteeringMod.Runtime
         private void ApplyAllBrakes()
         {
             BrakesPreset p = BrakesSettings.ActivePreset ?? BrakesPreset.Stock;
-            TargetPass(AppliedCat.Brakes, ApplyBrakes, p, RestoreBrakes);
+            TargetPass(AppliedCat.Brakes, r => BrakesSettings.Book.ForVehicle(VehicleName(r.Vc)), ApplyBrakes, RestoreBrakes);
         }
 
         private void RestoreAllBrakes()
@@ -373,7 +372,7 @@ namespace ApocalypterSteeringMod.Runtime
         private void ApplyAllGrip()
         {
             GripPreset p = GripSettings.ActivePreset ?? GripPreset.Stock;
-            TargetPass(AppliedCat.Grip, ApplyGrip, p, RestoreGrip);
+            TargetPass(AppliedCat.Grip, r => GripSettings.Book.ForVehicle(VehicleName(r.Vc)), ApplyGrip, RestoreGrip);
         }
 
         private void RestoreAllGrip()
@@ -420,7 +419,7 @@ namespace ApocalypterSteeringMod.Runtime
         {
             DrivetrainPreset p = DrivetrainSettings.ActivePreset ?? DrivetrainPreset.Stock;
             LogLayoutParseError();
-            TargetPass(AppliedCat.Drivetrain, ApplyDrivetrain, p, RestoreDrivetrain);
+            TargetPass(AppliedCat.Drivetrain, r => DrivetrainSettings.Book.ForVehicle(VehicleName(r.Vc)), ApplyDrivetrain, RestoreDrivetrain);
         }
 
         private void RestoreAllDrivetrain()

@@ -380,6 +380,23 @@ namespace ApocalypterSteeringMod.Settings
             }
         }
 
+        /// <summary>A fresh preset instance for a category (the per-vehicle import target).</summary>
+        public static ITunablePreset NewPreset(PresetCategory c)
+        {
+            switch (c)
+            {
+                case PresetCategory.Steering: return new SteeringPreset();
+                case PresetCategory.Suspension: return new SuspensionPreset();
+                case PresetCategory.Aero: return new AeroPreset();
+                case PresetCategory.Brakes: return new BrakesPreset();
+                case PresetCategory.Grip: return new GripPreset();
+                case PresetCategory.Drivetrain: return new DrivetrainPreset();
+                case PresetCategory.Assists: return new AssistsPreset();
+                case PresetCategory.Alignment: return new AlignmentPreset();
+                default: return new GearboxPreset();
+            }
+        }
+
         /// <summary>Number of keys a category carries (for tests and the status line).</summary>
         public static int KeyCount(PresetCategory c)
         {
@@ -390,9 +407,24 @@ namespace ApocalypterSteeringMod.Settings
 
         public static string Serialize(PresetCategory category, ITunablePreset preset)
         {
+            return SerializeLine(category, preset.Name, ExportBasedOn(category, preset), preset);
+        }
+
+        /// <summary>
+        /// Per-vehicle blob variant (0.9.0): a vehicle copy is not a selectable preset,
+        /// so it has no name of its own and exports the BasedOn SaveVehicle stored on it.
+        /// The "Custom" name is cosmetic; ParseInto ignores it.
+        /// </summary>
+        public static string SerializeVehicle(PresetCategory category, ITunablePreset copy)
+        {
+            return SerializeLine(category, "Custom", copy.BasedOn ?? "", copy);
+        }
+
+        private static string SerializeLine(PresetCategory category, string name, string basedOn, ITunablePreset preset)
+        {
             var sb = new StringBuilder(256);
-            sb.Append(Tag).Append('|').Append(category.ToString()).Append('|').Append(preset.Name);
-            sb.Append("|BasedOn=").Append(ExportBasedOn(category, preset));
+            sb.Append(Tag).Append('|').Append(category.ToString()).Append('|').Append(name);
+            sb.Append("|BasedOn=").Append(basedOn);
             Field[] fields = Table(category);
             for (int i = 0; i < fields.Length; i++)
             {
@@ -410,6 +442,12 @@ namespace ApocalypterSteeringMod.Settings
                 return preset.BasedOn ?? "";
             }
             return preset.Name;
+        }
+
+        /// <summary>True when <paramref name="name"/> names a built-in preset of the category — a valid BasedOn origin.</summary>
+        public static bool ResolveBuiltIn(PresetCategory category, string name)
+        {
+            return BookFor(category).ResolveBuiltIn(name);
         }
 
         // --------------------------------------------------------------- parse / import

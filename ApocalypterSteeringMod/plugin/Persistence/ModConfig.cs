@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Collections.Generic;
 using ApocalypterSteeringMod.Settings;
 using BepInEx.Configuration;
 using UnityEngine;
@@ -102,6 +103,7 @@ namespace ApocalypterSteeringMod.Persistence
         private static ConfigEntry<string> _telPosition;
         private static ConfigEntry<bool> _gearDebug;     // 0.7.7
         private static ConfigEntry<bool> _resetOnSaveSwitch;   // 0.8.0
+        private static ConfigEntry<string> _perVehicleTunes;   // 0.9.0
         private static ConfigEntry<string> _lastSave;
         private static ConfigEntry<long> _lastSaveStamp;
         private static ConfigEntry<string> _telCells;   // 0.7.4
@@ -432,10 +434,12 @@ namespace ApocalypterSteeringMod.Persistence
             _telPosition = _config.Bind("Telemetry", "Position", "TopLeft", "Screen corner: TopLeft, TopRight, BottomLeft, BottomRight.");
             _telDebugPick = _config.Bind("Telemetry", "DebugPick", false,
                 "Diagnostic (0.6.4): log the telemetry vehicle pick once per second. Off unless you are chasing a wrong telemetry car.");
-            _resetOnSaveSwitch = _config.Bind("General", "ResetOnSaveSwitch", false,
+            _resetOnSaveSwitch = _config.Bind("General", "ResetOnSaveSwitch", true,
                 "When the loaded save slot differs from the previous session's, turn every tuning category off (the save's serialized vehicle state can fight the config). False = only log the switch.");
             _lastSave = _config.Bind("General", "LastSave", "", "The save slot the mod last ran with (tracked automatically).");
             _lastSaveStamp = _config.Bind("General", "LastSaveStamp", 0L, "Timestamp of the tracked save slot (tracked automatically).");
+            _perVehicleTunes = _config.Bind("PerVehicle", "Tunes", "",
+                "Per-vehicle tunes (0.9.0): one line per tune, VehicleName|Category|code; the code is the preset clipboard text. Managed by the panel, not by hand.");
             _gearDebug = _config.Bind("Gearbox", "DebugHooks", false,
                 "Diagnostic (0.7.7): log every shift-controller hook with the captured type, gear count and mode. Off unless chasing a shifting bug.");
             _telCells = _config.Bind("Telemetry", "Cells", TelemetryCells.DefaultText,
@@ -492,7 +496,7 @@ namespace ApocalypterSteeringMod.Persistence
             Wire(_gearShiftUp); Wire(_gearShiftDown); Wire(_gearKickdown); Wire(_gearSpread);
             Wire(_uiFreeze); Wire(_uiScale); Wire(_uiWidth); Wire(_uiAlpha); Wire(_uiLastTab);
             Wire(_telEnabled); Wire(_telScale); Wire(_telPosition); Wire(_telDebugPick); Wire(_telCells); Wire(_gearDebug);
-            Wire(_targetMode); Wire(_targetVehicle);
+            Wire(_targetMode); Wire(_targetVehicle); Wire(_perVehicleTunes);
         }
 
         // ---------------------------------------------------------------- migration
@@ -685,24 +689,26 @@ namespace ApocalypterSteeringMod.Persistence
             bool switched = !string.IsNullOrEmpty(_lastSave.Value) && !string.Equals(_lastSave.Value, name, StringComparison.Ordinal);
             if (switched)
             {
-                if (Plugin.Log != null)
-                {
-                    Plugin.Log.LogInfo("Save switched: '" + name + "' (the previous session ran '" + _lastSave.Value + "').");
-                }
                 if (_resetOnSaveSwitch.Value)
                 {
                     ApocalypterSteeringMod.Runtime.SettingsPanel.TurnEverythingOff();
                     if (Plugin.Log != null)
                     {
-                        Plugin.Log.LogInfo("ResetOnSaveSwitch: every tuning category is off for the new save.");
+                        Plugin.Log.LogInfo("Vehicle tunes NOT applied: the loaded save ('" + name
+                            + "') differs from the previous session's ('" + _lastSave.Value
+                            + "') and ResetOnSaveSwitch turned every category off.");
                     }
+                }
+                else if (Plugin.Log != null)
+                {
+                    Plugin.Log.LogInfo("Save switched to '" + name + "' (tuning kept; ResetOnSaveSwitch is off).");
                 }
             }
             else if (!string.Equals(_lastSave.Value, name, StringComparison.Ordinal))
             {
                 if (Plugin.Log != null)
                 {
-                    Plugin.Log.LogInfo("Loaded save: '" + name + "'.");
+                    Plugin.Log.LogInfo("Vehicle tunes applied (save '" + name + "').");
                 }
             }
             bool wasSyncing = _syncing;
@@ -882,6 +888,7 @@ namespace ApocalypterSteeringMod.Persistence
                 _telPosition.Value = UiSettings.TelemetryPosition.ToString();
                 _telDebugPick.Value = UiSettings.TelemetryDebugPick;
                 _telCells.Value = TelemetryCells.Serialize();
+                _perVehicleTunes.Value = SerializePerVehicleTunes();
                 _targetMode.Value = TargetSettings.Mode.ToString();
                 _targetVehicle.Value = TargetSettings.SelectedName ?? "";
             }
@@ -949,6 +956,102 @@ namespace ApocalypterSteeringMod.Persistence
         {
             GearboxMode m;
             return PresetCodec.TryParseName(value, out m) ? m : GearboxMode.Stock;
+        }
+
+        // ------------------------------------------------- per-vehicle tunes (0.9.0)
+
+        /// <summary>The blob format: one line per tune, VehicleName|Category|code.
+        /// Re-imports from scratch: every book is cleared first, so a re-run (external
+        /// edit via Apocasetter, reload) cannot keep stale tunes a newer blob dropped.</summary>
+        private static void LoadPerVehicleTunes()
+        {
+            SteeringSettings.Book.ClearVehicles();
+            SuspensionSettings.Book.ClearVehicles();
+            AeroSettings.Book.ClearVehicles();
+            BrakesSettings.Book.ClearVehicles();
+            GripSettings.Book.ClearVehicles();
+            DrivetrainSettings.Book.ClearVehicles();
+            AssistsSettings.Book.ClearVehicles();
+            AlignmentSettings.Book.ClearVehicles();
+            GearboxSettings.Book.ClearVehicles();
+            string text = _perVehicleTunes != null ? _perVehicleTunes.Value : "";
+            if (string.IsNullOrEmpty(text))
+            {
+                return;
+            }
+            string[] lines = text.Split('\n');
+            for (int i = 0; i < lines.Length; i++)
+            {
+                string line = lines[i];
+                int p1 = line.IndexOf('|');
+                int p2 = p1 >= 0 ? line.IndexOf('|', p1 + 1) : -1;
+                if (p1 <= 0 || p2 <= p1)
+                {
+                    continue;
+                }
+                string name = line.Substring(0, p1);
+                string catName = line.Substring(p1 + 1, p2 - p1 - 1);
+                string code = line.Substring(p2 + 1);
+                PresetCategory c;
+                if (!PresetCodec.TryParseName(catName, out c))
+                {
+                    continue;
+                }
+                string based;
+                ITunablePreset target = PresetCodec.NewPreset(c);
+                if (!PresetCodec.ParseInto(c, code, target, out based).Ok)
+                {
+                    continue;
+                }
+                target.BasedOn = PresetCodec.ResolveBuiltIn(c, based) ? based : "";
+                ImportVehicleTune(name, c, target);
+            }
+        }
+
+        private static void ImportVehicleTune(string name, PresetCategory c, ITunablePreset p)
+        {
+            switch (c)
+            {
+                case PresetCategory.Steering: SteeringSettings.Book.ImportVehicle(name, (SteeringPreset)p); break;
+                case PresetCategory.Suspension: SuspensionSettings.Book.ImportVehicle(name, (SuspensionPreset)p); break;
+                case PresetCategory.Aero: AeroSettings.Book.ImportVehicle(name, (AeroPreset)p); break;
+                case PresetCategory.Brakes: BrakesSettings.Book.ImportVehicle(name, (BrakesPreset)p); break;
+                case PresetCategory.Grip: GripSettings.Book.ImportVehicle(name, (GripPreset)p); break;
+                case PresetCategory.Drivetrain: DrivetrainSettings.Book.ImportVehicle(name, (DrivetrainPreset)p); break;
+                case PresetCategory.Assists: AssistsSettings.Book.ImportVehicle(name, (AssistsPreset)p); break;
+                case PresetCategory.Alignment: AlignmentSettings.Book.ImportVehicle(name, (AlignmentPreset)p); break;
+                case PresetCategory.Gearbox: GearboxSettings.Book.ImportVehicle(name, (GearboxPreset)p); break;
+            }
+        }
+
+        private static string SerializePerVehicleTunes()
+        {
+            var sb = new System.Text.StringBuilder();
+            SerializeVehicleBook(sb, PresetCategory.Steering, SteeringSettings.Book.VehicleNames, n => SteeringSettings.Book.VehicleCopy(n));
+            SerializeVehicleBook(sb, PresetCategory.Suspension, SuspensionSettings.Book.VehicleNames, n => SuspensionSettings.Book.VehicleCopy(n));
+            SerializeVehicleBook(sb, PresetCategory.Aero, AeroSettings.Book.VehicleNames, n => AeroSettings.Book.VehicleCopy(n));
+            SerializeVehicleBook(sb, PresetCategory.Brakes, BrakesSettings.Book.VehicleNames, n => BrakesSettings.Book.VehicleCopy(n));
+            SerializeVehicleBook(sb, PresetCategory.Grip, GripSettings.Book.VehicleNames, n => GripSettings.Book.VehicleCopy(n));
+            SerializeVehicleBook(sb, PresetCategory.Drivetrain, DrivetrainSettings.Book.VehicleNames, n => DrivetrainSettings.Book.VehicleCopy(n));
+            SerializeVehicleBook(sb, PresetCategory.Assists, AssistsSettings.Book.VehicleNames, n => AssistsSettings.Book.VehicleCopy(n));
+            SerializeVehicleBook(sb, PresetCategory.Alignment, AlignmentSettings.Book.VehicleNames, n => AlignmentSettings.Book.VehicleCopy(n));
+            SerializeVehicleBook(sb, PresetCategory.Gearbox, GearboxSettings.Book.VehicleNames, n => GearboxSettings.Book.VehicleCopy(n));
+            return sb.ToString();
+        }
+
+        private static void SerializeVehicleBook(System.Text.StringBuilder sb, PresetCategory c,
+            ICollection<string> names, Func<string, ITunablePreset> copy)
+        {
+            foreach (string n in names)
+            {
+                ITunablePreset p = copy(n);
+                if (p == null)
+                {
+                    continue;
+                }
+                sb.Append(n).Append('|').Append(c.ToString()).Append('|')
+                  .Append(PresetCodec.SerializeVehicle(c, p)).Append("\n");
+            }
         }
 
         private static void PushAllToRuntime()
@@ -1102,6 +1205,7 @@ namespace ApocalypterSteeringMod.Persistence
             UiSettings.TelemetryPosition = UiSettings.ParseCorner(_telPosition.Value);
             UiSettings.TelemetryDebugPick = _telDebugPick.Value;
             TelemetryCells.Load(_telCells.Value);
+            LoadPerVehicleTunes();
             TargetSettings.Mode = TargetSettings.Parse(_targetMode.Value);
             TargetSettings.SelectedName = _targetVehicle.Value ?? "";
 

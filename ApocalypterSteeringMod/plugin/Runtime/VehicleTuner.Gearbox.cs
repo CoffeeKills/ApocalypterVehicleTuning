@@ -332,7 +332,7 @@ namespace ApocalypterSteeringMod.Runtime
         private void ApplyAllGearbox()
         {
             GearboxPreset p = GearboxSettings.ActivePreset ?? GearboxPreset.Stock;
-            TargetPass(AppliedCat.Gearbox, ApplyGearbox, p, RestoreGearbox);
+            TargetPass(AppliedCat.Gearbox, r => GearboxSettings.Book.ForVehicle(VehicleName(r.Vc)), ApplyGearbox, RestoreGearbox);
         }
 
         private void RestoreAllGearbox()

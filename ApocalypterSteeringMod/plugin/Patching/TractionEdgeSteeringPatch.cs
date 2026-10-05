@@ -39,13 +39,14 @@ namespace ApocalypterSteeringMod.Patching
             {
                 return true;
             }
-            SteeringPreset preset = SteeringSettings.ActivePreset;
+            VehicleController vc = __instance.vehicleController;
+            // 0.9.0: a vehicle with its own saved tune uses it even when the global is
+            // Vanilla; everyone else falls back to the global active preset.
+            SteeringPreset preset = SteeringSettings.Book.ForVehicle(vc != null && vc.gameObject != null ? vc.gameObject.name : "");
             if (preset == null || preset.IsVanilla)
             {
                 return true;
             }
-
-            VehicleController vc = __instance.vehicleController;
             Rigidbody rb = vc.vehicleRigidbody;
             float steeringInput = vc.input.Steering;
 

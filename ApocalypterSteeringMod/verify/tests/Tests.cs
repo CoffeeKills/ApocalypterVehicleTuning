@@ -328,6 +328,9 @@ public static class Tests
         Console.WriteLine("0.7.0 config: a real 0.6.4 file + new keys");
         TestConfig070(dir);
 
+        Console.WriteLine("0.9.0 per-vehicle tunes: book semantics + blob round-trip");
+        TestPerVehicleTunes(dir);
+
         Console.WriteLine("0.7.0 audit fixes (UI)");
         TestAudit070();
 
@@ -2781,21 +2784,15 @@ public static class Tests
 
         // NoteLoadedSave: the same slot changes nothing; a switch with ResetOnSaveSwitch resets everything.
         string cfg2 = Path.Combine(dir, "saveswitch.cfg");
-        ModConfig.Load(new ConfigFile(cfg2, true));
+        ModConfig.Load(new ConfigFile(cfg2, true));   // ResetOnSaveSwitch defaults to TRUE (0.9.0)
         SteeringSettings.Enabled = true;
         SuspensionSettings.Enabled = true;
         AssistsSettings.Enabled = true;
         ModConfig.NoteLoadedSave("SaveGame2.es3", 0L);
         Check(SteeringSettings.Enabled && SuspensionSettings.Enabled && AssistsSettings.Enabled, "same save slot: nothing changes");
-        string txt = File.ReadAllText(cfg2);
-        File.WriteAllText(cfg2, txt.Replace("ResetOnSaveSwitch = false", "ResetOnSaveSwitch = true"));
-        ModConfig.Load(new ConfigFile(cfg2, true));
-        SteeringSettings.Enabled = true;
-        SuspensionSettings.Enabled = true;
-        AssistsSettings.Enabled = true;
         ModConfig.NoteLoadedSave("SaveGame1.es3", 0L);   // the switch
         Check(!SteeringSettings.Enabled && !SuspensionSettings.Enabled && !AssistsSettings.Enabled,
-            "ResetOnSaveSwitch: a save switch turns every category off (cancel the config for the old save)");
+            "ResetOnSaveSwitch (default true): a save switch turns every category off (cancel the config for the old save)");
         ResetAllCategories();
     }
 
@@ -3597,11 +3594,11 @@ public static class Tests
         Check(kept && oldKeys.Count == 133, "all 133 keys of a real 0.6.4 file survive load + save with their values (no rename, removal or default change)");
         string[] added = { "Drivetrain.Custom|DiffCenterMode", "Gearbox.Custom|SpreadRatios", "Gearbox.Custom|ShiftUpFactor", "Gearbox.Custom|ShiftDownFactor",
             "Gearbox.Custom|KickdownScale", "Telemetry|Cells", "Gearbox|DebugHooks", "Steering.Custom|MaxSteerAngle",
-            "General|ResetOnSaveSwitch", "General|LastSave", "General|LastSaveStamp" };
+            "General|ResetOnSaveSwitch", "General|LastSave", "General|LastSaveStamp", "PerVehicle|Tunes" };
         bool all = newKeys.Count == oldKeys.Count + added.Length;
         foreach (string k in added) all &= newKeys.ContainsKey(k);
         if (!all) foreach (string k in newKeys.Keys) if (!oldKeys.ContainsKey(k)) Console.WriteLine("  new key: " + k);
-        Check(all, "exactly eleven keys added (0.8.0 adds MaxSteerAngle, ResetOnSaveSwitch, LastSave, LastSaveStamp)");
+        Check(all, "exactly twelve keys added (0.8.0 adds MaxSteerAngle, ResetOnSaveSwitch, LastSave, LastSaveStamp; 0.9.0 adds PerVehicle|Tunes)");
         File.WriteAllText(path, after.Replace("ShiftUpFactor = 1", "ShiftUpFactor = 9").Replace("KickdownScale = 1", "KickdownScale = 0.1").Replace("DiffCenterMode = Stock", "DiffCenterMode = 7"));
         ModConfig.Load(new ConfigFile(path, true));
         Check(Near(GearboxPreset.Custom.ShiftUpFactor, Limits.ShiftFactorMax) && Near(GearboxPreset.Custom.KickdownScale, Limits.KickdownMin)
@@ -3630,6 +3627,132 @@ public static class Tests
             if (eq > 0) d[section + "|" + line.Substring(0, eq)] = line.Substring(eq + 2).Trim();
         }
         return d;
+    }
+
+    // ================================================================ 0.9.0
+
+    /// <summary>The physical file line holding [PerVehicle] Tunes (BepInEx escapes the blob onto one line).</summary>
+    private static string BlobLine(string text)
+    {
+        foreach (string raw in text.Split('\n'))
+        {
+            string line = raw.Trim();
+            if (line.StartsWith("Tunes = ", StringComparison.Ordinal))
+            {
+                return line;
+            }
+        }
+        return "";
+    }
+
+    private static void TestPerVehicleTunes(string dir)
+    {
+        string path = Path.Combine(dir, "pvt.cfg");
+        if (File.Exists(path)) File.Delete(path);
+
+        // (a) PresetBook per-vehicle semantics, straight on the steering book.
+        PresetBook<SteeringPreset> book = SteeringSettings.Book;
+        book.ClearVehicles();
+        Check(book.VehicleNames.Count == 0 && !book.HasVehicle("Duke(Clone)1"), "per-vehicle book starts empty");
+        Check(book.ForVehicle("Duke(Clone)1") == (book.Active ?? book.Identity), "ForVehicle falls back to the global active preset");
+        book.SetByName("Euro Truck");
+        Check(book.SaveVehicle("Duke(Clone)1") && book.HasVehicle("Duke(Clone)1"), "SaveVehicle stores a copy under the vehicle name");
+        SteeringPreset unit = book.VehicleCopy("Duke(Clone)1");
+        Check(unit != null && unit != book.Active && Near(unit.RateMultiplier, 0.5f) && unit.BasedOn == "Euro Truck",
+            "the copy is a snapshot of the built-in, carrying the origin it forked from");
+        Check(!book.SaveVehicle(""), "SaveVehicle rejects an empty vehicle name");
+        book.RemoveVehicle("Duke(Clone)1");
+        Check(!book.HasVehicle("Duke(Clone)1") && !book.RemoveVehicle("Duke(Clone)1"), "RemoveVehicle drops the tune once");
+        book.SetByName("Vanilla");
+
+        // (b) Save -> file: the blob is one escaped physical line carrying every tune.
+        ModConfig.Load(new ConfigFile(path, true));
+        book.SetByName("Euro Truck");
+        book.SaveVehicle("Duke(Clone)1");
+        book.SetByName("Custom");
+        SteeringPreset.Custom.BasedOn = "Euro Truck";
+        SteeringPreset.Custom.RateMultiplier = 1.7f;
+        book.SaveVehicle("Van(Clone)2");
+        GearboxSettings.Book.SetByName("Custom");
+        GearboxPreset.Custom.BasedOn = "Truck";
+        GearboxPreset.Custom.KickdownScale = 1.4f;
+        GearboxSettings.Book.SaveVehicle("Duke(Clone)1");
+        DrivetrainSettings.Book.SetByName("Custom");
+        DrivetrainPreset.Custom.BasedOn = "";
+        DrivetrainPreset.Custom.PowerScale = 2.2f;
+        DrivetrainSettings.Book.SaveVehicle("Duke(Clone)1");
+        ModConfig.Save();
+        string after = File.ReadAllText(path);
+        string blob = BlobLine(after);
+        Check(blob.Length > 0 && blob.Contains("Duke(Clone)1|Steering|AVT1|Steering|Custom|BasedOn=Euro Truck"),
+            "the [PerVehicle] Tunes blob carries vehicle, category and the built-in origin");
+        Check(blob.Contains("Van(Clone)2|Steering|AVT1|Steering|Custom|BasedOn=Euro Truck") && blob.Contains("RateMultiplier=1.7"),
+            "a Custom-forked tune exports its own BasedOn, not an empty name");
+        Check(blob.Contains("Duke(Clone)1|Gearbox|AVT1|Gearbox|Custom|BasedOn=Truck"),
+            "a gearbox tune for the same car sits beside the steering one");
+        Check(blob.Contains("Duke(Clone)1|Drivetrain|AVT1|Drivetrain|Custom|BasedOn=|BoostScale=") && blob.Contains("PowerScale=2.2"),
+            "an identity-sourced tune exports an empty origin");
+        Check(!after.Contains("\nDuke(Clone)1|Gearbox"), "the multi-line blob is escaped onto one physical line by BepInEx");
+
+        // (c) Reload: every book repopulates, values and origins survive.
+        ModConfig.Load(new ConfigFile(path, true));
+        SteeringPreset sd = SteeringSettings.Book.VehicleCopy("Duke(Clone)1");
+        SteeringPreset sv = SteeringSettings.Book.VehicleCopy("Van(Clone)2");
+        Check(sd != null && Near(sd.RateMultiplier, 0.5f) && Near(sd.SmoothingScale, 1.7f) && sd.BasedOn == "Euro Truck"
+              && sv != null && Near(sv.RateMultiplier, 1.7f) && sv.BasedOn == "Euro Truck",
+            "reload: steering tunes keep their values and origin");
+        GearboxPreset gd = GearboxSettings.Book.VehicleCopy("Duke(Clone)1");
+        DrivetrainPreset dd = DrivetrainSettings.Book.VehicleCopy("Duke(Clone)1");
+        Check(gd != null && Near(gd.KickdownScale, 1.4f) && gd.BasedOn == "Truck"
+              && dd != null && Near(dd.PowerScale, 2.2f) && dd.BasedOn == "",
+            "reload: gearbox + drivetrain tunes for the same car keep values and origin");
+        Check(SteeringSettings.Book.VehicleNames.Count == 2 && GearboxSettings.Book.VehicleNames.Count == 1
+              && DrivetrainSettings.Book.VehicleNames.Count == 1,
+            "each book keeps only its own tunes");
+        Check(!SuspensionSettings.Book.HasVehicle("Duke(Clone)1") && !AeroSettings.Book.HasVehicle("Duke(Clone)1"),
+            "a tune never leaks into another category's book");
+
+        // (d) A second save reproduces the blob byte-for-byte (round trip is stable).
+        ModConfig.Save();
+        Check(BlobLine(File.ReadAllText(path)) == blob, "a second save reproduces the blob byte-for-byte (idempotent)");
+
+        // (e) External edit (Apocasetter): junk lines are skipped, valid ones import.
+        ConfigFile f = new ConfigFile(path, true);
+        string live = f.Bind<string>("PerVehicle", "Tunes", "", "blob").Value;
+        string[] junk = {
+            "no pipes at all",
+            "|Steering|AVT1|Steering|Custom|BasedOn=Euro Truck",
+            "Car|Bogus|AVT1|Steering|Custom|BasedOn=Euro Truck",
+            "Car|Steering|BOGUS|Steering|Custom|BasedOn=Euro Truck",
+            "Car|Steering|AVT1|Suspension|Custom|BasedOn=Stock",
+            "Car2|Gearbox|AVT1|Gearbox|Custom|BasedOn=Stock|Gear3Scale=not-a-float"
+        };
+        f.Bind<string>("PerVehicle", "Tunes", "", "blob").Value = live + "\n" + string.Join("\n", junk)
+            + "\nBus(Clone)3|Steering|AVT1|Steering|Custom|BasedOn=Euro Truck|SmoothingScale=1.3";
+        f.Save();
+        ModConfig.Load(new ConfigFile(path, true));
+        Check(SteeringSettings.Book.HasVehicle("Duke(Clone)1") && SteeringSettings.Book.HasVehicle("Van(Clone)2")
+              && !SteeringSettings.Book.HasVehicle("Car"),
+            "junk lines (empty name, unknown category, wrong tag, wrong category) are skipped; valid tunes survive");
+        GearboxPreset c2 = GearboxSettings.Book.VehicleCopy("Car2");
+        Check(c2 != null && Near(c2.Scale(3), 1f) && c2.BasedOn == "",
+            "a line with an unparsable key still imports, keeping defaults (identity origin dropped)");
+        SteeringPreset bus = SteeringSettings.Book.VehicleCopy("Bus(Clone)3");
+        Check(bus != null && Near(bus.SmoothingScale, 1.3f) && bus.BasedOn == "Euro Truck", "a valid appended line imports");
+        SteeringPreset d2 = SteeringSettings.Book.VehicleCopy("Duke(Clone)1");
+        Check(d2 != null && Near(d2.RateMultiplier, 0.5f), "the original tunes are untouched by the edit");
+
+        // Cleanup so nothing leaks into later tests.
+        SteeringSettings.Book.ClearVehicles();
+        SuspensionSettings.Book.ClearVehicles();
+        AeroSettings.Book.ClearVehicles();
+        BrakesSettings.Book.ClearVehicles();
+        GripSettings.Book.ClearVehicles();
+        DrivetrainSettings.Book.ClearVehicles();
+        AssistsSettings.Book.ClearVehicles();
+        AlignmentSettings.Book.ClearVehicles();
+        GearboxSettings.Book.ClearVehicles();
+        ResetAllCategories();
     }
 
     private static void TestAudit070()

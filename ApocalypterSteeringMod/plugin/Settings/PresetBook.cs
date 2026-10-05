@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace ApocalypterSteeringMod.Settings
 {
@@ -26,6 +27,11 @@ namespace ApocalypterSteeringMod.Settings
         public T Active;
 
         private readonly Func<string, string> _legacyName;   // optional (Street -> Stock)
+
+        // 0.9.0 per-vehicle tunes: a deep copy of the preset per vehicle name. The tuner
+        // applies a vehicle's copy when one exists (any apply-to mode); the global Active
+        // remains the default for everyone else.
+        private readonly Dictionary<string, T> _perVehicle = new Dictionary<string, T>();
 
         public PresetBook(T[] presets, T identity, T custom, T defaults, T notFound,
             Func<string, string> legacyName = null)
@@ -113,6 +119,82 @@ namespace ApocalypterSteeringMod.Settings
         {
             Custom.CopyValuesFrom(Defaults);
             Custom.BasedOn = "";
+        }
+
+        // ----------------------------------------------------- per-vehicle tunes (0.9.0)
+
+        /// <summary>Does this vehicle have its own saved tune?</summary>
+        public bool HasVehicle(string vehicleName)
+        {
+            return !string.IsNullOrEmpty(vehicleName) && _perVehicle.ContainsKey(vehicleName);
+        }
+
+        /// <summary>The vehicle's own tune, or the global Active when it has none.</summary>
+        public T ForVehicle(string vehicleName)
+        {
+            T v;
+            if (!string.IsNullOrEmpty(vehicleName) && _perVehicle.TryGetValue(vehicleName, out v))
+            {
+                return v;
+            }
+            return Active ?? Identity;
+        }
+
+        /// <summary>Deep-copy the active preset into the vehicle's own slot.</summary>
+        public bool SaveVehicle(string vehicleName)
+        {
+            if (string.IsNullOrEmpty(vehicleName))
+            {
+                return false;
+            }
+            T source = Active ?? Identity;
+            T copy = _perVehicle.ContainsKey(vehicleName)
+                ? _perVehicle[vehicleName]
+                : (T)Activator.CreateInstance(typeof(T));
+            copy.CopyValuesFrom(source);
+            // Mirror BeginEdit + ExportBasedOn: a built-in source records its own name
+            // as the origin, so the blob round-trip keeps the preset it forked from.
+            copy.BasedOn = source == Identity ? "" : (source == Custom ? source.BasedOn : source.Name);
+            _perVehicle[vehicleName] = copy;
+            return true;
+        }
+
+        /// <summary>Store an imported copy under the vehicle's name (config load path).</summary>
+        public void ImportVehicle(string vehicleName, T preset)
+        {
+            if (string.IsNullOrEmpty(vehicleName) || preset == null)
+            {
+                return;
+            }
+            T copy = _perVehicle.ContainsKey(vehicleName)
+                ? _perVehicle[vehicleName]
+                : (T)Activator.CreateInstance(typeof(T));
+            copy.CopyValuesFrom(preset);
+            copy.BasedOn = preset.BasedOn;
+            _perVehicle[vehicleName] = copy;
+        }
+
+        public bool RemoveVehicle(string vehicleName)
+        {
+            return !string.IsNullOrEmpty(vehicleName) && _perVehicle.Remove(vehicleName);
+        }
+
+        /// <summary>Drop every saved per-vehicle tune (blob re-import starts from scratch).</summary>
+        public void ClearVehicles()
+        {
+            _perVehicle.Clear();
+        }
+
+        /// <summary>Vehicle names with saved tunes, in insertion order (config serialization).</summary>
+        public ICollection<string> VehicleNames
+        {
+            get { return _perVehicle.Keys; }
+        }
+
+        public T VehicleCopy(string vehicleName)
+        {
+            T v;
+            return !string.IsNullOrEmpty(vehicleName) && _perVehicle.TryGetValue(vehicleName, out v) ? v : null;
         }
     }
 }

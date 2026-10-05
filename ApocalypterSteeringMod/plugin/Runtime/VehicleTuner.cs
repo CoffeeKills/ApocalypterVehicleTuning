@@ -1294,7 +1294,11 @@ namespace ApocalypterSteeringMod.Runtime
         /// i.e. every 2 s scan and every slider tick — the apply path was not allocation-free as
         /// documented. Static method groups are cached by the compiler; the preset rides along.
         /// </summary>
-        private void TargetPass<T>(AppliedCat cat, Action<VehicleRecord, T> apply, T preset, Action<VehicleRecord> restore)
+        /// <summary>One category's per-record pass with a PER-RECORD preset: the 0.9.0
+        /// per-vehicle-tune path (a vehicle with its own saved tune gets it; everyone else
+        /// gets the global). Flag first: a pass that throws half-way has still written some
+        /// fields, and the flag is what makes OFF restore them.</summary>
+        private void TargetPass<T>(AppliedCat cat, Func<VehicleRecord, T> pick, Action<VehicleRecord, T> apply, Action<VehicleRecord> restore)
         {
             foreach (KeyValuePair<VehicleController, VehicleRecord> kv in _records)
             {
@@ -1305,10 +1309,8 @@ namespace ApocalypterSteeringMod.Runtime
                 }
                 if (IsTarget(kv.Key))
                 {
-                    // Flag first: a pass that throws half-way has still written some fields,
-                    // and the flag is what makes OFF restore them.
                     r.Applied |= cat;
-                    try { apply(r, preset); }
+                    try { apply(r, pick(r)); }
                     catch (Exception ex) { LogFault(cat + " apply", kv.Key, ex); }
                 }
                 else if ((r.Applied & cat) != 0)
