@@ -6,9 +6,11 @@ You have no terminal. The user runs `bash verify/run.sh` (needs .NET SDK 8+; glo
 
 Version: `plugin/PluginInfo.cs` → `"0.7.0"` ✅. README title → "v0.7.0-alpha" + a new "## Changes in 0.7.0-alpha" section ✅. Suite before this round: **504 tests (486 logic + 18 prefix)**; after: **610 (592 + 18)**, all passing. Keep them green, add the §7 tests, and remove `GearboxSettings.ComingSoon` (release gate from 0.6.0) only when the §1 shifting subsystem is done — until then the gate stays.
 
-## Status after 0.7.0-alpha (what is done, what remains)
+## Status after 0.7.1-alpha (what is done, what remains)
 
-**Every item is implemented and harness-tested** (`bash verify/run.sh`: 610 tests, 592 logic + 18 prefix, all passing on .NET SDK 8.0.131). In-game confirmation is still pending: README §10 items 38–46 (0.7.0), and earlier 29–37. The full changelog, deviations and negative controls are in README "Changes in 0.7.0-alpha".
+**Every §1–§5 item is implemented and harness-tested** (`bash verify/run.sh`: 610 tests, 592 logic + 18 prefix, all passing on .NET SDK 8.0.131). In-game confirmation is still pending: README §10 items 38–46 (0.7.0), and earlier 29–37. The full changelog, deviations and negative controls are in README "Changes in 0.7.0-alpha".
+
+**0.7.1 (panel reorg, user request):** 8 tabs grouped by car area — Steering · Suspension · **Wheels** (alignment + grip) · **Drivetrain** (engine/diffs/layout + gearbox) · Brakes · Assists · Aero · Settings. 6x6 template button removed (parser keeps accepting multi-axle text); stored `LastTab` 8/9 clamps to the last tab (the one config-continuity exception). See README "Changes in 0.7.1-alpha".
 
 ### Checklist
 

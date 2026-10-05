@@ -25,17 +25,17 @@ namespace ApocalypterSteeringMod.Runtime
     {
         private const float Dimmed = 0.35f;
 
-        public const int TabCount = 10;
+        public const int TabCount = 8;
         public static readonly string[] TabNames =
         {
-            "Steering", "Suspension", "Aero", "Brakes", "Grip", "Drivetrain", "Assists", "Alignment", "Gearbox", "Settings"
+            "Steering", "Suspension", "Wheels", "Drivetrain", "Brakes", "Assists", "Aero", "Settings"
         };
-        // Preset book behind each tab (the Panel tab has none).
+        // Preset book behind each tab (merged tabs and the Settings tab have none:
+        // copy/paste needs exactly one book).
         private static readonly PresetCategory?[] TabCategory =
         {
-            PresetCategory.Steering, PresetCategory.Suspension, PresetCategory.Aero, PresetCategory.Brakes,
-            PresetCategory.Grip, PresetCategory.Drivetrain, PresetCategory.Assists, PresetCategory.Alignment,
-            PresetCategory.Gearbox, null
+            PresetCategory.Steering, PresetCategory.Suspension, null, null,
+            PresetCategory.Brakes, PresetCategory.Assists, PresetCategory.Aero, null
         };
         private static readonly string[] DiffModeLabels = { "Stock", "Open", "Locked", "LSD" };
         private static readonly string[] ModeLabels = { "Stock", "Manual", "Automatic" };
@@ -175,14 +175,30 @@ namespace ApocalypterSteeringMod.Runtime
 
             _pages[0] = BuildPage(_win, "SteeringPage", 0, BuildSteering);
             _pages[1] = BuildPage(_win, "SuspensionPage", 1, BuildSuspension);
-            _pages[2] = BuildPage(_win, "AeroPage", 2, BuildAero);
-            _pages[3] = BuildPage(_win, "BrakesPage", 3, BuildBrakes);
-            _pages[4] = BuildPage(_win, "GripPage", 4, BuildGrip);
-            _pages[5] = BuildPage(_win, "DrivetrainPage", 5, BuildDrivetrain);
-            _pages[6] = BuildPage(_win, "AssistsPage", 6, BuildAssists);
-            _pages[7] = BuildPage(_win, "AlignmentPage", 7, BuildAlignment);
-            _pages[8] = BuildPage(_win, "GearboxPage", 8, BuildGearbox);
-            _pages[9] = BuildPage(_win, "PanelPage", 9, BuildPanelTab);
+            _pages[2] = BuildPage(_win, "WheelsPage", 2, BuildWheels);
+            _pages[3] = BuildPage(_win, "DrivetrainPage", 3, BuildDrivetrainTab);
+            _pages[4] = BuildPage(_win, "BrakesPage", 4, BuildBrakes);
+            _pages[5] = BuildPage(_win, "AssistsPage", 5, BuildAssists);
+            _pages[6] = BuildPage(_win, "AeroPage", 6, BuildAero);
+            _pages[7] = BuildPage(_win, "SettingsPage", 7, BuildPanelTab);
+        }
+
+        // ================================================================ merged tabs (0.7.1)
+        // Two categories share one tab (one car area): each keeps its own master switch,
+        // preset book and reset button, separated by an area banner.
+
+        private void BuildWheels(RectTransform content)
+        {
+            BuildAlignment(content);
+            AddSectionTitle(content, "Tires & grip");
+            BuildGrip(content);
+        }
+
+        private void BuildDrivetrainTab(RectTransform content)
+        {
+            BuildDrivetrain(content);
+            AddSectionTitle(content, "Transmission & shifting");
+            BuildGearbox(content);
         }
 
         private void BuildHeader(RectTransform win)
@@ -196,9 +212,9 @@ namespace ApocalypterSteeringMod.Runtime
             {
                 _subtitle.text = UiSettings.FreezeWhileOpen
                     ? "Changes apply instantly and are saved when you close. " + ModConfig.ToggleKeyString
-                      + ", Esc or a click outside closes. Keys 1-0 switch tabs."
+                      + ", Esc or a click outside closes. Keys 1-8 switch tabs."
                     : "Changes apply instantly; you can keep driving. Saved when you close. " + ModConfig.ToggleKeyString
-                      + " or Esc closes. Keys 1-0 switch tabs while the mouse is over the panel.";
+                      + " or Esc closes. Keys 1-8 switch tabs while the mouse is over the panel.";
             });
 
             Button close = UiKit.MakeButton(win, "Close", "X", UiKit.RowBase, 18, () => _requestClose(), out Text _);
@@ -1335,7 +1351,7 @@ namespace ApocalypterSteeringMod.Runtime
 
             // 0.7.0 (FEATURES §2): panel UI for the 0.6.2 custom drivetrain layout.
             AddSectionTitle(c, "Drivetrain layout");
-            AddOption(c, "Custom layout", "Rewire which wheels are driven (RWD / AWD / 6x6)",
+            AddOption(c, "Custom layout", "Rewire which wheels are driven (RWD / AWD / 4x4)",
                 () => DrivetrainSettings.LayoutEnabled, v =>
                 {
                     DrivetrainSettings.LayoutEnabled = v;

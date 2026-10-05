@@ -59,7 +59,7 @@ specifiers (`"0.00"`) appear in the sweep but are never shown. Display strings b
    section (`Upshift point`, `Downshift point`, `Kickdown`, `Spread gears over the stock range`,
    its note) and the `Truck` preset (Name = Label = `Truck`, plus its Description); Drivetrain
    centre-diff buttons (the same `Stock` / `Open` / `Locked` / `LSD` labels), `Drivetrain layout`
-   section (`Custom layout`, the template buttons `RWD`, `FWD`, `AWD`, `4x4 locked`, `6x6`,
+   section (`Custom layout`, the template buttons `RWD`, `FWD`, `AWD`, `4x4 locked`,
    `Copy this vehicle's layout`, `Paste layout`); Settings tab `Pinned values` option.
    **Telemetry pin cells** show two texts: the label (the slider's own title once the panel was
    built — the same string as in the panel, so one translation covers both — else the config key

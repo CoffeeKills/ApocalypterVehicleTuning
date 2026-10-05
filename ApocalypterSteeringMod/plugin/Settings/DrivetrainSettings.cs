@@ -24,17 +24,16 @@ namespace ApocalypterSteeringMod.Settings
 
         /// <summary>
         /// Layout templates for the panel (0.7.0, FEATURES §2): one click writes the text. Wheel
-        /// names FL/FR/RL/RR are the first/last axle, so they fit any vehicle with two or more axles
-        /// (the 6x6 one needs three).
+        /// names FL/FR/RL/RR are the first/last axle. The game has no 6x6 vehicles, so no 6x6
+        /// template (0.7.1) — but the layout parser still accepts multi-axle text from older configs.
         /// </summary>
-        public static readonly string[] LayoutTemplateNames = { "RWD", "FWD", "AWD", "4x4 locked", "6x6" };
+        public static readonly string[] LayoutTemplateNames = { "RWD", "FWD", "AWD", "4x4 locked" };
         public static readonly string[] LayoutTemplates =
         {
             "gearbox -> rear; rear: LSD -> RL, RR",
             "gearbox -> front; front: Open -> FL, FR",
             DefaultLayoutText,
-            "gearbox -> transfer; transfer: Locked -> front, rear; front: Open -> FL, FR; rear: Open -> RL, RR",
-            "gearbox -> transfer; transfer: Locked -> front, bogie; front: Open -> FL, FR; bogie: Locked -> mid, rear; mid: Open -> A2L, A2R; rear: Open -> RL, RR"
+            "gearbox -> transfer; transfer: Locked -> front, rear; front: Open -> FL, FR; rear: Open -> RL, RR"
         };
 
         /// <summary>Index of the template the current text equals, or -1 (a hand-written layout).</summary>

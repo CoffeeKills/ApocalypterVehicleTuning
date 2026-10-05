@@ -1,4 +1,4 @@
-# Apocalypter Vehicle Tuning (v0.7.0-alpha)
+# Apocalypter Vehicle Tuning (v0.7.1-alpha)
 
 A BepInEx mod for **Apocalypter** (SawyerK Games, Unity 2020.3.49, BepInEx 5.4.23.5 + Harmony 2) that adds a full vehicle-tuning panel: steering, suspension, aero, brakes, tire grip, drivetrain, stability assists (ABS/TCS), wheel alignment and gearbox, all applied live to every vehicle in the game. Since 0.6.0 the panel docks to the right edge and you can keep driving while it is open.
 
@@ -216,6 +216,27 @@ All §2 facts are preserved. The hidden-runner survival architecture is unchange
 - **Negative control** (against the untouched 0.5.0 plugin, compiled against the new stubs): the 9 new checks that compile against 0.5.0 give 5 failures (the four audit bugs: destroyed-vehicle writes ×2, latched-handbrake ABS, TCS mid-shift, external edit reverting panel edits) and 4 passes (their positive controls). The other 126 new checks exercise 0.6.0 API and do not compile against 0.5.0. `run.sh` is unchanged.
 - **gamecode/ gap:** `PowertrainComponent` (base of Engine/Clutch/Transmission/Wheel/Differential, declares `OutputRPM`) is referenced through `ClutchComponent.cs:10/95/108` but its file is not in the bundle. Please copy `PowertrainComponent.cs` from the decompiled tree into `gamecode/`. The stub mirrors only the members the mod uses.
 
+## Changes in 0.7.1-alpha
+
+The panel is reorganized around the car, not the mod's internals (user request). Ten tabs become eight:
+
+| Tab | Content |
+|---|---|
+| Steering | steering (unchanged) |
+| Suspension | suspension (unchanged) |
+| **Wheels** | wheel alignment **+ tire grip** (two sections, one tab) |
+| **Drivetrain** | engine/diffs/custom layout **+ gearbox & shifting** (two sections, one tab) |
+| Brakes | brakes (unchanged) |
+| Assists | ABS/TCS (unchanged) |
+| Aero | aero (unchanged) |
+| Settings | panel + telemetry (unchanged) |
+
+- Digit hotkeys: 1–8 (0 still jumps to the last tab). Copy/paste is disabled on the two merged tabs (it needs exactly one preset book; each section's presets work normally).
+- **6x6 template removed** from the drivetrain layout buttons (the game has no 6x6 vehicles) and from the config description examples. The layout parser still accepts multi-axle text, so old configs with a 6x6 layout keep loading and applying.
+- **One config behavior change:** a stored `[UI] LastTab` of 8 or 9 (the old Gearbox/Settings tabs) clamps to the last tab on load — the harness fixture proves the other 132 keys of a real 0.6.4 file still survive load + save byte-identically.
+
+Suite: **610 tests (592 logic + 18 prefix), all passing.**
+
 ## Changes in 0.7.0-alpha
 
 Implements FEATURES.md 0.7.0 (§1 the mod-owned gearbox subsystem; the §2 remainder; §3–§5) on top of an audit of 0.6.4. Re-checked §10 (crash hardening) and §11 (telemetry). Suite: **610 tests (592 logic + 18 prefix), all passing.** I ran it on .NET SDK 8.0.131 (Linux; `run.sh` is unchanged and still runs from Git Bash). The 0.6.4 baseline was 504 (486 + 18). The steering prefix and its 18-test suite are byte-identical. Every new fix has a negative control (table below).
@@ -275,7 +296,7 @@ New load-bearing fact §2.15.
 - **Per-axle torque-split readout.** Example: "Torque split of the car you drive (nominal): front 40% · rear 60%". It walks the **live** wiring from the gearbox, so a custom layout shows its own split. Open diffs split by bias (A gets 1 − biasAB); Locked and LSD diffs count as nominally 50/50. A one-axle vehicle shows "drives one axle. A custom layout below can make it AWD" (the spec's "disabled slider" note is obsolete since 0.6.2's live rewiring).
 - **Layout UI (new "Drivetrain layout" section).**
   - A "Custom layout" switch.
-  - Five template buttons: RWD, FWD, AWD (the default text), 4x4 locked, 6x6. The active one highlights.
+  - Four template buttons: RWD, FWD, AWD (the default text), 4x4 locked. The active one highlights (no 6x6: the game has no 6x6 vehicles; the parser still accepts multi-axle text from older configs).
   - "Copy this vehicle's layout" puts the stock layout text of the car you drive on the clipboard. "Paste layout" parses before accepting and reports the parser's message if the text is invalid.
   - A status line: active / ignored with the reason / "needs Drivetrain on" / "this vehicle keeps its own drivetrain: why".
   - Text entry stays in the config or Apocasetter: the panel is mouse-only.
@@ -497,7 +518,7 @@ Layout = gearbox -> transfer; transfer: Open split=0.4 -> front, rear; front: Op
 - Outputs: node names, or wheels `FL FR RL RR` (first/last axle) or `A<n>L`/`A<n>R`/`A<n>` (axle n from the front; no side = a centre wheel). Axles are grouped like NWH does it (0.2 m in z); side by the wheel's vehicle-local x (±0.01 m).
 - Must be a tree: every node reachable from the gearbox, every node and wheel fed once. Wheels not named are undriven. A driveshaft is just an edge, so "where the driveshafts go" is the `->` structure.
 - **Each vehicle's own layout is logged on first sight**, ready to copy and edit, e.g. `Drivetrain of 'Duke(Clone)': 2 axles, wheels FL FR RL RR. Stock layout: gearbox -> Center_Differential_1; ...`. Applying logs `Drivetrain layout applied to '…': 3 nodes, driven wheels FL FR RL RR.`; a layout that doesn't fit a vehicle (missing axle, dual wheels, `RL`/`A2L` naming the same wheel on a 2-axle car) logs why and that vehicle keeps its own drivetrain; an invalid text logs the parse error once and nothing changes.
-- Examples: RWD `gearbox -> rear; rear: LSD -> RL, RR` · part-time 4x4 `gearbox -> transfer; transfer: Locked -> front, rear; front: Open -> FL, FR; rear: Open -> RL, RR` · 6x6 `gearbox -> transfer; transfer: Locked -> front, bogie; front: Open -> FL, FR; bogie: Locked -> mid, rear; mid: Open -> A2L, A2R; rear: Open -> RL, RR`.
+- Examples: RWD `gearbox -> rear; rear: LSD -> RL, RR` · part-time 4x4 `gearbox -> transfer; transfer: Locked -> front, rear; front: Open -> FL, FR; rear: Open -> RL, RR`
 
 **How it applies** (`Runtime/VehicleTuner.Layout.cs`, `Settings/DrivetrainLayout.cs`): the layout's nodes are mod-owned `DifferentialComponent`s ("AVT <name>"), one set per vehicle, built when the layout text changes. The gearbox's output is pointed at the root and each node at its outputs; the vehicle's own diffs are **bypassed, never edited** (so the existing diff-mode/bias/stiffness code keeps working on them, and has no audible effect while a layout is active). Re-applying is idempotent and allocation-free. OFF (layout, category, target switch, runner disable/destroy) restores the captured references and hashes exactly.
 
@@ -604,7 +625,7 @@ Runtime/GearGraph.cs            (0.6.0) Gear-ratio bar graph row (sibling of Cur
 Runtime/TelemetryStrip.cs       (0.6.0) Click-through speed/RPM/gear/slip strip on the hidden runner, own canvas, 4 Hz. Shows FindDrivenVehicle(): live input → last driven → running engine → fastest → first (0.6.3). 0.7.0: pinned-value cells (pure CellBand/StripHeight).
 Runtime/InputBlocker.cs        Two layers (0.6.0): InputController name whitelist (driving input stays live) + the PlayMaker class patch set (forks routed by name, OnEnter gated by everyFrame); SetInputBlocked / SetFreeze (see §2.8, §2.11).
 Runtime/SettingsPanelManager.cs On the hidden runner: hotkey/Esc/digit polling (dual input), menu-button injection (§2.7), panel lifecycle (live vs freeze), per-frame cursor freeing + selection clearing, EventSystem find-or-create, auto-save on close.
-Runtime/SettingsPanel.cs        The 10-tab docked panel (two-row tab strip, width-adaptive rows via Relayout, one Graphic per GO, mouse-only widgets, single refresher list, two-click per-tab reset-all and "Turn everything off", copy/paste preset footer, dim + click-outside close in Freeze mode only, absolute readouts).
+Runtime/SettingsPanel.cs        The 8-tab docked panel (0.7.1: two merged tabs — Wheels = alignment + grip, Drivetrain = engine/diffs/gearbox/layout) (two-row tab strip, width-adaptive rows via Relayout, one Graphic per GO, mouse-only widgets, single refresher list, two-click per-tab reset-all and "Turn everything off", copy/paste preset footer, dim + click-outside close in Freeze mode only, absolute readouts).
 Runtime/UiStrings.cs            Every dynamic panel string as a {0} template + value formatters, so ApocaLanguage can translate them (docs/strings.md).
 Runtime/CurveEditor.cs          The visual curve editor row: header band (title, readout, Reset, hint) above a MaskableGraphic graph (grid + curve + mesh-drawn handles), click-add / drag-move / double-click-remove, non-handle drags forwarded to the list's ScrollRect, inert while its tab is OFF/Vanilla.
 Runtime/UiKit.cs                Tiny uGUI widget kit (anchored layout, built-in Arial font with fallbacks, HitArea sliders, scroll view with auto-hide scrollbar).

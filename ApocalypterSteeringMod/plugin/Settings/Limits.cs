@@ -70,7 +70,7 @@ namespace ApocalypterSteeringMod.Settings
         public const float PanelWidthMin = 300f, PanelWidthMax = 1000f;
         public const float PanelWidthDefault = 460f;
         public const float PanelAlphaMin = 0.15f, PanelAlphaMax = 1f;
-        public const int LastTabMin = 0, LastTabMax = 9;
+        public const int LastTabMin = 0, LastTabMax = 7;
         public const float TelemetryScaleMin = 0.3f, TelemetryScaleMax = 3f;
     }
 }

@@ -329,8 +329,7 @@ namespace ApocalypterSteeringMod.Persistence
                 + "Every node must be reachable from the gearbox and every node/wheel fed once; wheels not named are undriven.\n"
                 + "Each vehicle's own layout is written to the BepInEx log on first sight, ready to copy.\n"
                 + "Examples: RWD 'gearbox -> rear; rear: LSD -> RL, RR'  |  "
-                + "6x6 'gearbox -> transfer; transfer: Locked -> front, bogie; front: Open -> FL, FR; bogie: Locked -> mid, rear; "
-                + "mid: Open -> A2L, A2R; rear: Open -> RL, RR'.");
+                + "AWD 'gearbox -> transfer; transfer: Open split=0.4 -> front, rear; front: Open -> FL, FR; rear: LSD -> RL, RR'.");
         }
 
         private static void BindAssists()

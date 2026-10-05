@@ -2001,7 +2001,7 @@ public static class Tests
         Check(GearboxPreset.Custom.GearCount == 12 && Near(GearboxPreset.Custom.Scale(3), 0.25f), "gear count clamped to 12, gear factor to 0.25");
         Check(GearboxPreset.Custom.TransmissionMode == GearboxMode.Stock && UiSettings.TelemetryPosition == TelemetryCorner.TopLeft,
             "numeric / unknown enum names fall back (Stock, TopLeft)");
-        Check(Near(UiSettings.PanelWidth, 1000f) && Near(UiSettings.PanelScale, 0.3f) && UiSettings.LastTab == 9, "panel width/scale/last tab clamped");
+        Check(Near(UiSettings.PanelWidth, 1000f) && Near(UiSettings.PanelScale, 0.3f) && UiSettings.LastTab == 7, "panel width/scale/last tab clamped");
         Check(ModConfig.ParseGearboxMode(" manual ") == GearboxMode.Manual && UiSettings.ParseCorner("topright") == TelemetryCorner.TopRight,
             "names parse case/space-tolerant");
         Check(UiSettings.ClampTab(-3) == 0 && UiSettings.ClampTab(10) == 0 && UiSettings.ClampTab(7) == 7, "LastTab parse: garbage -> first tab");
@@ -2019,7 +2019,7 @@ public static class Tests
         gp.TransmissionMode = GearboxMode.Automatic;
         UiSettings.FreezeWhileOpen = true;
         UiSettings.PanelWidth = 620f;
-        UiSettings.LastTab = 8;
+        UiSettings.LastTab = 7;
         UiSettings.TelemetryPosition = TelemetryCorner.TopRight;
         ModConfig.Save();
         ResetAllCategories();
@@ -2030,7 +2030,7 @@ public static class Tests
               && AlignmentPreset.Custom.BasedOn == "Sport" && Near(AlignmentPreset.Custom.PosZRL, -7f), "alignment Custom persisted");
         Check(GearboxSettings.Enabled && GearboxPreset.Custom.GearCount == 7 && Near(GearboxPreset.Custom.Scale(7), 0.9f)
               && GearboxPreset.Custom.TransmissionMode == GearboxMode.Automatic, "gearbox Custom persisted");
-        Check(UiSettings.FreezeWhileOpen && Near(UiSettings.PanelWidth, 620f) && UiSettings.LastTab == 8
+        Check(UiSettings.FreezeWhileOpen && Near(UiSettings.PanelWidth, 620f) && UiSettings.LastTab == 7
               && UiSettings.TelemetryPosition == TelemetryCorner.TopRight, "panel + telemetry settings persisted");
         ResetAllCategories();
         UiSettings.ResetPanel();
@@ -2085,9 +2085,9 @@ public static class Tests
         Check(Near(PanelLayout.ScaleFactor(1080f, 1f), 1f) && Near(PanelLayout.ScaleFactor(2160f, 1f), 2f) && Near(PanelLayout.ScaleFactor(1080f, 0.5f), 0.5f),
             "scale factor = Screen.height / 1080 x PanelScale (x1 renders like 0.5.0)");
 
-        Check(PanelLayout.TabForDigit(1) == 0 && PanelLayout.TabForDigit(9) == 8 && PanelLayout.TabForDigit(0) == 9 && PanelLayout.TabForDigit(11) == -1,
-            "digit hotkeys: 1..9 -> tabs 1..9, 0 -> tab 10");
-        Check(SettingsPanel.TabCount == 10 && SettingsPanel.TabNames.Length == 10 && SettingsPanel.TabNames[9] == "Settings", "ten tabs, Settings last");
+        Check(PanelLayout.TabForDigit(1) == 0 && PanelLayout.TabForDigit(8) == 7 && PanelLayout.TabForDigit(0) == 7 && PanelLayout.TabForDigit(9) == -1,
+            "digit hotkeys: 1..8 -> tabs 1..8, 0 -> tab 8 (Settings)");
+        Check(SettingsPanel.TabCount == 8 && SettingsPanel.TabNames.Length == 8 && SettingsPanel.TabNames[7] == "Settings", "eight tabs, Settings last");
 
         Check(GearGraph.RouteDrag(true, 3, true) == GearGraph.DragRoute.MoveBar && GearGraph.RouteDrag(true, -1, true) == GearGraph.DragRoute.ScrollList
               && GearGraph.RouteDrag(false, 3, true) == GearGraph.DragRoute.ScrollList && GearGraph.RouteDrag(true, -1, false) == GearGraph.DragRoute.None,
@@ -2417,7 +2417,8 @@ public static class Tests
         Check(t.Output == stockOut && t.outputNameHash == stockOutHash, "runner OnDisable restores the layout");
         Invoke(tuner, "OnEnable");
 
-        // ---- 6x6 truck: rear-drive from the factory, layout drives all three axles.
+        // ---- multi-axle layout (legacy configs): the parser still accepts 6x6-style text
+        // even though the panel no longer offers a 6x6 template (0.7.1; the game has none).
         UnityEngine.Object.Registry.Clear();
         LayoutRig six = MakeLayoutCar(3, false, "Rustliner(Clone)");
         StepDrive(six, 100f);
@@ -3400,15 +3401,21 @@ public static class Tests
         Check(GearboxSettings.Enabled && GearboxSettings.ActivePreset == gc && gc.GearCount == 7 && Near(gc.Scale(2), 1.1f) && gc.TransmissionMode == GearboxMode.Manual
               && Near(gc.ShiftUpFactor, 1f) && Near(gc.ShiftDownFactor, 1f) && Near(gc.KickdownScale, 1f) && !gc.SpreadRatios,
             "0.6.4 cfg: gearbox kept (now live: the gate is gone), new shift knobs at their neutral 1");
-        Check(AlignmentSettings.Enabled && UiSettings.TelemetryEnabled && Near(UiSettings.PanelWidth, 300f) && UiSettings.LastTab == 8
+        Check(AlignmentSettings.Enabled && UiSettings.TelemetryEnabled && Near(UiSettings.PanelWidth, 300f) && UiSettings.LastTab == 7
               && TargetSettings.Mode == TargetMode.Selected && TargetSettings.SelectedName == "Duke(Clone)6792" && TelemetryPins.Count == 0,
-            "0.6.4 cfg: alignment, UI, telemetry, target kept; no pins");
+            "0.6.4 cfg: alignment, UI, telemetry, target kept; a stored tab 8 (the old Gearbox tab) clamps to the last tab");
         ModConfig.Save();
         string after = File.ReadAllText(path);
         var newKeys = ReadKeys(after);
         bool kept = true;
         foreach (KeyValuePair<string, string> kv in oldKeys)
         {
+            // The one documented 0.7.1 exception: a stored tab index beyond the new 8-tab
+            // panel clamps to the first tab (the old Gearbox tab no longer exists).
+            if (kv.Key == "UI|LastTab")
+            {
+                continue;
+            }
             string nv;
             if (!newKeys.TryGetValue(kv.Key, out nv) || nv != kv.Value)
             {

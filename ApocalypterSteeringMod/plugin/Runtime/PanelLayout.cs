@@ -375,9 +375,9 @@ namespace ApocalypterSteeringMod.Runtime
         {
             if (digit == 0)
             {
-                return 9;
+                return 7;
             }
-            return digit >= 1 && digit <= 9 ? digit - 1 : -1;
+            return digit >= 1 && digit <= 8 ? digit - 1 : -1;
         }
 
         /// <summary>
