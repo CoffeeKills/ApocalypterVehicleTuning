@@ -122,7 +122,7 @@ namespace ApocalypterSteeringMod.Runtime
             RescaleSpringsForMass(r, ratio);   // early-outs internally when unchanged
 
             float frontN, rearN;
-            WeightMath.LiftFor(p.FrontKg, p.RearKg, d.StockMass, Limits.WeightLiftCapFactor, out frontN, out rearN);
+            WeightMath.LiftFor(p.FrontKg, p.RearKg, out frontN, out rearN);
             WeightLiftModule m = d.Lift;
             if (m != null)
             {

@@ -2002,6 +2002,9 @@ public static class Tests
             "new keys carry their Limits ranges");
         var gcRange = cfg[new ConfigDefinition("Gearbox.Custom", "GearCount")].Description.AcceptableValues as AcceptableValueRange<int>;
         Check(gcRange != null && gcRange.MinValue == 0 && gcRange.MaxValue == 12, "GearCount is an int range 0..12");
+        Check(is_(RangeOf(cfg, "Weight.Custom", "FrontKg"), Limits.WeightKgMin, Limits.WeightKgMax)
+              && is_(RangeOf(cfg, "Weight.Custom", "RearKg"), Limits.WeightKgMin, Limits.WeightKgMax),
+            "weight range widened to -10 t .. +20 t (0.11.0)");
 
         // A 0.5.0 file loads as-is: every old key and value kept, new sections added.
         string old = Path.Combine(dir, "v050.cfg");
@@ -3807,12 +3810,28 @@ public static class Tests
         Vector3 fallback = WeightMath.ComputeCom(new Vector3(0f, 0.4f, 0f), 0f, new Vector3(0f, 0f, 2.6f), new Vector3(0f, 0f, 0f), 0f, 0f);
         Check(fallback.x == 0f && fallback.y == 0.4f && fallback.z == 0f, "a zero-mass vehicle keeps its stock COM");   // stub Vector3 has no ==
         float fn, rn;
-        WeightMath.LiftFor(-1000f, -500f, 1200f, 0.8f, out fn, out rn);
-        Check(Near(fn + rn, 1200f * 9.81f * 0.8f) && Near(fn / rn, 2f), "balloon lift is clamped at stockMass*g*cap, shared proportionally");
-        WeightMath.LiftFor(-250f, -250f, 1200f, 0.8f, out fn, out rn);
-        Check(Near(fn, 250f * 9.81f) && Near(rn, 250f * 9.81f), "under the cap each balloon lifts its own |kg| x g");
-        WeightMath.LiftFor(400f, 0f, 1200f, 0.8f, out fn, out rn);
-        Check(Near(fn, 0f) && Near(rn, 0f), "positive ballast produces no lift");
+        WeightMath.LiftFor(-250f, -250f, out fn, out rn);
+        Check(Near(fn, 250f * 9.81f) && Near(rn, 250f * 9.81f), "each balloon lifts its own |kg| x g");
+        WeightMath.LiftFor(-10000f, 0f, out fn, out rn);
+        Check(Near(fn, 10000f * 9.81f) && Near(rn, 0f), "lift is uncapped (0.11.0): -10 t lifts with 98.1 kN");   // hazard: fails if the cap returns
+        WeightMath.LiftFor(20000f, 500f, out fn, out rn);
+        Check(fn == 0f && rn == 0f, "positive ballast produces no lift");   // hazard: fails if positive kg ever lifts
+        WeightMath.LiftFor(0f, -0.5f, out fn, out rn);
+        Check(Near(rn, 0.5f * 9.81f), "fractional negative kg lifts proportionally");
+
+        // (a2) Coarse/trim slider decomposition (banker's rounding, same in game and harness).
+        Check(Near(WeightMath.CoarseOf(420f), 400f) && Near(WeightMath.TrimOf(420f), 20f), "coarse snaps to the nearest 100 kg");
+        Check(Near(WeightMath.CoarseOf(-250f), -200f) && Near(WeightMath.TrimOf(-250f), -50f),
+            "banker's rounding: -250 decomposes to coarse -200 + trim -50 (the Lift preset)");
+        Check(Near(WeightMath.CoarseOf(0f), 0f) && Near(WeightMath.TrimOf(0f), 0f), "zero decomposes to zero");
+        Check(Near(WeightMath.CoarseOf(20000f), 20000f) && Near(WeightMath.CoarseOf(-10000f), -10000f), "limits land on 100 kg boundaries");
+        float[] sweep = { -9999f, -100f, -1f, 1f, 50f, 51f, 19999f };
+        bool roundTrip = true;
+        foreach (float s in sweep)
+        {
+            if (!Near(WeightMath.CoarseOf(s) + WeightMath.TrimOf(s), s)) roundTrip = false;
+        }
+        Check(roundTrip, "coarse + trim always reconstructs the exact value");
 
         // (b) Presets + kg strings.
         Check(Near(WeightPreset.Stock.FrontKg, 0f) && Near(WeightPreset.Stock.RearKg, 0f), "Stock keeps the vehicle's own weight");

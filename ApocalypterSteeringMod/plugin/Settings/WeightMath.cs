@@ -4,8 +4,8 @@ namespace ApocalypterSteeringMod.Settings
 {
     /// <summary>
     /// Pure math for the weight category (harness-tested, no Unity calls):
-    /// ballast mass and weighted centre of mass, and balloon lift in newtons
-    /// with a proportional total clamp so the car can't be blown away.
+    /// ballast mass and weighted centre of mass, balloon lift in newtons
+    /// (uncapped since 0.11.0), and the coarse/trim slider decomposition.
     /// </summary>
     public static class WeightMath
     {
@@ -38,24 +38,27 @@ namespace ApocalypterSteeringMod.Settings
         }
 
         /// <summary>
-        /// Balloon lift in newtons per axle: |negative kg| x gravity. Total lift is
-        /// clamped to stockMass x gravity x capFactor, shared proportionally between
-        /// the axles (both shrink by the same factor past the cap).
+        /// Balloon lift in newtons per axle: |negative kg| x gravity. Uncapped
+        /// (0.11.0): every negative kilogram lifts with exactly its own weight's
+        /// worth of force. Positive kg produces no lift (ballast is handled by
+        /// the mass-property writes).
         /// </summary>
-        public static void LiftFor(float frontKg, float rearKg, float stockMass, float capFactor, out float frontN, out float rearN)
+        public static void LiftFor(float frontKg, float rearKg, out float frontN, out float rearN)
         {
-            float f = Mathf.Max(0f, -frontKg) * Gravity;
-            float r = Mathf.Max(0f, -rearKg) * Gravity;
-            float cap = Mathf.Max(0f, stockMass) * Gravity * capFactor;
-            float total = f + r;
-            if (total > cap && total > 1e-3f)
-            {
-                float k = cap / total;
-                f *= k;
-                r *= k;
-            }
-            frontN = f;
-            rearN = r;
+            frontN = Mathf.Max(0f, -frontKg) * Gravity;
+            rearN = Mathf.Max(0f, -rearKg) * Gravity;
+        }
+
+        /// <summary>Coarse part of a weight: v snapped to the nearest 100 kg (banker's rounding).</summary>
+        public static float CoarseOf(float v)
+        {
+            return Mathf.Round(v / 100f) * 100f;
+        }
+
+        /// <summary>Trim part: what the coarse snap discarded; always in [-50, +50] kg.</summary>
+        public static float TrimOf(float v)
+        {
+            return v - CoarseOf(v);
         }
     }
 }
