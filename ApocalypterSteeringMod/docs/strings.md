@@ -17,8 +17,9 @@ plus the templates in `Runtime/UiStrings.cs`:
 grep -o '"[^"]\{3,\}"' plugin/Runtime/SettingsPanel.cs plugin/Runtime/SettingsPanelManager.cs plugin/Runtime/GearGraph.cs plugin/Settings/*Preset.cs plugin/Settings/DrivetrainSettings.cs | sed 's/^[^:]*://' | sort -u
 ```
 
-(0.10.0 sweep: 476 unique quoted strings across those files, display and internal together —
-up from 456 at 0.9.0, the Weight tab strings.)
+(0.11.0 sweep: 479 unique quoted strings across those files, display and internal together —
+up from 476 at 0.10.0: the four coarse/trim slider titles and their hints, the trim hint
+shared by both rows.)
 
 Not every hit is a display string: internal object names (`AeroPage`, `ApocalypterSettingsCanvas`,
 `ApocalypterSteeringMod_Button`, `Dim`, `Footer`, `Body`, `Description`, `Default*`) and format
@@ -79,7 +80,11 @@ specifiers (`"0.00"`) appear in the sweep but are never shown. Display strings b
    `Rear ballast`, `Full load`, `Lift` with their descriptions (WeightPreset.cs; the Stock
    preset's "The vehicle's own weight, exactly as shipped." is a description only, never shown
    as a button label). Two new templates: `KgFmt` and the `AppliedOneWeightFmt` /
-   `AppliedManyWeightFmt` pair — see the table below.
+   `AppliedManyWeightFmt` pair — see the table below. **0.11.0 replaces** the two weight
+   slider rows with four: `Front weight (coarse)`, `Front weight (trim)`, `Rear weight
+   (coarse)`, `Rear weight (trim)` — each coarse row reusing its ballast/lift hint plus
+   `Snaps in 100 kg steps`, and one trim hint (`Fine trim on top of the coarse snap, +-100
+   kg in 1 kg steps`) shared by both trim rows. No new templates.
 
 ## Dynamic templates (UiStrings.cs)
 
