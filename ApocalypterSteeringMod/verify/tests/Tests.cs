@@ -3855,7 +3855,6 @@ public static class Tests
         rb.inertiaTensor = new Vector3(1000f, 800f, 1200f);
         UnityEngine.Object.Registry.Add(vc);
         tuner.ReapplyNow();
-        Check(CountOf<WeightLiftModule>(vc) == 1, "capture onboards exactly one WeightLiftModule");
         WeightSettings.Enabled = true;
         WeightSettings.SetPresetByName("Front ballast");
         tuner.ApplyLive();
@@ -3865,25 +3864,32 @@ public static class Tests
             "inertia scales by the mass ratio (diagonal only)");
         Check(Near(w[0].SpringMaxForce, 40000f) && Near(w[1].SpringMaxForce, 40000f) && Near(w[2].SpringMaxForce, 40000f) && Near(w[3].SpringMaxForce, 40000f),
             "suspension OFF: springs scale absolutely (30000 x 4/3)");
-        Check(Near(FindOf<WeightLiftModule>(vc).FrontLiftN, 0f) && Near(FindOf<WeightLiftModule>(vc).RearLiftN, 0f),
-            "positive ballast produces no lift");
+        rb.ForceCalls.Clear();
+        tuner.ApplyLiftForcesAll();
+        Check(rb.ForceCalls.Count == 0, "positive ballast applies no lift forces");
         WeightSettings.SetPresetByName("Rear ballast");
         tuner.ApplyLive();
         Check(Near(rb.mass, 1600f) && Near(rb.centerOfMass.z, 0f), "rear ballast pulls the COM back instead");
         WeightSettings.SetPresetByName("Lift");
         tuner.ApplyLive();
-        WeightLiftModule m = FindOf<WeightLiftModule>(vc);
         Check(Near(rb.mass, 1200f) && Near(w[0].SpringMaxForce, 30000f), "balloons alone change neither mass nor springs");
-        Check(m != null && Near(m.FrontLiftN, 250f * 9.81f) && Near(m.RearLiftN, 250f * 9.81f),
-            "balloons write lift targets into the onboarded module");
-        Check(m != null && Near(m.FrontPoint.z, 2.6f) && Near(m.RearPoint.z, 0f), "lift acts at the axle points (local)");
+        rb.ForceCalls.Clear();
+        tuner.ApplyLiftForcesAll();
+        Check(rb.ForceCalls.Count == 2, "the Lift preset delivers one force per axle from FixedUpdate");   // hazard: fails if lift returns to a module path
+        if (rb.ForceCalls.Count == 2)
+        {
+            Check(Near(rb.ForceCalls[0].Key.y, 250f * 9.81f) && Near(rb.ForceCalls[1].Key.y, 250f * 9.81f)
+                  && Near(rb.ForceCalls[0].Value.z, 2.6f) && Near(rb.ForceCalls[1].Value.z, 0f),
+                "lift forces act upward at the axle points (local space)");
+        }
         WeightSettings.Enabled = false;
         tuner.ApplyLive();
         Check(Near(rb.mass, 1200f) && Near(rb.centerOfMass.y, 0.4f) && Near(rb.centerOfMass.z, 0f) && Near(w[0].SpringMaxForce, 30000f)
               && Near(rb.inertiaTensor.x, 1000f),
             "weight OFF restores stock mass, COM, inertia and springs");
-        Check(Near(FindOf<WeightLiftModule>(vc).FrontLiftN, 0f) && Near(FindOf<WeightLiftModule>(vc).RearLiftN, 0f),
-            "weight OFF zeroes the lift targets");
+        rb.ForceCalls.Clear();
+        tuner.ApplyLiftForcesAll();
+        Check(rb.ForceCalls.Count == 0, "weight OFF stops the lift forces");   // hazard: fails if OFF leaves stale targets or the Applied flag
 
         // (d) Suspension ON: the rescale delta-composes over the suspension scan.
         SuspensionSettings.Enabled = true;
@@ -3919,10 +3925,19 @@ public static class Tests
         tuner.ApplyLive();
         Check(Near(rb.mass, 1500f) && Near(w[0].SpringMaxForce, 30000f * springF),
             "weight OFF restores the re-captured mass, not the first-sight one");
-        Check(CountOf<WeightLiftModule>(vc) == 1, "re-captures never re-onboard the lift module");
         SuspensionSettings.Enabled = false;
         tuner.ApplyLive();
         Check(Near(w[0].SpringMaxForce, 30000f), "everything off: stock springs and the game's mass survive");
+
+        // (f) Direct delivery path (public for the harness; FixedUpdate calls ApplyLiftForcesAll).
+        rb.ForceCalls.Clear();
+        VehicleTuner.ApplyLiftForces(null, null, Vector3.zero, Vector3.zero, 100f, 100f);   // null rb: no-throw
+        VehicleTuner.ApplyLiftForces(rb, vc.transform, new Vector3(0f, 0f, 2.6f), new Vector3(0f, 0f, 0f), 100f, 0f);
+        Check(rb.ForceCalls.Count == 1 && Near(rb.ForceCalls[0].Key.y, 100f) && Near(rb.ForceCalls[0].Value.z, 2.6f),
+            "ApplyLiftForces pushes one upward force at the front axle point; a null rb is a no-op");
+        rb.ForceCalls.Clear();
+        VehicleTuner.ApplyLiftForces(rb, vc.transform, Vector3.zero, Vector3.zero, 0f, 0f);
+        Check(rb.ForceCalls.Count == 0, "zero newtons applies nothing");
         ResetAllCategories();
     }
 

@@ -3,8 +3,8 @@ namespace ApocalypterSteeringMod.Settings
     /// <summary>
     /// Runtime weight settings: positive kg = real ballast (mass + centre of
     /// mass), negative kg = balloon lift at that axle. Opt-in; the applier
-    /// onboards a WeightLiftModule for the lift force and re-scales the
-    /// suspension springs so the extra mass doesn't bottom them out.
+    /// re-scales the suspension springs so the extra mass doesn't bottom them
+    /// out, and VehicleTuner.FixedUpdate applies the lift (0.11.0).
     /// </summary>
     public static class WeightSettings
     {

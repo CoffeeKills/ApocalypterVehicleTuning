@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using ApocalypterSteeringMod.Settings;
 using NWH.Common.Vehicles;
@@ -9,9 +10,11 @@ namespace ApocalypterSteeringMod.Runtime
     /// <summary>
     /// Weight category (0.10.0): positive kg = real ballast at that axle (raises
     /// the rigidbody mass, shifts the centre of mass, scales the inertia tensor),
-    /// negative kg = "balloon" lift applied per physics tick by an onboarded
-    /// WeightLiftModule. The suspension springs are re-scaled with the mass so
-    /// ballast does not bottom them out.
+    /// negative kg = "balloon" lift. The lift forces are applied per physics
+    /// tick from VehicleTuner.FixedUpdate (0.11.0; before that they went through
+    /// an onboarded WeightLiftModule whose tick the game never ran). The
+    /// suspension springs are re-scaled with the mass so ballast does not bottom
+    /// them out.
     /// </summary>
     public sealed partial class VehicleTuner
     {
@@ -24,7 +27,9 @@ namespace ApocalypterSteeringMod.Runtime
             public Vector3 StockInertia;  // diagonal only; inertiaTensorRotation never touched
             public Vector3 FrontPoint;    // local space (mean of that axle's wheel positions)
             public Vector3 RearPoint;
-            public WeightLiftModule Lift; // null = could not be onboarded (no moduleManager)
+            public float FrontLiftN;      // balloon lift targets for FixedUpdate (0.11.0)
+            public float RearLiftN;
+            public bool LiftLogged;       // one-time BepInEx log when lift first becomes nonzero
             public float LastFrontKg;     // the axle split the last mass-property write used
             public float LastRearKg;
         }
@@ -41,14 +46,14 @@ namespace ApocalypterSteeringMod.Runtime
         }
 
         /// <summary>
-        /// Snapshot the rigidbody's stock mass properties and each axle's point,
-        /// and onboard the lift module once (it stays onboarded forever; at
-        /// 0 N it is inert). Axle point = mean of that axle's captured wheel
-        /// positions in vehicle-local space (the frame centre of mass lives in);
-        /// an axle with no wheels falls back to the stock COM. Called both at
-        /// capture and on every toggle-on refresh: the game may have changed the
-        /// mass since (cargo, fuel), and unlike aero there is no shipped module
-        /// to protect — every WeightData is ours.
+        /// Snapshot the rigidbody's stock mass properties and each axle's point.
+        /// Axle point = mean of that axle's captured wheel positions in
+        /// vehicle-local space (the frame centre of mass lives in); an axle with
+        /// no wheels falls back to the stock COM. Called both at capture and on
+        /// every toggle-on refresh: the game may have changed the mass since
+        /// (cargo, fuel), and unlike aero there is no shipped module to protect
+        /// — every WeightData is ours. The lift itself is applied from
+        /// VehicleTuner.FixedUpdate (0.11.0), not from a module.
         /// </summary>
         private static WeightData CaptureWeight(VehicleController vc, VehicleRecord r)
         {
@@ -76,16 +81,6 @@ namespace ApocalypterSteeringMod.Runtime
             }
             d.FrontPoint = frontCount > 0 ? front / frontCount : d.StockCom;
             d.RearPoint = rearCount > 0 ? rear / rearCount : d.StockCom;
-
-            if (d.Lift == null && vc.moduleManager != null)
-            {
-                WeightLiftModule m = new WeightLiftModule();
-                vc.moduleManager.AddAndOnboardNewComponent(m);
-                // Onboarding leaves the module uninitialised (LOD index -1);
-                // VC_Enable initialises it, and 0 N targets keep it inert.
-                m.VC_Enable(false);
-                d.Lift = m;
-            }
             return d;
         }
 
@@ -123,18 +118,14 @@ namespace ApocalypterSteeringMod.Runtime
 
             float frontN, rearN;
             WeightMath.LiftFor(p.FrontKg, p.RearKg, out frontN, out rearN);
-            WeightLiftModule m = d.Lift;
-            if (m != null)
+            d.FrontLiftN = frontN;
+            d.RearLiftN = rearN;
+            if (!d.LiftLogged && (frontN > 1e-4f || rearN > 1e-4f))
             {
-                // LOD can switch the module off; 0 N targets keep it inert either way.
-                if (!m.IsActive)
-                {
-                    m.VC_Enable(false);
-                }
-                m.FrontPoint = d.FrontPoint;
-                m.RearPoint = d.RearPoint;
-                m.FrontLiftN = frontN;
-                m.RearLiftN = rearN;
+                d.LiftLogged = true;
+                Plugin.Log?.LogInfo(string.Format(
+                    "Weight: balloon lift on '{0}' = {1} N front / {2} N rear (uncapped)",
+                    VehicleName(r.Vc), frontN, rearN));
             }
         }
 
@@ -153,10 +144,63 @@ namespace ApocalypterSteeringMod.Runtime
                 rb.inertiaTensor = d.StockInertia;
             }
             RescaleSpringsForMass(r, 1f);
-            if (d.Lift != null)
+            d.FrontLiftN = 0f;   // stale lift must not survive weight OFF (0.11.0)
+            d.RearLiftN = 0f;
+        }
+
+        /// <summary>
+        /// Deliver the balloon lift of every weight-tuned vehicle for one
+        /// physics tick. Called from FixedUpdate (0.11.0) — the same delivery
+        /// mechanism ballast provably uses; before that, lift went through an
+        /// onboarded WeightLiftModule whose tick the game never ran.
+        /// </summary>
+        public void ApplyLiftForcesAll()
+        {
+            foreach (KeyValuePair<VehicleController, VehicleRecord> kv in _records)
             {
-                d.Lift.FrontLiftN = 0f;
-                d.Lift.RearLiftN = 0f;
+                VehicleController vc = kv.Key;
+                VehicleRecord r = kv.Value;
+                if (vc == null || r == null || r.Vc == null)
+                {
+                    continue;
+                }
+                if ((r.Applied & AppliedCat.Weight) == 0)
+                {
+                    continue;
+                }
+                try
+                {
+                    WeightData d = r.Weight;
+                    if (d == null)
+                    {
+                        continue;
+                    }
+                    ApplyLiftForces(vc.vehicleRigidbody, vc.transform, d.FrontPoint, d.RearPoint, d.FrontLiftN, d.RearLiftN);
+                }
+                catch (Exception ex) { LogFault("Weight lift", vc, ex); }
+            }
+        }
+
+        /// <summary>Upward lift at each axle point (0 N skips that axle); a null rigidbody is a no-op.</summary>
+        public static void ApplyLiftForces(Rigidbody rb, Transform t, Vector3 frontPoint, Vector3 rearPoint, float frontN, float rearN)
+        {
+            if (rb == null)
+            {
+                return;
+            }
+            bool liftFront = frontN > 1e-4f;
+            bool liftRear = rearN > 1e-4f;
+            if (!liftFront && !liftRear)
+            {
+                return;
+            }
+            if (liftFront)
+            {
+                rb.AddForceAtPosition(new Vector3(0f, frontN, 0f), t.TransformPoint(frontPoint));
+            }
+            if (liftRear)
+            {
+                rb.AddForceAtPosition(new Vector3(0f, rearN, 0f), t.TransformPoint(rearPoint));
             }
         }
 

@@ -339,7 +339,10 @@ namespace UnityEngine
         public float mass { get; set; }
         public Vector3 centerOfMass { get; set; }
         public Vector3 inertiaTensor { get; set; }
-        public void AddForceAtPosition(Vector3 force, Vector3 position) { }
+        // 0.11.0: AddForceAtPosition is a recorder so the harness can verify the
+        // FixedUpdate lift delivery (force, world position) that the game sees.
+        public readonly List<KeyValuePair<Vector3, Vector3>> ForceCalls = new List<KeyValuePair<Vector3, Vector3>>();
+        public void AddForceAtPosition(Vector3 force, Vector3 position) { ForceCalls.Add(new KeyValuePair<Vector3, Vector3>(force, position)); }
     }
 
     public sealed class Canvas : Behaviour

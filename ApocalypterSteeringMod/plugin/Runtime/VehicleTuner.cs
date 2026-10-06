@@ -213,6 +213,17 @@ namespace ApocalypterSteeringMod.Runtime
             ApplyLive();
         }
 
+        private void FixedUpdate()
+        {
+            // Balloon lift must be applied per physics tick; the gate keeps the
+            // hot path cheap while the weight tab is off (0.11.0).
+            if (!WeightSettings.Enabled)
+            {
+                return;
+            }
+            ApplyLiftForcesAll();
+        }
+
         /// <summary>Find new vehicles, then apply (or restore, when disabled). Use after toggles / on open.</summary>
         public void ReapplyNow()
         {
