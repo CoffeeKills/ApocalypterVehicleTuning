@@ -17,15 +17,15 @@ plus the templates in `Runtime/UiStrings.cs`:
 grep -o '"[^"]\{3,\}"' plugin/Runtime/SettingsPanel.cs plugin/Runtime/SettingsPanelManager.cs plugin/Runtime/GearGraph.cs plugin/Settings/*Preset.cs plugin/Settings/DrivetrainSettings.cs | sed 's/^[^:]*://' | sort -u
 ```
 
-(0.9.0 sweep: 456 unique quoted strings across those files, display and internal together —
-down from 508 at 0.7.0, mostly the pin strings removed in 0.7.4.)
+(0.10.0 sweep: 476 unique quoted strings across those files, display and internal together —
+up from 456 at 0.9.0, the Weight tab strings.)
 
 Not every hit is a display string: internal object names (`AeroPage`, `ApocalypterSettingsCanvas`,
 `ApocalypterSteeringMod_Button`, `Dim`, `Footer`, `Body`, `Description`, `Default*`) and format
 specifiers (`"0.00"`) appear in the sweep but are never shown. Display strings break down as:
 
 1. **UI chrome** — tab names (`Steering`, `Suspension`, `Aero`, `Brakes`, `Grip`, `Drivetrain`,
-   `Assists`, and since 0.6.0 `Alignment`, `Gearbox`, `Settings` — "Panel" until the 0.6.0 release prep), footer buttons (`Copy preset`,
+   `Assists`, and since 0.6.0 `Alignment`, `Gearbox`, `Settings` — "Panel" until the 0.6.0 release prep; `Weight` since 0.10.0), footer buttons (`Copy preset`,
    `Paste preset`, `Turn everything off`, `Click again`), the transmission-mode labels
    (`Stock`, `Manual`, `Automatic`), the clutch-type labels (`Stock`, `Street`, `Sport`, `Race`,
    `Custom`), the telemetry corner labels (`Top left` …), the gear-count value `Own`, `ON`, `OFF`, `Reset`, `Done`, `Close`, `X`, `Click again to confirm`,
@@ -34,7 +34,7 @@ specifiers (`"0.00"`) appear in the sweep but are never shown. Display strings b
    `AddOption` / `AddSlider` / `AddNote` in each `Build*` method (e.g. `"Steering speed"`,
    `"Grip window"`, `"Diff stiffness"`). These are complete sentences or short labels.
 3. **Preset names/labels/descriptions** — the `Name`, `Label`, `Description` fields of all
-   seven preset classes. See below for the one rule about `Name`.
+   ten preset classes. See below for the one rule about `Name`.
 4. **Dynamic templates** — everything in `Runtime/UiStrings.cs` (see next section).
 5. **Menu button** — the cloned pause-menu button is labelled `Vehicle Tuning`, or
    `VEHICLE TUNING` when the template button it copies is all-caps. Section titles are
@@ -73,7 +73,13 @@ specifiers (`"0.00"`) appear in the sweep but are never shown. Display strings b
 10. **0.8.0 additions** — two static labels in the steering tab: `Max steering angle` and its
    hint `0 = each vehicle's own lock; raise it for drift-style extra angle` (SettingsPanel.cs).
    No new templates; the save-tracking log lines are log output, not panel strings. **0.9.0 adds
-   no panel strings** — the per-vehicle tunes blob is config-level.
+   no panel strings** — the per-vehicle tunes blob is config-level. **0.10.0 adds** the Weight
+   tab (its section title, master-switch row, description note, front/rear weight slider titles
+   with hints and status note, SettingsPanel.cs) and the preset names `Front ballast`,
+   `Rear ballast`, `Full load`, `Lift` with their descriptions (WeightPreset.cs; the Stock
+   preset's "The vehicle's own weight, exactly as shipped." is a description only, never shown
+   as a button label). Two new templates: `KgFmt` and the `AppliedOneWeightFmt` /
+   `AppliedManyWeightFmt` pair — see the table below.
 
 ## Dynamic templates (UiStrings.cs)
 
@@ -130,6 +136,8 @@ Every dynamic string is a `string.Format` template using only `{0}` (repeated `{
 | `LayoutUnfitFmt` | why the vehicle keeps its own drivetrain (English) | layout status (0.7.0) |
 | `LayoutCopied` / `LayoutCopyNone` / `LayoutPasted` | — | no placeholder; footer status (0.7.0) |
 | `TargetMissingFmt` | the selected vehicle's name | "… (not here)" while it has not spawned (0.7.0) |
+| `KgFmt` `"{0} kg"` | kilograms, signed whole ("+400 kg" / "-250 kg" / "0 kg") | weight slider readouts + status (0.10.0) |
+| `AppliedOneWeightFmt` / `AppliedManyWeightFmt` | vehicle count | weight status (0.10.0) |
 | (pin strings removed in 0.7.4 with the pin feature) | — | — |
 
 **Conventions**
