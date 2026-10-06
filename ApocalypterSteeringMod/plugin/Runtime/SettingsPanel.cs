@@ -588,7 +588,8 @@ namespace ApocalypterSteeringMod.Runtime
         /// </summary>
         private GameObject AddSlider(RectTransform content, string title, string hint, float min, float max,
             Func<float> get, Action<float> set, Func<float> reference, Func<float, string> format,
-            Func<bool> enabled = null, Func<float, string> readout = null, bool wholeNumbers = false)
+            Func<bool> enabled = null, Func<float, string> readout = null, bool wholeNumbers = false,
+            Action onReset = null)
         {
             RectTransform row = AddBlock(content, "Row_" + title, PanelLayout.RowHeight, true, out LayoutElement le);
             CanvasGroup group = row.gameObject.AddComponent<CanvasGroup>();
@@ -634,7 +635,14 @@ namespace ApocalypterSteeringMod.Runtime
                 {
                     return;
                 }
-                set(reference());
+                if (onReset != null)
+                {
+                    onReset();
+                }
+                else
+                {
+                    set(reference());
+                }
                 Refresh();
             }, out resetLabel);
             RectTransform resetRt = (RectTransform)reset.transform;
@@ -1103,14 +1111,33 @@ namespace ApocalypterSteeringMod.Runtime
             });
 
             AddSectionTitle(c, "Tuning");
-            AddSlider(c, "Front weight", "Positive kg = real ballast at the front; negative kg = balloon lift pulling that axle up",
+            // Coarse + trim pairs (0.11.0): both rows bind the same preset float, the
+            // coarse row snapping to 100 kg steps and preserving the current trim.
+            // Editing either re-syncs the other through the shared refresher.
+            AddSlider(c, "Front weight (coarse)", "Positive kg = real ballast at the front; negative kg = balloon lift. Snaps in 100 kg steps",
                 Limits.WeightKgMin, Limits.WeightKgMax,
-                () => WeightSettings.Shown.FrontKg, v => EditWeight(p => p.FrontKg = v),
-                () => WeightSettings.Reference().FrontKg, UiStrings.Kg, null, null, true);
-            AddSlider(c, "Rear weight", "Positive kg = real ballast at the rear; negative kg = balloon lift pulling that axle up",
+                () => WeightSettings.Shown.FrontKg,
+                v => EditWeight(p => p.FrontKg = WeightMath.CoarseOf(v) + WeightMath.TrimOf(p.FrontKg)),
+                () => WeightSettings.Reference().FrontKg, UiStrings.Kg, null, null, false,
+                () => EditWeight(p => p.FrontKg = WeightSettings.Reference().FrontKg));
+            AddSlider(c, "Front weight (trim)", "Fine trim on top of the coarse snap, +-100 kg in 1 kg steps",
+                -100f, 100f,
+                () => WeightMath.TrimOf(WeightSettings.Shown.FrontKg),
+                v => EditWeight(p => p.FrontKg = WeightMath.CoarseOf(p.FrontKg) + v),
+                () => WeightMath.TrimOf(WeightSettings.Reference().FrontKg), UiStrings.Kg, null, null, true,
+                () => EditWeight(p => p.FrontKg = WeightMath.CoarseOf(p.FrontKg) + WeightMath.TrimOf(WeightSettings.Reference().FrontKg)));
+            AddSlider(c, "Rear weight (coarse)", "Positive kg = real ballast at the rear; negative kg = balloon lift. Snaps in 100 kg steps",
                 Limits.WeightKgMin, Limits.WeightKgMax,
-                () => WeightSettings.Shown.RearKg, v => EditWeight(p => p.RearKg = v),
-                () => WeightSettings.Reference().RearKg, UiStrings.Kg, null, null, true);
+                () => WeightSettings.Shown.RearKg,
+                v => EditWeight(p => p.RearKg = WeightMath.CoarseOf(v) + WeightMath.TrimOf(p.RearKg)),
+                () => WeightSettings.Reference().RearKg, UiStrings.Kg, null, null, false,
+                () => EditWeight(p => p.RearKg = WeightSettings.Reference().RearKg));
+            AddSlider(c, "Rear weight (trim)", "Fine trim on top of the coarse snap, +-100 kg in 1 kg steps",
+                -100f, 100f,
+                () => WeightMath.TrimOf(WeightSettings.Shown.RearKg),
+                v => EditWeight(p => p.RearKg = WeightMath.CoarseOf(p.RearKg) + v),
+                () => WeightMath.TrimOf(WeightSettings.Reference().RearKg), UiStrings.Kg, null, null, true,
+                () => EditWeight(p => p.RearKg = WeightMath.CoarseOf(p.RearKg) + WeightMath.TrimOf(WeightSettings.Reference().RearKg)));
 
             Text status = AddNote(content, "Status", 44f, 14);
             _refreshers.Add(() =>
