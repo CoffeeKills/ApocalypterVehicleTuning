@@ -60,5 +60,23 @@ namespace ApocalypterSteeringMod.Settings
         {
             return v - CoarseOf(v);
         }
+
+        /// <summary>
+        /// The trim slider's domain: TrimOf never leaves [-TrimLimit, +TrimLimit],
+        /// so the slider must not either (0.11.2: the old +-100 range let a drag
+        /// ratchet the coarse bucket ~100 kg per event).
+        /// </summary>
+        public const float TrimLimit = 50f;
+
+        /// <summary>
+        /// Trim slider set: keep the current coarse bucket and add the trim drag,
+        /// clamped to the trim domain. The clamp is what makes a stuck drag safe:
+        /// without it, events beyond +-50 flip the bucket and every further event
+        /// re-flips it (the 0.11.2 "+-10000 kg instantly" ratchet).
+        /// </summary>
+        public static float ApplyTrim(float currentKg, float trimV)
+        {
+            return CoarseOf(currentKg) + Mathf.Clamp(trimV, -TrimLimit, TrimLimit);
+        }
     }
 }

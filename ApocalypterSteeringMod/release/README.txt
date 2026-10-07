@@ -1,4 +1,4 @@
-Apocalypter Vehicle Tuning 0.11.1-alpha
+Apocalypter Vehicle Tuning 0.11.2-alpha
 ======================================
 
 An in-game tuning panel for every vehicle in Apocalypter: steering,
@@ -59,6 +59,12 @@ NOTES
   target. If the strip ever shows the wrong car, set Telemetry ->
   DebugPick = true in the mod config and send the "Telemetry pick:"
   lines from BepInEx\LogOutput.log.
+- New in 0.11.2: the Weight tab's trim sliders are fixed - dragging one
+  used to move the coarse slider, fight the mouse and ratchet the weight
+  to +-10000 kg within seconds (the +-100 kg slider range vs the +-50 kg
+  trim domain flipped the 100 kg bucket on every drag event). The trim
+  sliders now run +-50 kg and the value is clamped, so a drag held at
+  the end stays put.
 - New in 0.11.1: ballast no longer re-scales the springs - 0.10.0's
   rescale held the ride height constant, so positive ballast (real
   mass) never visibly compressed the suspension. The springs stay
@@ -67,7 +73,8 @@ NOTES
 - New in 0.11.0: the Weight tab's balloon lift now actually lifts
   (0.10.0's lift never ran - it is applied per physics tick by the mod
   itself now, uncapped), the weight range is -10 t to +20 t, and each
-  axle has two sliders: coarse (100 kg steps) + trim (+-100 kg).
+  axle has two sliders: coarse (100 kg steps) + trim (+-50 kg since
+  0.11.2; the 0.11.0 range was +-100).
 - New in 0.10.0: the Weight tab - front/rear ballast in kg (real
   mass, centre of mass and inertia) or negative-kg "balloon" lift at
   that axle. Presets: Front ballast, Rear ballast, Full load, Lift.

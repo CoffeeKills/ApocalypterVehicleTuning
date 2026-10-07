@@ -3833,6 +3833,27 @@ public static class Tests
         }
         Check(roundTrip, "coarse + trim always reconstructs the exact value");
 
+        // (a3) Trim slider set (0.11.2): ApplyTrim keeps the coarse bucket and
+        // clamps the drag to the trim domain. The old +-100-range setter
+        // (CoarseOf(p) + v raw) ratcheted: events beyond +-50 flip the bucket,
+        // and every further event re-flips it (~100 kg per event -> the reported
+        // "+-10000 kg instantly").
+        Check(Near(WeightMath.TrimLimit, 50f), "the trim domain is +-50 kg");
+        Check(Near(WeightMath.ApplyTrim(0f, 30f), 30f) && Near(WeightMath.ApplyTrim(-250f, 40f), -160f)
+              && Near(WeightMath.ApplyTrim(-250f, -40f), -240f),
+            "ApplyTrim keeps the current coarse bucket and adds the drag");
+        Check(Near(WeightMath.ApplyTrim(0f, 60f), 50f) && Near(WeightMath.ApplyTrim(0f, -60f), -50f)
+              && Near(WeightMath.ApplyTrim(-250f, -100f), -250f),
+            "ApplyTrim clamps the drag to +-50 kg");   // hazard: fails if the clamp is removed
+        float ratchet = -250f;
+        for (int e = 0; e < 100; e++) ratchet = WeightMath.ApplyTrim(ratchet, 100f);
+        Check(ratchet <= 200f && ratchet >= -250f,
+            "a trim drag pinned at the range end cannot ratchet toward the limits (hazard: 100 out-of-range events reach ~+10000 kg without the clamp)");
+        ratchet = 250f;
+        for (int e = 0; e < 100; e++) ratchet = WeightMath.ApplyTrim(ratchet, -100f);
+        Check(ratchet >= -200f && ratchet <= 250f,
+            "the same storm in the negative direction stays bounded too");
+
         // (b) Presets + kg strings.
         Check(Near(WeightPreset.Stock.FrontKg, 0f) && Near(WeightPreset.Stock.RearKg, 0f), "Stock keeps the vehicle's own weight");
         Check(WeightPreset.Presets.Length == 6

@@ -19,7 +19,8 @@ grep -o '"[^"]\{3,\}"' plugin/Runtime/SettingsPanel.cs plugin/Runtime/SettingsPa
 
 (0.11.0 sweep: 479 unique quoted strings across those files, display and internal together —
 up from 476 at 0.10.0: the four coarse/trim slider titles and their hints, the trim hint
-shared by both rows.)
+shared by both rows. 0.11.2 changes the trim hint's text in place — "…+-100 kg…" became
+"…+-50 kg…" — so the count stays 479: no string added, none removed.)
 
 Not every hit is a display string: internal object names (`AeroPage`, `ApocalypterSettingsCanvas`,
 `ApocalypterSteeringMod_Button`, `Dim`, `Footer`, `Body`, `Description`, `Default*`) and format
@@ -83,8 +84,9 @@ specifiers (`"0.00"`) appear in the sweep but are never shown. Display strings b
    `AppliedManyWeightFmt` pair — see the table below. **0.11.0 replaces** the two weight
    slider rows with four: `Front weight (coarse)`, `Front weight (trim)`, `Rear weight
    (coarse)`, `Rear weight (trim)` — each coarse row reusing its ballast/lift hint plus
-   `Snaps in 100 kg steps`, and one trim hint (`Fine trim on top of the coarse snap, +-100
-   kg in 1 kg steps`) shared by both trim rows. No new templates.
+   `Snaps in 100 kg steps`, and one trim hint (`Fine trim on top of the coarse snap, +-50
+   kg in 1 kg steps` since 0.11.2 — the 0.11.0 text said +-100, corrected with the range
+   fix) shared by both trim rows. No new templates.
 
 ## Dynamic templates (UiStrings.cs)
 

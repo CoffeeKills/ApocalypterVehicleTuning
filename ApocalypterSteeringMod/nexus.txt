@@ -1,0 +1,140 @@
+Apocalypter Vehicle Tuning - Changelog
+======================================
+
+Current release: 0.11.2-alpha
+
+An in-game tuning panel for every vehicle in Apocalypter: steering,
+suspension, wheel alignment, aero, brakes, tire grip, drivetrain,
+gearbox and ABS/TCS assists. All applied live while you drive, all
+persisted per setting. Press F7 (or the "Vehicle Tuning" button in the
+pause menu) to open the panel.
+
+Need help? Contact @OddlyTugs on Discord for assistance.
+
+
+New in 0.11.2-alpha
+-------------------
+
+- FIXED: the Weight tab's trim sliders. Dragging a trim slider used to
+  move the coarse slider with it, fight the mouse, and ratchet the
+  weight to +-10000 kg within seconds. The sliders' +-100 kg range
+  exceeded the +-50 kg trim domain, so every drag event flipped the
+  100 kg coarse bucket and re-added it. The trim sliders now run
+  +-50 kg (the real trim domain) and the value is clamped, so a drag
+  held at the end of the slider stays put and nothing ratchets.
+- Also in this update: the ballast/springs behaviour is final as
+  shipped in 0.11.1 - ballast leaves the springs stock so the body
+  visibly squats under load.
+
+
+New in 0.11.1-alpha
+-------------------
+
+- Ballast no longer re-scales the springs. 0.10.0's rescale held the
+  ride height constant, so positive ballast (real mass) never visibly
+  compressed the suspension. The springs stay stock now: the body
+  squats under load, and the balloon lift offsets the extreme loads.
+
+
+New in 0.11.0-alpha
+-------------------
+
+- The Weight tab's balloon lift now actually lifts (0.10.0's lift never
+  ran - it is applied per physics tick by the mod itself now, and it
+  is uncapped: big negatives can fly).
+- The weight range is -10 t to +20 t.
+- Each axle has two sliders: coarse (100 kg steps) + trim (fine
+  adjustment; +-50 kg in 1 kg steps since 0.11.2).
+
+
+New in 0.10.0-alpha
+-------------------
+
+- The Weight tab: front/rear ballast in kg (real mass, centre of mass
+  and inertia) or negative-kg "balloon" lift at that axle. Presets:
+  Front ballast, Rear ballast, Full load, Lift. Works with per-vehicle
+  tunes. (0.10.0-0.11.0 also re-scaled the springs with the mass;
+  0.11.1 removed that - see above.)
+
+
+New in 0.9.0-alpha
+------------------
+
+- Per-vehicle tunes: save a tune under a vehicle's name and it
+  re-applies to that vehicle only. Config-level for now: one line per
+  tune in the config file's [PerVehicle] Tunes section (Apocasetter
+  edits it live; a panel UI comes later).
+- Switching saves now resets the tuning by default
+  (ResetOnSaveSwitch = true).
+
+
+New in 0.8.0-alpha
+------------------
+
+- Max steering angle slider (0 = each vehicle's own lock, up to 70 deg
+  for drift-style extra angle).
+- Save tracking: the mod detects the loaded save slot and can turn
+  every category off when a different save loads.
+
+
+New in 0.7.x (0.7.0-0.7.7)
+--------------------------
+
+- Gearbox tuning fully unlocked for every transmission: the mod runs
+  its own shift controller while gearbox changes are active, with a
+  Truck 12-gear preset.
+- Custom drivetrain layouts: centre-diff mode + torque-split readout,
+  a panel UI for RWD/AWD/4x4/6x6 wiring, copy/paste.
+- The panel is reorganized by car area: 8 tabs - Steering, Suspension,
+  Wheels (alignment + tires), Drivetrain (engine/diffs/layout +
+  gearbox), Brakes, Assists, Aero, Settings.
+- Telemetry: pinned values, then (0.7.4) a readout list - speed, RPM,
+  gear, front/rear slip, lateral/longitudinal g, steering angle,
+  throttle, brakes.
+- A tighter panel (bigger text, smaller boxes) at every width.
+- Fixes along the way: 12-gear gearboxes no longer grabbed by the
+  game's own skipping automatic (0.7.3), per-tab Reset matching the
+  reorganized tabs (0.7.4), custom-gearbox-at-load diagnostics and fix
+  (0.7.5/0.7.6), quieter logging (0.7.7).
+
+
+New in 0.6.x (0.6.0-0.6.4)
+--------------------------
+
+- Wheel alignment: camber, caster, toe and wheel position.
+- Gearbox tab (gear count, ratios, clutch) with the note that the
+  game's shift logic fights resized gearboxes (unlocked in 0.7.0).
+- The panel docks to the right edge and the game keeps running while
+  it is open - tune and drive at the same time. Prefer the old paused
+  panel? Turn on "Freeze game while open" in the Settings tab.
+- An optional live telemetry strip (off by default).
+- Custom drivetrain layouts (config-only at first: AWD, part-time 4x4,
+  6x6 wiring).
+- Panel width/size/transparency settings, a rebindable panel hotkey.
+- Copy/paste for presets.
+- Fixes: the mod keeps out of the game's post-load spawn wave and
+  survives a half-initialised vehicle (0.6.3), and telemetry keeps
+  YOUR car with hands off the keys even parked next to other cars
+  (0.6.4).
+
+
+Earlier (0.2.0-0.5.0)
+---------------------
+
+- 0.5.0: aero, brakes, tire grip and stability assists (ABS/TCS) tabs;
+  curve-editor polish from the playtest report.
+- 0.4.0: visual curve editors for the steering tab and speed-sensing
+  center return.
+- 0.3.0: the Euro Truck preset, Apocasetter integration (live settings
+  editors) and ApocaLanguage translation support.
+- 0.2.0: the first audit round - every fix regression-tested.
+- 0.1.0: the original steering mod (traction steering, linearity,
+  counter-steer).
+
+
+Credits
+-------
+
+Credit DeepSeek API + Claude Code and Claude Chat Pro.
+
+Contact @OddlyTugs on Discord for assistance.
