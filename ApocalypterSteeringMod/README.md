@@ -1,4 +1,4 @@
-# Apocalypter Vehicle Tuning (v0.11.2-alpha)
+# Apocalypter Vehicle Tuning (v0.11.3-alpha)
 
 A BepInEx mod for **Apocalypter** (SawyerK Games, Unity 2020.3.49, BepInEx 5.4.23.5 + Harmony 2) that adds a full vehicle-tuning panel: steering, suspension, aero, brakes, tire grip, drivetrain, stability assists (ABS/TCS), wheel alignment and gearbox, all applied live to every vehicle in the game. Since 0.6.0 the panel docks to the right edge and you can keep driving while it is open.
 
@@ -233,6 +233,14 @@ All §2 facts are preserved. The hidden-runner survival architecture is unchange
 ### Not changed
 
 All §2 facts are preserved. No new writes to the game's save data and no `vc.input.*` writes (lift acts through the rigidbody, ballast through mass properties); BepInEx config remains the only persistence; the steering prefix is unchanged; hot paths stay allocation-free (lift applies two `AddForceAtPosition` calls per tick with cached vectors). Onboarded lift modules stay onboarded after restore (inert at 0 N), like the aero module.
+
+## Changes in 0.11.3-alpha
+
+- **The two weight numbers are now truly separate on screen.** Each row owns and displays its own number: the coarse row shows `CoarseOf(FrontKg)` and the trim row shows `TrimOf(FrontKg)`, and the applied weight is their sum. Before, the coarse row's getter was the whole `FrontKg`, so dragging trim still rewrote the coarse readout and nudged the coarse handle — now a trim drag leaves the coarse number and handle exactly where they were, and a coarse drag leaves the trim number untouched. The invariants this relies on are the same ones 0.11.2 added: `ApplyTrim` clamps to the trim domain so trim edits can never flip the coarse bucket, and the coarse setter preserves the current trim. Display-only — no math, config or persistence changes.
+
+### Not changed
+
+No config keys added, renamed or removed (a 0.11.2 cfg loads as is). `WeightMath` is untouched; the harness is unchanged at **691 tests (672 logic + 19 prefix), all passing** — 0.11.2's `ApplyTrim` checks already pin the invariants above.
 
 ## Changes in 0.11.2-alpha
 
@@ -701,7 +709,7 @@ These drove several unusual design decisions; treat them as load-bearing when re
 
 ```
 Plugin.cs                       Slim entry: config load → ES3 read-only import → Harmony patches (steering + InputBlocker) → hidden runner GO; sceneLoaded → recreate runner.
-PluginInfo.cs                   GUID "dev.apocalypter.tractionsteering" (unchanged for config continuity), name, version "0.11.2" (numeric-only: BepInEx 5 skips "-alpha" tags).
+PluginInfo.cs                   GUID "dev.apocalypter.tractionsteering" (unchanged for config continuity), name, version "0.11.3" (numeric-only: BepInEx 5 skips "-alpha" tags).
 Settings/PresetBook.cs          Generic preset semantics shared by all 10 categories: ITunablePreset + PresetBook<T> (Identity/Custom/Defaults/NotFound, SetByName with legacy-name mapping, BeginEdit copy-to-Custom with BasedOn, Reference for per-slider Reset, ResetCustom). 0.9.0: per-vehicle store (HasVehicle/ForVehicle/SaveVehicle/ImportVehicle/RemoveVehicle/ClearVehicles/VehicleNames) — every apply path picks ForVehicle.
 Settings/EditableCurve.cs       Piecewise-linear curve over [0,1]², 2-8 points: allocation-free Evaluate (prefix hot path), add/move/remove, Clone, "x:y;x:y" (de)serialization with validation.
 Settings/SteeringPreset.cs      6 presets (Vanilla/GTA/Euro Truck/Sim-Race/Drift/Custom) + Defaults; UseVehicleCurve + LockCurve + ReturnCurve; v2.0.0-behavior defaults; Custom mutated by UI; RestoreBaseCurve() re-attaches the BasedOn preset's curves (config-parse fallback). 0.8.0: MaxSteerAngle override (0 = vehicle's own lock, ≤70).
@@ -743,7 +751,7 @@ Runtime/GearGraph.cs            (0.6.0) Gear-ratio bar graph row (sibling of Cur
 Runtime/TelemetryStrip.cs       (0.6.0) Click-through speed/RPM/gear/slip strip on the hidden runner, own canvas, 4 Hz. Shows FindDrivenVehicle(): live input → last driven → running engine → fastest → first (0.6.3). 0.7.4: readout-list cells (pure CellBand/StripHeight).
 Runtime/InputBlocker.cs        Two layers (0.6.0): InputController name whitelist (driving input stays live) + the PlayMaker class patch set (forks routed by name, OnEnter gated by everyFrame); SetInputBlocked / SetFreeze (see §2.8, §2.11).
 Runtime/SettingsPanelManager.cs On the hidden runner: hotkey/Esc/digit polling (dual input), menu-button injection (§2.7), panel lifecycle (live vs freeze), per-frame cursor freeing + selection clearing, EventSystem find-or-create, auto-save on close.
-Runtime/SettingsPanel.cs        The 9-tab docked panel (0.7.1: two merged tabs — Wheels = alignment + grip, Drivetrain = engine/diffs/gearbox/layout) (two-row tab strip, width-adaptive rows via Relayout, one Graphic per GO, mouse-only widgets, single refresher list, two-click per-tab reset-all and "Turn everything off", copy/paste preset footer, dim + click-outside close in Freeze mode only, absolute readouts).
+Runtime/SettingsPanel.cs        The 9-tab docked panel (0.7.1: two merged tabs — Wheels = alignment + grip, Drivetrain = engine/diffs/gearbox/layout) (two-row tab strip, width-adaptive rows via Relayout, one Graphic per GO, mouse-only widgets, single refresher list, two-click per-tab reset-all and "Turn everything off", copy/paste preset footer, dim + click-outside close in Freeze mode only, absolute readouts). 0.11.0: coarse + trim weight rows (coarse snaps 100 kg and preserves trim); 0.11.2: trim rows range ±TrimLimit and set through ApplyTrim; 0.11.3: the coarse row's getter is CoarseOf — each row shows its own number, applied weight = coarse + trim.
 Runtime/UiStrings.cs            Every dynamic panel string as a {0} template + value formatters, so ApocaLanguage can translate them (docs/strings.md).
 Runtime/CurveEditor.cs          The visual curve editor row: header band (title, readout, Reset, hint) above a MaskableGraphic graph (grid + curve + mesh-drawn handles), click-add / drag-move / double-click-remove, non-handle drags forwarded to the list's ScrollRect, inert while its tab is OFF/Vanilla.
 Runtime/UiKit.cs                Tiny uGUI widget kit (anchored layout, built-in Arial font with fallbacks, HitArea sliders, scroll view with auto-hide scrollbar).
@@ -810,6 +818,7 @@ powershell Compress-Archive README.md,PROMPT.md,FEATURES.md,CONTEXT.md,plugin,ve
 10. **0.11.0**: lift forces fire only while Weight is enabled and applied and are zeroed on restore; the FixedUpdate lift path is allocation-free and exception-contained (`LogFault`); coarse/trim Reset restores the exact reference value (no double snap).
 11. **0.11.1**: ballast leaves the springs stock (no mass ratio anywhere in the suspension path); RestoreWeight resets the last axle split so re-applying a preset after Weight OFF re-runs the mass/COM/inertia writes; no new config keys.
 12. **0.11.2**: trim sliders range exactly ±50 kg (TrimLimit) and the setter clamps through ApplyTrim — a drag pinned at the range end must never flip the coarse bucket or ratchet the value; no new config keys.
+13. **0.11.3**: the coarse rows read CoarseOf and the trim rows TrimOf — each row displays and edits only its own number (a trim drag cannot move the coarse readout or handle, and vice versa); applied weight = the two added; no math, config or persistence changes.
 
 ## 8. Known limitations / deliberate decisions
 
@@ -838,7 +847,7 @@ powershell Compress-Archive README.md,PROMPT.md,FEATURES.md,CONTEXT.md,plugin,ve
 
 ## 10. In-game test checklist (for the machine with the game)
 
-1. Log shows `Apocalypter Vehicle Tuning 0.11.2 loaded.`, two `InputBlocker: patched …` counts (6 InputController methods + the PlayMaker action methods) and no errors.
+1. Log shows `Apocalypter Vehicle Tuning 0.11.3 loaded.`, two `InputBlocker: patched …` counts (6 InputController methods + the PlayMaker action methods) and no errors.
 2. F7 (or the "Vehicle Tuning" button in the pause menu) opens the panel docked right; cursor free; the game keeps running (0.6.0 live mode — see item 21; item 22 covers the Freeze option). Esc/F7/X/Done close it (click-outside only with Freeze ON).
 3. Each of the 8 tuning tabs (plus the Settings tab): master ON applies the preset, sliders live-edit (preset → "Custom (Base)"), Reset returns to the preset origin, OFF restores stock feel.
 4. Steering tab: Vanilla must feel exactly unmodded; Custom defaults ≈ the old v2.0.0 feel; traction clamp + opposite lock behave as before.
@@ -902,14 +911,16 @@ powershell Compress-Archive README.md,PROMPT.md,FEATURES.md,CONTEXT.md,plugin,ve
 53. **0.11.0 — balloon lift (0.10.0's was a no-op):** Lift (-250/-250): the car visibly rides higher and the wheels unweight — in 0.10.0 nothing happened. An extreme lift (e.g. -1000/-500 kg) is now uncapped: the car can fly.
 54. **0.10.0 — restore, copy/paste, per-vehicle:** Copy preset → paste ("Custom (…)") and Weight OFF, Turn everything off and per-tab Reset restore stock mass and handling exactly. A per-vehicle Weight tune saved in the config re-applies on respawn, and a slider edit on the tuned vehicle survives a restart (0.9.0 blob round-trip).
 55. **0.10.0 — springs follow the mass either way:** with Suspension ON and OFF, switching Weight presets keeps the ride height sensible (ON: delta-composed with the suspension write because Weight applies last; OFF: absolute re-scale of the captured springs). 0.10.0/0.11.0 behaviour, removed in 0.11.1 (items 59–61).
-56. **0.11.0 — coarse + trim sliders:** the Weight tab shows four sliders: front/rear coarse (range −10 000…+20 000 kg, snapping in 100 kg steps) and front/rear trim (±50 kg in 1 kg steps since 0.11.2; the 0.11.0 range was ±100). Dragging trim moves the coarse readout by ±1 kg steps and vice versa; the coarse slider never drags the trim along.
+56. **0.11.0 — coarse + trim sliders:** the Weight tab shows four sliders: front/rear coarse (range −10 000…+20 000 kg, snapping in 100 kg steps) and front/rear trim (±50 kg in 1 kg steps since 0.11.2; the 0.11.0 range was ±100). Since 0.11.3 each slider shows and edits only its own number: dragging trim leaves the coarse readout and handle untouched and vice versa, and the applied weight is the two numbers added.
 57. **0.11.0 — exact Reset:** on the Lift preset press Reset on both front rows: coarse shows −200 kg, trim −50 kg (−250 total, not a snapped −175).
 58. **0.11.0 — lift log:** with Weight ON and any negative kg, the log has one `Weight: balloon lift on '…' = … N front / … N rear (uncapped)` line per vehicle, and no errors.
 59. **0.11.1 — ballast squats the suspension:** with Suspension OFF, pick Front ballast (+400/0): the front end visibly squats under the load (in 0.10.0/0.11.0 the springs were re-scaled so the ride height barely moved); Rear ballast squats the rear; Full load squats both.
 60. **0.11.1 — weight ON leaves the springs alone:** with Suspension ON at a stiff preset and Weight ON at Full load, the stiffness is preserved (no mass ratio in the spring path); Weight OFF restores stock mass and ride height.
 61. **0.11.1 — re-apply after OFF:** Weight ON with Front ballast, then OFF (stock feel returns), then ON again with the same preset — the ballast comes back (mass/COM re-written, not skipped); no log errors.
 62. **0.11.2 — trim range:** the front/rear trim sliders run −50…+50 kg (the handle stops at the ends; no ±100 range). Set Front ballast (+400/0), then drag the front trim handle all the way to the top and HOLD it there: the value stays at +450 kg, the coarse handle does not move, and nothing ratchets toward ±10000.
-63. **0.11.2 — interior trim drags:** with Front ballast, drag the front trim slowly from 0 to +30: the front value reads +430 kg in 1 kg steps, the coarse readout stays +400 the whole time (coarse moves only if the trim crosses a coarse boundary), and the trim handle follows the pointer without fighting it.
+63. **0.11.2 — interior trim drags:** with Front ballast, drag the front trim slowly from 0 to +30: the front value reads +430 kg in 1 kg steps, the coarse readout stays +400 the whole time (0.11.3 displays the coarse readout as the coarse part, so it can never move on a trim drag), and the trim handle follows the pointer without fighting it.
+64. **0.11.3 — the two numbers are separate on screen:** with Front ballast (+400/0), the coarse row reads "+400 kg" and the trim row "0 kg"; drag the trim to +30: the trim row reads "+30 kg", the coarse row still reads "+400 kg" and its handle does not move, and the applied weight (status line) is +430 kg. Drag the coarse to +500: the coarse row reads "+500 kg", the trim row keeps "+30 kg" (total +530 kg).
+65. **0.11.3 — Reset still restores exactly:** on the Lift preset press Reset on both front rows: coarse shows −200 kg, trim −50 kg (total −250 kg, unchanged from item 57).
 
 ## 11. Translation (ApocaLanguage)
 

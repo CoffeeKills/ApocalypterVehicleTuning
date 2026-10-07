@@ -1117,11 +1117,16 @@ namespace ApocalypterSteeringMod.Runtime
             // The trim rows stay inside TrimOf's domain (0.11.2): the old +-100
             // range let a drag flip the coarse bucket per event and ratchet the
             // value toward the limits in seconds.
+            // Each row shows only its own number (0.11.3): the coarse row's getter
+            // is CoarseOf (not the total), so a trim drag can't move the coarse
+            // readout or handle - applied weight = coarse + trim. ApplyTrim's
+            // clamp keeps the coarse part invariant under trim edits, and the
+            // coarse setter keeps the trim part invariant under coarse edits.
             AddSlider(c, "Front weight (coarse)", "Positive kg = real ballast at the front; negative kg = balloon lift. Snaps in 100 kg steps",
                 Limits.WeightKgMin, Limits.WeightKgMax,
-                () => WeightSettings.Shown.FrontKg,
+                () => WeightMath.CoarseOf(WeightSettings.Shown.FrontKg),
                 v => EditWeight(p => p.FrontKg = WeightMath.CoarseOf(v) + WeightMath.TrimOf(p.FrontKg)),
-                () => WeightSettings.Reference().FrontKg, UiStrings.Kg, null, null, false,
+                () => WeightMath.CoarseOf(WeightSettings.Reference().FrontKg), UiStrings.Kg, null, null, false,
                 () => EditWeight(p => p.FrontKg = WeightSettings.Reference().FrontKg));
             AddSlider(c, "Front weight (trim)", "Fine trim on top of the coarse snap, +-50 kg in 1 kg steps",
                 -WeightMath.TrimLimit, WeightMath.TrimLimit,
@@ -1131,9 +1136,9 @@ namespace ApocalypterSteeringMod.Runtime
                 () => EditWeight(p => p.FrontKg = WeightMath.ApplyTrim(p.FrontKg, WeightMath.TrimOf(WeightSettings.Reference().FrontKg))));
             AddSlider(c, "Rear weight (coarse)", "Positive kg = real ballast at the rear; negative kg = balloon lift. Snaps in 100 kg steps",
                 Limits.WeightKgMin, Limits.WeightKgMax,
-                () => WeightSettings.Shown.RearKg,
+                () => WeightMath.CoarseOf(WeightSettings.Shown.RearKg),
                 v => EditWeight(p => p.RearKg = WeightMath.CoarseOf(v) + WeightMath.TrimOf(p.RearKg)),
-                () => WeightSettings.Reference().RearKg, UiStrings.Kg, null, null, false,
+                () => WeightMath.CoarseOf(WeightSettings.Reference().RearKg), UiStrings.Kg, null, null, false,
                 () => EditWeight(p => p.RearKg = WeightSettings.Reference().RearKg));
             AddSlider(c, "Rear weight (trim)", "Fine trim on top of the coarse snap, +-50 kg in 1 kg steps",
                 -WeightMath.TrimLimit, WeightMath.TrimLimit,

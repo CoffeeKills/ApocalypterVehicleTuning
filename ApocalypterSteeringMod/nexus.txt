@@ -1,7 +1,7 @@
 Apocalypter Vehicle Tuning - Changelog
 ======================================
 
-Current release: 0.11.2-alpha
+Current release: 0.11.3-alpha
 
 An in-game tuning panel for every vehicle in Apocalypter: steering,
 suspension, wheel alignment, aero, brakes, tire grip, drivetrain,
@@ -10,6 +10,18 @@ persisted per setting. Press F7 (or the "Vehicle Tuning" button in the
 pause menu) to open the panel.
 
 Need help? Contact @OddlyTugs on Discord for assistance.
+
+
+New in 0.11.3-alpha
+-------------------
+
+- FIXED: the Weight tab's two sliders now show only their own number.
+  The coarse row previously read the whole weight, so dragging the
+  trim slider rewrote the coarse readout and nudged its handle. Now
+  the coarse row shows the coarse part and the trim row the trim
+  part, and the applied weight is simply the two added together.
+  Dragging trim leaves the coarse readout and handle untouched, and
+  a coarse drag never touches the trim number. Display-only change.
 
 
 New in 0.11.2-alpha

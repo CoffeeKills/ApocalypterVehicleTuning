@@ -1,4 +1,4 @@
-Apocalypter Vehicle Tuning 0.11.2-alpha
+Apocalypter Vehicle Tuning 0.11.3-alpha
 ======================================
 
 An in-game tuning panel for every vehicle in Apocalypter: steering,
@@ -59,6 +59,11 @@ NOTES
   target. If the strip ever shows the wrong car, set Telemetry ->
   DebugPick = true in the mod config and send the "Telemetry pick:"
   lines from BepInEx\LogOutput.log.
+- New in 0.11.3: the Weight tab's two numbers are now truly separate -
+  the coarse row shows the coarse part and the trim row the trim part,
+  and the applied weight is them added together. Dragging trim no
+  longer rewrites the coarse readout or nudges the coarse handle (and
+  a coarse drag never touches the trim number). Display-only change.
 - New in 0.11.2: the Weight tab's trim sliders are fixed - dragging one
   used to move the coarse slider, fight the mouse and ratchet the weight
   to +-10000 kg within seconds (the +-100 kg slider range vs the +-50 kg
