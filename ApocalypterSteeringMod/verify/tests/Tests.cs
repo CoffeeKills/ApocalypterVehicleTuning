@@ -352,7 +352,7 @@ public static class Tests
         Console.WriteLine("0.9.0 per-vehicle tunes: book semantics + blob round-trip");
         TestPerVehicleTunes(dir);
 
-        Console.WriteLine("0.10.0 weight: math, presets, ballast, balloons, spring rescale");
+        Console.WriteLine("0.10.0 weight: math, presets, ballast, balloons (0.11.1: springs stay stock)");
         TestWeight();
 
         Console.WriteLine("0.7.0 audit fixes (UI)");
@@ -3862,8 +3862,8 @@ public static class Tests
             "front ballast: mass 1200->1600, COM toward the front axle (z 0->0.65, y 0.4->0.3)");
         Check(Near(rb.inertiaTensor.x, 4000f / 3f) && Near(rb.inertiaTensor.y, 3200f / 3f) && Near(rb.inertiaTensor.z, 1600f),
             "inertia scales by the mass ratio (diagonal only)");
-        Check(Near(w[0].SpringMaxForce, 40000f) && Near(w[1].SpringMaxForce, 40000f) && Near(w[2].SpringMaxForce, 40000f) && Near(w[3].SpringMaxForce, 40000f),
-            "suspension OFF: springs scale absolutely (30000 x 4/3)");
+        Check(Near(w[0].SpringMaxForce, 30000f) && Near(w[1].SpringMaxForce, 30000f) && Near(w[2].SpringMaxForce, 30000f) && Near(w[3].SpringMaxForce, 30000f),
+            "ballast leaves the springs STOCK so the body visibly squats (0.11.1 removed the rescale; hazard: fails if the rescale returns)");
         rb.ForceCalls.Clear();
         tuner.ApplyLiftForcesAll();
         Check(rb.ForceCalls.Count == 0, "positive ballast applies no lift forces");
@@ -3890,37 +3890,45 @@ public static class Tests
         rb.ForceCalls.Clear();
         tuner.ApplyLiftForcesAll();
         Check(rb.ForceCalls.Count == 0, "weight OFF stops the lift forces");   // hazard: fails if OFF leaves stale targets or the Applied flag
+        WeightSettings.Enabled = true;
+        WeightSettings.SetPresetByName("Front ballast");
+        tuner.ApplyLive();
+        Check(Near(rb.mass, 1600f) && Near(rb.centerOfMass.z, 0.65f),
+            "re-applying the same preset after OFF re-runs the mass writes (0.11.1: RestoreWeight resets LastFrontKg/LastRearKg; hazard: fails if the apply skip survives restore)");
+        WeightSettings.Enabled = false;
+        tuner.ApplyLive();
 
-        // (d) Suspension ON: the rescale delta-composes over the suspension scan.
+        // (d) Suspension ON: ballast no longer touches the springs (0.11.1
+        // removed the rescale), so the suspension scan's writes stand alone.
         SuspensionSettings.Enabled = true;
         SuspensionSettings.SetPresetByName("Race");
         float springF = SuspensionSettings.Spring(true);
         tuner.ApplyLive();
-        Check(Near(w[0].SpringMaxForce, 30000f * springF), "Race suspension writes its own scale at ratio 1");
+        Check(Near(w[0].SpringMaxForce, 30000f * springF), "Race suspension writes its own scale");
         WeightSettings.Enabled = true;
         WeightSettings.SetPresetByName("Front ballast");
         tuner.ApplyLive();
-        Check(Near(w[0].SpringMaxForce, 30000f * springF * 4f / 3f) && Near(rb.mass, 1600f),
-            "weight ON composes over the suspension scan (delta: no double-scale)");
+        Check(Near(w[0].SpringMaxForce, 30000f * springF) && Near(rb.mass, 1600f),
+            "weight ON leaves the suspension's springs untouched (hazard: fails if the rescale returns)");
         SuspensionSettings.Enabled = false;
         tuner.ApplyLive();
-        Check(Near(w[0].SpringMaxForce, 40000f), "suspension OFF leaves the weight-scaled springs (baseline x ratio)");
+        Check(Near(w[0].SpringMaxForce, 30000f), "suspension OFF restores the STOCK springs, not mass-scaled ones");
         SuspensionSettings.Enabled = true;
         tuner.ApplyLive();
-        Check(Near(w[0].SpringMaxForce, 30000f * springF * 4f / 3f) && Near(rb.mass, 1600f),
-            "turning suspension ON while weight is applied does not double-scale (baseline divides by MassRatio)");
+        Check(Near(w[0].SpringMaxForce, 30000f * springF) && Near(rb.mass, 1600f),
+            "turning suspension back ON re-applies the preset cleanly (no mass factor to compose)");
         WeightSettings.Enabled = false;
         tuner.ApplyLive();
         Check(Near(w[0].SpringMaxForce, 30000f * springF) && Near(rb.mass, 1200f),
-            "weight OFF while suspension is ON: the delta restores exactly (Weight runs last)");
+            "weight OFF while suspension is ON: stock mass and the preset springs");
 
         // (e) Hazard: while weight is OFF the game changes the mass (cargo); enabling re-reads it.
         rb.mass = 1500f;
         WeightSettings.Enabled = true;
         WeightSettings.SetPresetByName("Full load");
         tuner.ApplyLive();
-        Check(Near(rb.mass, 2100f) && Near(w[0].SpringMaxForce, 30000f * springF * 1.4f),
-            "enabling weight re-captures the game's current mass (cargo) and re-scales from it");
+        Check(Near(rb.mass, 2100f) && Near(w[0].SpringMaxForce, 30000f * springF),
+            "enabling weight re-captures the game's current mass (cargo) and never touches the springs");
         WeightSettings.Enabled = false;
         tuner.ApplyLive();
         Check(Near(rb.mass, 1500f) && Near(w[0].SpringMaxForce, 30000f * springF),

@@ -123,7 +123,6 @@ namespace ApocalypterSteeringMod.Runtime
             public AeroData Aero;
             public GearboxData Gearbox;
             public WeightData Weight;
-            public float MassRatio = 1f;    // weight's mass scale currently baked into the springs
             public AssistHandles Assists;
             public bool HasTyreWear;
             public bool AlignmentMoved;     // wheel positions currently offset (wheelbase/trackWidth stale)
@@ -299,8 +298,8 @@ namespace ApocalypterSteeringMod.Runtime
                 TrimPendingGearbox();
             }
 
-            // Weight LAST: its spring rescale delta-composes with the suspension
-            // block's same-scan writes (see RescaleSpringsForMass).
+            // Weight LAST: ballast changes rb mass the suspension block above already
+            // wrote springs for, and Weight applies/restores whole-vehicle state.
             if (WeightSettings.Enabled) { if (!_weightApplied) RefreshBaselines(Category.Weight); ApplyAllWeight(); _weightApplied = true; }
             else if (_weightApplied) { RestoreAllWeight(); _weightApplied = false; }
         }
@@ -698,7 +697,7 @@ namespace ApocalypterSteeringMod.Runtime
                         {
                             continue;
                         }
-                        wk.Value.SpringForce = u.SpringMaxForce / r.MassRatio;   // weight's mass scale is baked into the live value
+                        wk.Value.SpringForce = u.SpringMaxForce;   // ballast no longer rescales springs; the live value is stock
                         wk.Value.SpringLength = u.SpringMaxLength;
                         wk.Value.BumpRate = u.DamperBumpRate;
                         wk.Value.ReboundRate = u.DamperReboundRate;

@@ -1,8 +1,8 @@
-# Apocalypter Vehicle Tuning (v0.11.0-alpha)
+# Apocalypter Vehicle Tuning (v0.11.1-alpha)
 
 A BepInEx mod for **Apocalypter** (SawyerK Games, Unity 2020.3.49, BepInEx 5.4.23.5 + Harmony 2) that adds a full vehicle-tuning panel: steering, suspension, aero, brakes, tire grip, drivetrain, stability assists (ABS/TCS), wheel alignment and gearbox, all applied live to every vehicle in the game. Since 0.6.0 the panel docks to the right edge and you can keep driving while it is open.
 
-The repo contains the complete mod source (`plugin/`) plus a self-contained test harness (`verify/` — Unity/NWH compile stubs and a 685-test suite (666 logic + 19 steering-prefix), needs only a .NET SDK 8+; `verify/refs/` carries the BepInEx 5 core DLLs it needs). The `gamecode/` excerpts used for audits are kept out of the public repo.
+The repo contains the complete mod source (`plugin/`) plus a self-contained test harness (`verify/` — Unity/NWH compile stubs and a 686-test suite (667 logic + 19 steering-prefix), needs only a .NET SDK 8+; `verify/refs/` carries the BepInEx 5 core DLLs it needs). The `gamecode/` excerpts used for audits are kept out of the public repo.
 
 ## Changes in 0.2.0-alpha
 
@@ -233,6 +233,17 @@ All §2 facts are preserved. The hidden-runner survival architecture is unchange
 ### Not changed
 
 All §2 facts are preserved. No new writes to the game's save data and no `vc.input.*` writes (lift acts through the rigidbody, ballast through mass properties); BepInEx config remains the only persistence; the steering prefix is unchanged; hot paths stay allocation-free (lift applies two `AddForceAtPosition` calls per tick with cached vectors). Onboarded lift modules stay onboarded after restore (inert at 0 N), like the aero module.
+
+## Changes in 0.11.1-alpha
+
+- **Ballast visibly squats the suspension (bug fix).** 0.10.0's `RescaleSpringsForMass` multiplied every wheel's `spring.maxForce` by the ballast mass ratio — WC3D sizes the spring force from `maxForce × forceCurve(compression)`, so ride height stayed constant and positive ballast, though real mass, produced no visible suspension actuation (reported after 0.11.0). The rescale is deleted: ballast now leaves the springs stock, the body visibly squats under load, and the balloon lift offsets the extreme loads. Suspension apply/restore no longer composes any mass ratio.
+- **Deleted plumbing.** `RescaleSpringsForMass` is gone from `VehicleTuner.Weight.cs`, the `MassRatio` field from `VehicleRecord`, and the `× MassRatio` factor from the suspension apply/restore paths. `WeightMath.MassRatio` stays — it now has exactly one consumer, the inertia-tensor scale.
+- **Re-apply after Weight OFF re-runs the mass writes.** With the ratio half of the apply skip gone, `RestoreWeight` resets `LastFrontKg`/`LastRearKg` so toggling Weight back on re-applies the same preset's mass/COM/inertia instead of being skipped as "unchanged".
+- **Harness.** New hazard checks: ballast (alone, and with Suspension ON, and after a cargo re-capture) leaves all four springs at their stock force so the body squats, and re-applying the same preset after OFF re-runs the mass writes. Suite: **686 tests (667 logic + 19 prefix), all passing.**
+
+### Not changed
+
+No config keys added, renamed or removed (a 0.11.0 cfg loads as is). The mass/COM/inertia writes and the balloon lift are unchanged; the FixedUpdate lift path, the coarse + trim slider pairs and their strings are untouched.
 
 ## Changes in 0.11.0-alpha
 
@@ -652,7 +663,7 @@ Ten tuning categories (plus a Panel tab for the panel itself), each with: a mast
 | Assists | ABS + TCS via NWH's public delegate hooks — no modules, no vehicle fields | `brakes.brakeTorqueModifiers` / `engine.powerModifiers` |
 | Alignment | camber per wheel, caster/toe per axle, wheel position per axle or per wheel — **offsets** (deg/cm) on each vehicle's own geometry | `WheelUAPI.Camber`, `WheelGroup.CasterAngle/ToeAngle` (+ gates), wheel `transform.localPosition` |
 | Gearbox | per-gear ratio ×, gear count (0 = own; added gears continue the ratio progression, or 0.7.0 spread over the stock range), clutch type (emulated: capacity/engagement), shifting by the mod's own controller (mode, shift points, kickdown) | `transmission.gears` (+ `Gear` re-shift guard), `clutch` fields, `transmission.shiftDelegate` (0.7.0; `transmissionType` is never written) |
-| Weight | front/rear ballast in **absolute kg** (real mass, centre of mass and inertia, springs re-scaled with the mass) or negative-kg "balloon" lift at that axle (−10 000…+20 000 kg, uncapped since 0.11.0) | rigidbody mass/COM/inertiaTensor + lift force per physics tick from `VehicleTuner.FixedUpdate` (0.11.0) |
+| Weight | front/rear ballast in **absolute kg** (real mass, centre of mass and inertia; springs stay stock since 0.11.1 so ballast visibly squats the suspension) or negative-kg "balloon" lift at that axle (−10 000…+20 000 kg, uncapped since 0.11.0) | rigidbody mass/COM/inertiaTensor + lift force per physics tick from `VehicleTuner.FixedUpdate` (0.11.0) |
 
 All factors are **multipliers on each vehicle's captured stock values** (effective = stock × factor) — Weight is the one exception: its sliders are **absolute kg** on top of the stock mass (negative kg = balloon lift, never a lighter body). Stock baselines are captured when a vehicle is first seen, re-read whenever a category is switched on (while it was off the fields were the game's), and restored exactly when a category is switched off. The suspension tab additionally shows computed **absolute readouts** (mean stock baseline × factor, e.g. "×1.40 / 42 000 N"), Brakes shows the torque in N·m, Gearbox the absolute ratio of each gear and Alignment the reference vehicle's stock angle/position.
 
@@ -681,7 +692,7 @@ These drove several unusual design decisions; treat them as load-bearing when re
 
 ```
 Plugin.cs                       Slim entry: config load → ES3 read-only import → Harmony patches (steering + InputBlocker) → hidden runner GO; sceneLoaded → recreate runner.
-PluginInfo.cs                   GUID "dev.apocalypter.tractionsteering" (unchanged for config continuity), name, version "0.11.0" (numeric-only: BepInEx 5 skips "-alpha" tags).
+PluginInfo.cs                   GUID "dev.apocalypter.tractionsteering" (unchanged for config continuity), name, version "0.11.1" (numeric-only: BepInEx 5 skips "-alpha" tags).
 Settings/PresetBook.cs          Generic preset semantics shared by all 10 categories: ITunablePreset + PresetBook<T> (Identity/Custom/Defaults/NotFound, SetByName with legacy-name mapping, BeginEdit copy-to-Custom with BasedOn, Reference for per-slider Reset, ResetCustom). 0.9.0: per-vehicle store (HasVehicle/ForVehicle/SaveVehicle/ImportVehicle/RemoveVehicle/ClearVehicles/VehicleNames) — every apply path picks ForVehicle.
 Settings/EditableCurve.cs       Piecewise-linear curve over [0,1]², 2-8 points: allocation-free Evaluate (prefix hot path), add/move/remove, Clone, "x:y;x:y" (de)serialization with validation.
 Settings/SteeringPreset.cs      6 presets (Vanilla/GTA/Euro Truck/Sim-Race/Drift/Custom) + Defaults; UseVehicleCurve + LockCurve + ReturnCurve; v2.0.0-behavior defaults; Custom mutated by UI; RestoreBaseCurve() re-attaches the BasedOn preset's curves (config-parse fallback). 0.8.0: MaxSteerAngle override (0 = vehicle's own lock, ≤70).
@@ -702,7 +713,7 @@ Settings/DrivetrainLayout.cs    (0.6.2) Layout text parser + tree validator (pur
 Settings/UiSettings.cs          (0.6.0) Panel (freeze, scale, width, alpha, last tab) + telemetry preferences; name-only corner parse; tab clamp.
 Settings/WeightPreset.cs        (0.10.0) FrontKg/RearKg; presets Stock/Front ballast/Rear ballast/Full load/Lift/Custom; Stock's description is description-only.
 Settings/WeightSettings.cs      (0.10.0) Book delegate; Enabled default FALSE (opt-in).
-Settings/WeightMath.cs          (0.10.0) Pure mass/COM/lift math: ComputeMass, MassRatio (stock ≤ 1e-3 → 1), ComputeCom (near-zero total → stock COM), LiftFor — uncapped since 0.11.0 (N = |negative kg| × 9.81 per axle) — plus CoarseOf/TrimOf (100 kg snap + remainder).
+Settings/WeightMath.cs          (0.10.0) Pure mass/COM/lift math: ComputeMass, MassRatio (stock ≤ 1e-3 → 1; inertia-tensor scale only since 0.11.1 — the springs are never rescaled), ComputeCom (near-zero total → stock COM), LiftFor — uncapped since 0.11.0 (N = |negative kg| × 9.81 per axle) — plus CoarseOf/TrimOf (100 kg snap + remainder).
 Settings/PresetCodec.cs         (0.6.0) Pure static preset export/import ("AVT1|…"), per-category key tables, clamping, Custom-only import. 0.9.0: SerializeVehicle/ResolveBuiltIn for the per-vehicle blob.
 Settings/Limits.cs              Single source of truth for every slider/config range.
 Game/GameSettingsReader.cs      Read-only ES3 import of steeringspeed/smoothinput/normalizeinput; re-read on panel open.
@@ -715,7 +726,7 @@ Runtime/VehicleTuner.Assists.cs ABS/TCS delegate factory (allocated once per veh
 Runtime/VehicleTuner.Alignment.cs (0.6.0) camber/caster/toe/position apply+restore, gate handling, camber-lock skip, x=0 clamp, baseline refresh.
 Runtime/VehicleTuner.Layout.cs  (0.6.2) Custom drivetrain layout: stock-wiring capture (axles, sides, driven set, own wheel inertia), per-vehicle resolve, idempotent wiring with hash hygiene, wheel release, exact restore, stock-layout log text.
 Runtime/VehicleTuner.Gearbox.cs (0.6.0) gear capture/layout check/continuation (0.7.0: or progressive spread), ratio+count write with the Gear re-shift guard and in-flight-shift deferral, clutch (drift-aware), mid-shift restore + trim; 0.7.0 HookShifter/UnhookShifter.
-Runtime/VehicleTuner.Weight.cs  (0.10.0) Weight capture (mass/COM/inertia diagonal + axle points) and apply/restore; RescaleSpringsForMass — the single composition point: delta-composes when Suspension is ON (Weight runs LAST in ApplyLiveCore), absolute otherwise. 0.11.0: per-axle lift targets (N) applied from VehicleTuner.FixedUpdate via ApplyLiftForcesAll/ApplyLiftForces (the 0.10.0 WeightLiftModule is deleted).
+Runtime/VehicleTuner.Weight.cs  (0.10.0) Weight capture (mass/COM/inertia diagonal + axle points) and apply/restore. 0.11.0: per-axle lift targets (N) applied from VehicleTuner.FixedUpdate via ApplyLiftForcesAll/ApplyLiftForces (the 0.10.0 WeightLiftModule is deleted). 0.11.1: RescaleSpringsForMass deleted — ballast leaves the springs stock so the body visibly squats; RestoreWeight resets LastFrontKg/LastRearKg so re-applying a preset after OFF re-runs the mass writes.
 Runtime/ShiftController.cs      (0.7.0) The mod's own shifting: pure shift-point/DNR/manual math + a per-vehicle NWH shift delegate (reads the game's shift requests, ShiftInto, fault fallback, allocation-free). 0.9.0 known gap: shift points still come from the global GearboxSettings.ActivePreset while gearbox apply picks per-vehicle.
 Runtime/Drift.cs                (0.7.0) "Did the game change this field since our last write?" — adopt it as the new stock (drivetrain + clutch).
 Runtime/PanelLayout.cs          (0.6.0) Every panel size as a pure function of the width (wide / narrow stacked rows), scale factor, effective width, digit→tab. 0.7.0: tighter constants, font constants, cell band, tab rows, Arial width tables + FitFont.
@@ -743,7 +754,7 @@ gamecode/, PROMPT.md            Audit-bundle files, now kept in the tree (gameco
 
 ## 5. Config schema and migration
 
-Sections: `Steering` (Enabled **false** by default, Preset, MatchGameSteeringSpeed) + `Steering.Custom.*` · `Suspension` (Enabled, Preset, SplitFrontRear) + `Suspension.Custom.*` (10 factor keys + BasedOn) · `Aero` / `Brakes` / `Grip` / `Drivetrain` / `Assists` (Enabled, Preset) + per-category `Custom.*` (incl. DiffFrontMode/DiffRearMode strings, Abs/Tcs keys) · `UI.ToggleKey`. 0.6.0 adds `Alignment` (Enabled, Preset, PerWheel) + `Alignment.Custom.*` (BasedOn + 20 offset keys), `Gearbox` (Enabled, Preset) + `Gearbox.Custom.*` (BasedOn, GearCount, Gear1..12Scale, clutch keys, TransmissionMode), `UI.FreezeWhileOpen/PanelScale/PanelWidth/PanelAlpha/LastTab`, `Telemetry.Enabled/Scale/Position`. All numeric entries carry AcceptableValueRanges from `Limits`. 0.6.0 needs no migration (additions + widened ranges only). 0.6.2 adds `Drivetrain.Layout` (Enabled, Layout) — additions only. 0.7.0 adds `Drivetrain.Custom.DiffCenterMode`, `Gearbox.Custom.SpreadRatios/ShiftUpFactor/ShiftDownFactor/KickdownScale`, `Telemetry.Pins` — additions only (harness: a real 0.6.4 file keeps all 133 keys and values). 0.7.4 retires `Telemetry.Pins` (an old cfg line is ignored) and adds `Telemetry.Cells`. 0.7.7 adds `Gearbox.DebugHooks`. 0.8.0 adds `Steering.Custom.MaxSteerAngle` and `General.ResetOnSaveSwitch/LastSave/LastSaveStamp` — additions only. 0.9.0 adds `PerVehicle.Tunes` (multi-line blob, panel-managed) and flips the `ResetOnSaveSwitch` default to true (existing files keep their stored value). 0.10.0 adds `Weight` (Enabled, Preset) + `Weight.Custom.*` (BasedOn, FrontKg, RearKg) — additions only. 0.11.0 changes no keys: only the FrontKg/RearKg range (−10 000…+20 000) and the lift semantics (uncapped, applied from the mod's FixedUpdate).
+Sections: `Steering` (Enabled **false** by default, Preset, MatchGameSteeringSpeed) + `Steering.Custom.*` · `Suspension` (Enabled, Preset, SplitFrontRear) + `Suspension.Custom.*` (10 factor keys + BasedOn) · `Aero` / `Brakes` / `Grip` / `Drivetrain` / `Assists` (Enabled, Preset) + per-category `Custom.*` (incl. DiffFrontMode/DiffRearMode strings, Abs/Tcs keys) · `UI.ToggleKey`. 0.6.0 adds `Alignment` (Enabled, Preset, PerWheel) + `Alignment.Custom.*` (BasedOn + 20 offset keys), `Gearbox` (Enabled, Preset) + `Gearbox.Custom.*` (BasedOn, GearCount, Gear1..12Scale, clutch keys, TransmissionMode), `UI.FreezeWhileOpen/PanelScale/PanelWidth/PanelAlpha/LastTab`, `Telemetry.Enabled/Scale/Position`. All numeric entries carry AcceptableValueRanges from `Limits`. 0.6.0 needs no migration (additions + widened ranges only). 0.6.2 adds `Drivetrain.Layout` (Enabled, Layout) — additions only. 0.7.0 adds `Drivetrain.Custom.DiffCenterMode`, `Gearbox.Custom.SpreadRatios/ShiftUpFactor/ShiftDownFactor/KickdownScale`, `Telemetry.Pins` — additions only (harness: a real 0.6.4 file keeps all 133 keys and values). 0.7.4 retires `Telemetry.Pins` (an old cfg line is ignored) and adds `Telemetry.Cells`. 0.7.7 adds `Gearbox.DebugHooks`. 0.8.0 adds `Steering.Custom.MaxSteerAngle` and `General.ResetOnSaveSwitch/LastSave/LastSaveStamp` — additions only. 0.9.0 adds `PerVehicle.Tunes` (multi-line blob, panel-managed) and flips the `ResetOnSaveSwitch` default to true (existing files keep their stored value). 0.10.0 adds `Weight` (Enabled, Preset) + `Weight.Custom.*` (BasedOn, FrontKg, RearKg) — additions only. 0.11.0 changes no keys: only the FrontKg/RearKg range (−10 000…+20 000) and the lift semantics (uncapped, applied from the mod's FixedUpdate). 0.11.1 changes no keys.
 
 **v3.1 → v3.2 migration (one-time, in `ModConfig.MigrateLegacySuspension`)**: (1) `Suspension.Preset = "Street"` maps to "Stock"; (2) if any legacy `[Suspension.User]` multiplier ≠ 1.0, fold `Custom_i = Clamp(presetFactor_i × user_i, 0.5, 2)` into the Suspension.Custom entries with BasedOn set, ActivePreset = Custom; (3) the 10 legacy keys are `config.Remove`d every load so the fold can never run twice. Covered by tests.
 
@@ -755,7 +766,7 @@ Sections: `Steering` (Enabled **false** by default, Preset, MatchGameSteeringSpe
 
 ```
 cd plugin && dotnet build -c Release          # real DLL, references game DLLs at D:\SteamLibrary\...\Apocalypter_Data\Managed (adjust paths in the csproj; 0.6.0 adds UnityEngine.IMGUIModule for the clipboard)
-cd verify && bash run.sh                      # stubs compile + 685 tests (666 logic + 19 prefix); .NET SDK 8+; refs/ already populated (tests/fixtures/v064.cfg is read from verify/)
+cd verify && bash run.sh                      # stubs compile + 686 tests (667 logic + 19 prefix); .NET SDK 8+; refs/ already populated (tests/fixtures/v064.cfg is read from verify/)
 ```
 Install: copy the DLL to `BepInEx\plugins\` and `icon.png` next to it as `ApocalypterSteeringMod.png` (the Apocasetter Mods-window icon). Rebuild the install zip with both files at the zip root. **Never run it alongside an old `SteeringFix.dll`** (earlier assembly name) — both prefixes would double-process steering. The GUID is deliberately unchanged, so the existing config file migrates in place.
 
@@ -763,7 +774,7 @@ Install: copy the DLL to `BepInEx\plugins\` and `icon.png` next to it as `Apocal
 
 The Apocasetter updater installs mods from its GitHub index (`DeonUrist/Apocasetter-Index`); its contract for a loose-DLL mod like this one:
 
-- a public GitHub repo with a release whose tag equals the `[BepInPlugin]` version (`0.11.0`),
+- a public GitHub repo with a release whose tag equals the `[BepInPlugin]` version (`0.11.1`),
 - a release `.zip` that unpacks into `BepInEx\plugins` — i.e. `ApocalypterSteeringMod.dll` + `ApocalypterSteeringMod.png` at the zip root (the layout of `BepInEx\plugins\ApocalypterSteeringMod.zip`),
 - the `[General] Apocasetter = true` config entry (bound on load, written on first run),
 - one-time submission via the index repo's "Submit a mod" issue template.
@@ -788,6 +799,7 @@ powershell Compress-Archive README.md,PROMPT.md,FEATURES.md,CONTEXT.md,plugin,ve
 8. **0.6.0**: gear-list resize never leaves `gearIndex` out of range (also under an in-flight shift); alignment never crosses x = 0, never writes a locked camber, restores gates; blocker whitelist fail-closed; layout bands at 400/460/800.
 9. **0.7.0**: the shift delegate is restored by instance on every OFF path (category, target switch, OnDisable/OnDestroy) and never captured from a stale controller; `transmissionType` never written; controller per-tick path allocation-free and exception-contained; drift adoption only on a mismatch with our own last write; pins never break one-Graphic-per-GO.
 10. **0.11.0**: lift forces fire only while Weight is enabled and applied and are zeroed on restore; the FixedUpdate lift path is allocation-free and exception-contained (`LogFault`); coarse/trim Reset restores the exact reference value (no double snap).
+11. **0.11.1**: ballast leaves the springs stock (no mass ratio anywhere in the suspension path); RestoreWeight resets the last axle split so re-applying a preset after Weight OFF re-runs the mass/COM/inertia writes; no new config keys.
 
 ## 8. Known limitations / deliberate decisions
 
@@ -816,7 +828,7 @@ powershell Compress-Archive README.md,PROMPT.md,FEATURES.md,CONTEXT.md,plugin,ve
 
 ## 10. In-game test checklist (for the machine with the game)
 
-1. Log shows `Apocalypter Vehicle Tuning 0.11.0 loaded.`, two `InputBlocker: patched …` counts (6 InputController methods + the PlayMaker action methods) and no errors.
+1. Log shows `Apocalypter Vehicle Tuning 0.11.1 loaded.`, two `InputBlocker: patched …` counts (6 InputController methods + the PlayMaker action methods) and no errors.
 2. F7 (or the "Vehicle Tuning" button in the pause menu) opens the panel docked right; cursor free; the game keeps running (0.6.0 live mode — see item 21; item 22 covers the Freeze option). Esc/F7/X/Done close it (click-outside only with Freeze ON).
 3. Each of the 8 tuning tabs (plus the Settings tab): master ON applies the preset, sliders live-edit (preset → "Custom (Base)"), Reset returns to the preset origin, OFF restores stock feel.
 4. Steering tab: Vanilla must feel exactly unmodded; Custom defaults ≈ the old v2.0.0 feel; traction clamp + opposite lock behave as before.
@@ -876,13 +888,16 @@ powershell Compress-Archive README.md,PROMPT.md,FEATURES.md,CONTEXT.md,plugin,ve
 50. **0.9.0 — ResetOnSaveSwitch default:** with a fresh config file (rename/delete the old one) the key defaults to true and a save switch turns everything off (item 48). An existing 0.8.0 cfg keeps its stored false.
 
 51. **0.10.0 — Weight tab:** F7 → the Weight tab sits between Aero and Settings with the presets Front ballast (+400/0 kg), Rear ballast (0/+400 kg), Full load (+300/+300 kg) and Lift (-250/-250 kg) and front/rear sliders reading "+400 kg" / "-250 kg" — absolute kg, not a multiplier.
-52. **0.10.0 — ballast:** on any car pick Front ballast: the front end feels heavier under braking (more dive, more weight transfer); Full load plants the car and the suspension must NOT bottom out over bumps (springs re-scaled with the mass).
+52. **0.10.0 — ballast:** on any car pick Front ballast: the front end feels heavier under braking (more dive, more weight transfer); Full load plants the car and the suspension must NOT bottom out over bumps (springs re-scaled with the mass — 0.10.0/0.11.0 behaviour, removed in 0.11.1: see items 59–61).
 53. **0.11.0 — balloon lift (0.10.0's was a no-op):** Lift (-250/-250): the car visibly rides higher and the wheels unweight — in 0.10.0 nothing happened. An extreme lift (e.g. -1000/-500 kg) is now uncapped: the car can fly.
 54. **0.10.0 — restore, copy/paste, per-vehicle:** Copy preset → paste ("Custom (…)") and Weight OFF, Turn everything off and per-tab Reset restore stock mass and handling exactly. A per-vehicle Weight tune saved in the config re-applies on respawn, and a slider edit on the tuned vehicle survives a restart (0.9.0 blob round-trip).
-55. **0.10.0 — springs follow the mass either way:** with Suspension ON and OFF, switching Weight presets keeps the ride height sensible (ON: delta-composed with the suspension write because Weight applies last; OFF: absolute re-scale of the captured springs).
+55. **0.10.0 — springs follow the mass either way:** with Suspension ON and OFF, switching Weight presets keeps the ride height sensible (ON: delta-composed with the suspension write because Weight applies last; OFF: absolute re-scale of the captured springs). 0.10.0/0.11.0 behaviour, removed in 0.11.1 (items 59–61).
 56. **0.11.0 — coarse + trim sliders:** the Weight tab shows four sliders: front/rear coarse (range −10 000…+20 000 kg, snapping in 100 kg steps) and front/rear trim (±100 kg in 1 kg steps). Dragging trim moves the coarse readout by ±1 kg steps and vice versa; the coarse slider never drags the trim along.
 57. **0.11.0 — exact Reset:** on the Lift preset press Reset on both front rows: coarse shows −200 kg, trim −50 kg (−250 total, not a snapped −175).
 58. **0.11.0 — lift log:** with Weight ON and any negative kg, the log has one `Weight: balloon lift on '…' = … N front / … N rear (uncapped)` line per vehicle, and no errors.
+59. **0.11.1 — ballast squats the suspension:** with Suspension OFF, pick Front ballast (+400/0): the front end visibly squats under the load (in 0.10.0/0.11.0 the springs were re-scaled so the ride height barely moved); Rear ballast squats the rear; Full load squats both.
+60. **0.11.1 — weight ON leaves the springs alone:** with Suspension ON at a stiff preset and Weight ON at Full load, the stiffness is preserved (no mass ratio in the spring path); Weight OFF restores stock mass and ride height.
+61. **0.11.1 — re-apply after OFF:** Weight ON with Front ballast, then OFF (stock feel returns), then ON again with the same preset — the ballast comes back (mass/COM re-written, not skipped); no log errors.
 
 ## 11. Translation (ApocaLanguage)
 

@@ -12,9 +12,10 @@ namespace ApocalypterSteeringMod.Runtime
     /// the rigidbody mass, shifts the centre of mass, scales the inertia tensor),
     /// negative kg = "balloon" lift. The lift forces are applied per physics
     /// tick from VehicleTuner.FixedUpdate (0.11.0; before that they went through
-    /// an onboarded WeightLiftModule whose tick the game never ran). The
-    /// suspension springs are re-scaled with the mass so ballast does not bottom
-    /// them out.
+    /// an onboarded WeightLiftModule whose tick the game never ran). The springs
+    /// are deliberately NOT re-scaled with the mass (0.11.1 removed the 0.10.0
+    /// rescale): ballast compresses the suspension visibly instead of riding at
+    /// a constant height, and the lift offsets it at the extreme loads.
     /// </summary>
     public sealed partial class VehicleTuner
     {
@@ -98,11 +99,11 @@ namespace ApocalypterSteeringMod.Runtime
             }
             float ratio = WeightMath.MassRatio(d.StockMass, p.FrontKg, p.RearKg);
             // Mass-property writes re-run the PhysX mass matrix: skip them when
-            // the ratio AND the axle split are unchanged (the fields already
-            // carry those values from the last apply). Ratio alone is not enough:
-            // front ballast and rear ballast share a ratio but different COMs.
-            bool sameInput = Mathf.Abs(ratio - r.MassRatio) <= 1e-4f
-                && Mathf.Abs(d.LastFrontKg - p.FrontKg) <= 1e-3f
+            // the axle split is unchanged (the fields already carry those values
+            // from the last apply). The split alone identifies the state — stock
+            // mass is fixed between captures, and front ballast vs rear ballast
+            // share a ratio but different COMs, so both kg values are compared.
+            bool sameInput = Mathf.Abs(d.LastFrontKg - p.FrontKg) <= 1e-3f
                 && Mathf.Abs(d.LastRearKg - p.RearKg) <= 1e-3f;
             if (!sameInput)
             {
@@ -114,7 +115,6 @@ namespace ApocalypterSteeringMod.Runtime
                 d.LastFrontKg = p.FrontKg;
                 d.LastRearKg = p.RearKg;
             }
-            RescaleSpringsForMass(r, ratio);   // early-outs internally when unchanged
 
             float frontN, rearN;
             WeightMath.LiftFor(p.FrontKg, p.RearKg, out frontN, out rearN);
@@ -143,7 +143,8 @@ namespace ApocalypterSteeringMod.Runtime
                 rb.centerOfMass = d.StockCom;
                 rb.inertiaTensor = d.StockInertia;
             }
-            RescaleSpringsForMass(r, 1f);
+            d.LastFrontKg = 0f;   // the next apply must re-run the mass writes (0.11.1: the sameInput skip compares only these now)
+            d.LastRearKg = 0f;
             d.FrontLiftN = 0f;   // stale lift must not survive weight OFF (0.11.0)
             d.RearLiftN = 0f;
         }
@@ -202,40 +203,6 @@ namespace ApocalypterSteeringMod.Runtime
             {
                 rb.AddForceAtPosition(new Vector3(0f, rearN, 0f), t.TransformPoint(rearPoint));
             }
-        }
-
-        /// <summary>
-        /// Single composition point for mass scaling of the springs. The
-        /// suspension category writes spring force absolutely from its captured
-        /// baseline, so when suspension is ON this delta-composes over what the
-        /// suspension scan just wrote (which carries the old ratio); when
-        /// suspension is OFF nothing else writes the springs, so it writes
-        /// absolute = baseline x ratio (the scaling survives suspension off).
-        /// Weight runs LAST in ApplyLiveCore so both orderings hold.
-        /// </summary>
-        private static void RescaleSpringsForMass(VehicleRecord r, float newRatio)
-        {
-            if (Mathf.Abs(newRatio - r.MassRatio) < 1e-4f)
-            {
-                return;
-            }
-            foreach (KeyValuePair<WheelUAPI, WheelData> wk in r.Wheels)
-            {
-                WheelUAPI u = wk.Key;
-                if (u == null)
-                {
-                    continue;
-                }
-                if (SuspensionSettings.Enabled)
-                {
-                    u.SpringMaxForce *= newRatio / r.MassRatio;
-                }
-                else
-                {
-                    u.SpringMaxForce = wk.Value.SpringForce * newRatio;
-                }
-            }
-            r.MassRatio = newRatio;
         }
     }
 }
