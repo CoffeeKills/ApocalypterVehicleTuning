@@ -71,6 +71,10 @@ namespace ApocalypterSteeringMod.Settings
         public SlipLimitMode SlipLimitMode = SlipLimitMode.Hard;
         public float SlipLimitStrength = 1f;
 
+        // 0.12.0: how much of the vehicle's own Ackermann geometry applies
+        // (0 = all front wheels parallel, 1 = the vehicle's own geometry).
+        public float AckermannAmount = 1f;
+
         // Custom only: the built-in preset this was copied from ("" = none).
         // Persisted so the preset's curves can be restored after a restart.
         public string BasedOn { get; set; } = "";
@@ -206,6 +210,7 @@ namespace ApocalypterSteeringMod.Settings
             MaxSteerAngle = src.MaxSteerAngle;
             SlipLimitMode = src.SlipLimitMode;
             SlipLimitStrength = src.SlipLimitStrength;
+            AckermannAmount = src.AckermannAmount;
         }
 
         /// <summary>A real tunable preset by config name (never Custom / Vanilla), or null.</summary>

@@ -915,6 +915,10 @@ namespace ApocalypterSteeringMod.Runtime
                 () => Shown.SlipLimitStrength, v => EditSteering(p => p.SlipLimitStrength = v),
                 () => SteeringSettings.Reference().SlipLimitStrength, UiStrings.Percent,
                 () => Shown.TractionClampEnabled);
+            AddSlider(t, "Ackermann amount", "Ackermann steering geometry (0 = all wheels parallel, 100% = the vehicle's own)",
+                Limits.StrengthMin, Limits.StrengthMax,
+                () => Shown.AckermannAmount, v => EditSteering(p => p.AckermannAmount = v),
+                () => SteeringSettings.Reference().AckermannAmount, UiStrings.Percent);
 
             AddSectionTitle(c, "Game setting");
             Text gameHint = AddOption(c, "Follow game's steering speed", "",

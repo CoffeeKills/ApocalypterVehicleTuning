@@ -41,7 +41,7 @@ public static class PrefixTests
         return _fail == 0 ? 0 : 1;
     }
 
-    private static VehicleController MakeCar(out FakeWheel[] wheels, float pivotZ)
+    private static VehicleController MakeCar(out FakeWheel[] wheels, float pivotZ, bool addAckerman = false, float trackWidth = 1.6f)
     {
         var vc = new VehicleController();
         vc.vehicleRigidbody = new Rigidbody();
@@ -52,7 +52,7 @@ public static class PrefixTests
         float[] z = { 1.3f, 1.3f, -1.3f, -1.3f };
         for (int g = 0; g < 2; g++)
         {
-            var group = new WheelGroup { antiRollBarForce = g == 0 ? 5000f : 0f, addAckerman = false, steerCoefficient = g == 0 ? 1f : 0f };
+            var group = new WheelGroup { antiRollBarForce = g == 0 ? 5000f : 0f, addAckerman = g == 0 && addAckerman, trackWidth = g == 0 ? trackWidth : 0f, steerCoefficient = g == 0 ? 1f : 0f };
             for (int i = 0; i < 2; i++)
             {
                 var w = new FakeWheel { SpringMaxForce = 30000f, SpringMaxLength = 0.3f, DamperBumpRate = 3000f, DamperReboundRate = 3500f };
@@ -243,6 +243,61 @@ public static class PrefixTests
             SteeringPreset.Custom.TractionClampEnabled = true;
             Check(s.angle <= 45.001f && s.angle > 44f,
                 "MaxSteerAngle 45 overrides a 30-deg car's lock (angle " + s.angle.ToString("0.0") + ")");
+
+            // 0.12.0: Ackermann amount. A front axle with addAckerman and a 1.6 m
+            // track: at positive lock the game bends the left (outer) wheel less and
+            // the right (inner) wheel more. The angles are irrational trig, so
+            // recompute the full-geometry values here with the game's own formula
+            // and pin the blend: a=1 is the game's geometry, a=0 is parallel,
+            // a=0.5 halfway, and an axle without addAckerman ignores the amount.
+            SteeringPreset.Custom.TractionClampEnabled = false;   // isolate Ackermann from the slip clamp
+            VehicleController vcA = MakeCar(out FakeWheel[] aWheels, 0f, true, 1.6f);
+            var sA = new Steering
+            {
+                vehicleController = vcA,
+                maximumSteerAngle = 30f,
+                degreesPerSecondLimit = 100000f,
+                linearity = new AnimationCurve(new Keyframe(0f, 0f), new Keyframe(1f, 1f)),
+                speedSensitiveSteeringCurve = new AnimationCurve(new Keyframe(0f, 2f), new Keyframe(1f, 2f)),
+                speedSensitiveSmoothingCurve = new AnimationCurve(new Keyframe(0f, 0.05f), new Keyframe(1f, 0.05f))
+            };
+            vcA.Speed = 20f;
+            vcA.input.Steering = 1f;
+            vcA.vehicleRigidbody.velocity = new Vector3(0f, 0f, 20f);
+            vcA.vehicleRigidbody.angularVelocity = new Vector3(0f, 0f, 0f);
+
+            float baseRad = 30f * 0.017453292f;
+            float aSin = Mathf.Sin(baseRad);
+            float aCos = Mathf.Cos(baseRad);
+            float rightFull = Mathf.Atan(4f * 1.6f * aSin / (2f * 2.6f * aCos - 1.6f * aSin)) * 57.29578f;
+            float leftFull = Mathf.Atan(4f * 1.6f * aSin / (2f * 2.6f * aCos + 1.6f * aSin)) * 57.29578f;
+
+            SteeringPreset.Custom.AckermannAmount = 1f;
+            TractionEdgeSteeringPatch.Prefix(sA);
+            Check(Near(aWheels[0].SteerAngle, leftFull) && Near(aWheels[1].SteerAngle, rightFull),
+                "Ackermann 1 = the game's own geometry (L " + aWheels[0].SteerAngle.ToString("0.00") + ", R " + aWheels[1].SteerAngle.ToString("0.00") + ")");
+            sA.angle = 0f;
+            SteeringPreset.Custom.AckermannAmount = 0f;
+            TractionEdgeSteeringPatch.Prefix(sA);
+            Check(Near(aWheels[0].SteerAngle, 30f) && Near(aWheels[1].SteerAngle, 30f),
+                "Ackermann 0 = both wheels parallel at the base angle");
+            sA.angle = 0f;
+            SteeringPreset.Custom.AckermannAmount = 0.5f;
+            TractionEdgeSteeringPatch.Prefix(sA);
+            Check(Near(aWheels[0].SteerAngle, Mathf.Lerp(30f, leftFull, 0.5f)) && Near(aWheels[1].SteerAngle, Mathf.Lerp(30f, rightFull, 0.5f)),
+                "Ackermann 0.5 blends halfway");
+
+            // The main car's front axle has addAckerman = false: the amount is ignored.
+            s.angle = 0f;
+            vc.input.Steering = 1f;
+            vc.Speed = 20f;
+            vc.vehicleRigidbody.velocity = new Vector3(0f, 0f, 20f);
+            vc.vehicleRigidbody.angularVelocity = new Vector3(0f, 0f, 0f);
+            TractionEdgeSteeringPatch.Prefix(s);
+            Check(Near(wheels[0].SteerAngle, s.angle) && Near(wheels[1].SteerAngle, s.angle),
+                "axle without addAckerman ignores the amount (parallel)");
+            SteeringPreset.Custom.AckermannAmount = 1f;
+            SteeringPreset.Custom.TractionClampEnabled = true;
 
             // 0.12.0: slip-limit mode + strength. Straight 20 m/s, full input, no
             // slide: slip = 0 -> the window is +/-8.5 deg on a 30-deg car, the

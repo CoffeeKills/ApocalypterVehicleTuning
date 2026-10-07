@@ -187,16 +187,17 @@ namespace ApocalypterSteeringMod.Patching
 
             __instance.angle = Mathf.MoveTowards(__instance.angle, smoothedTarget, rateLimit * vc.fixedDeltaTime);
 
-            // Apply Ackermann geometry exactly as the game does.
-            ApplyWheelAngles(__instance);
+            // Apply Ackermann geometry, blended per the preset's amount (0.12.0).
+            ApplyWheelAngles(__instance, preset.AckermannAmount);
 
             return false;
         }
 
-        // Verbatim copy of NWH's wheel-angle application loop (Steering.CalculateSteerAngles),
+        // Copy of NWH's wheel-angle application loop (Steering.CalculateSteerAngles),
         // so steer coefficients (4WS), Ackermann and externally added angle (motorcycle
-        // balancing) behave identically to vanilla.
-        private static void ApplyWheelAngles(Steering steering)
+        // balancing) behave like vanilla. 0.12.0: the Ackermann geometry is blended per
+        // the preset's AckermannAmount (1 = the game's own geometry, 0 = parallel wheels).
+        private static void ApplyWheelAngles(Steering steering, float amount)
         {
             foreach (var wheelGroup in steering.vehicleController.powertrain.wheelGroups)
             {
@@ -210,15 +211,20 @@ namespace ApocalypterSteeringMod.Patching
                     float rightAngle = Mathf.Atan(4f * wheelGroup.trackWidth * sin / (2f * steering.vehicleController.wheelbase * cos - wheelGroup.trackWidth * sin));
                     float leftAngle = Mathf.Atan(4f * wheelGroup.trackWidth * sin / (2f * steering.vehicleController.wheelbase * cos + wheelGroup.trackWidth * sin));
 
+                    // Blend toward the game's geometry: amount 1 = the vehicle's own
+                    // Ackermann (up to float rounding), amount 0 = both wheels parallel.
+                    float rightDeg = Mathf.Lerp(baseAngle, rightAngle * 57.29578f, amount);
+                    float leftDeg = Mathf.Lerp(baseAngle, leftAngle * 57.29578f, amount);
+
                     if (baseAngle < 0f)
                     {
-                        wheelGroup.RightWheel.wheelUAPI.SteerAngle = rightAngle * 57.29578f;
-                        wheelGroup.LeftWheel.wheelUAPI.SteerAngle = leftAngle * 57.29578f;
+                        wheelGroup.RightWheel.wheelUAPI.SteerAngle = rightDeg;
+                        wheelGroup.LeftWheel.wheelUAPI.SteerAngle = leftDeg;
                     }
                     else
                     {
-                        wheelGroup.LeftWheel.wheelUAPI.SteerAngle = leftAngle * 57.29578f;
-                        wheelGroup.RightWheel.wheelUAPI.SteerAngle = rightAngle * 57.29578f;
+                        wheelGroup.LeftWheel.wheelUAPI.SteerAngle = leftDeg;
+                        wheelGroup.RightWheel.wheelUAPI.SteerAngle = rightDeg;
                     }
                 }
                 else

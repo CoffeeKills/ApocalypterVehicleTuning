@@ -28,7 +28,7 @@ namespace ApocalypterSteeringMod.Persistence
         private static ConfigEntry<string> _steerPreset;
         private static ConfigEntry<bool> _matchGameSteeringSpeed;
         private static ConfigEntry<string> _steerBasedOn;
-        private static ConfigEntry<float> _steerRate, _steerSmoothing, _steerSlip, _steerOppLock, _steerLinExp, _steerMaxAngle, _steerSlipStrength;
+        private static ConfigEntry<float> _steerRate, _steerSmoothing, _steerSlip, _steerOppLock, _steerLinExp, _steerMaxAngle, _steerSlipStrength, _steerAckermann;
         private static ConfigEntry<string> _steerSlipMode;
         private static ConfigEntry<bool> _steerUseVehicleCurve;
         private static ConfigEntry<string> _steerLockCurve, _steerReturnCurve;
@@ -250,6 +250,8 @@ namespace ApocalypterSteeringMod.Persistence
                 "How the traction clamp applies the slip window: Hard, Blend or Pushback.");
             _steerSlipStrength = BindRange("Steering.Custom", "SlipLimitStrength", 1f, Limits.StrengthMin, Limits.StrengthMax,
                 "How firmly the slip limit applies (0 = off, 1 = full; Hard @ 1 is the 0.11.3 behavior).");
+            _steerAckermann = BindRange("Steering.Custom", "AckermannAmount", 1f, Limits.StrengthMin, Limits.StrengthMax,
+                "Ackermann steering amount (0 = all wheels parallel, 1 = the vehicle's own geometry).");
 
             // Legacy v0.3.x keys — read once for migration, then removed.
             _legacySteerCurveScale = BindRange("Steering.Custom", "SpeedCurveScale", 1f, Limits.CurveScaleMin, Limits.CurveScaleMax, "Legacy.");
@@ -481,7 +483,7 @@ namespace ApocalypterSteeringMod.Persistence
             Wire(_steerRate); Wire(_steerSmoothing); Wire(_steerUseVehicleCurve); Wire(_steerLockCurve);
             Wire(_steerReturnCurve); Wire(_steerTraction);
             Wire(_steerSlip); Wire(_steerOppLock); Wire(_steerLinearityOverride); Wire(_steerLinExp); Wire(_steerMaxAngle);
-            Wire(_steerSlipMode); Wire(_steerSlipStrength);
+            Wire(_steerSlipMode); Wire(_steerSlipStrength); Wire(_steerAckermann);
             Wire(_suspEnabled); Wire(_suspPreset); Wire(_suspSplit); Wire(_suspBasedOn);
             Wire(_suspSpringF); Wire(_suspSpringR); Wire(_suspHeightF); Wire(_suspHeightR);
             Wire(_suspBumpF); Wire(_suspBumpR); Wire(_suspReboundF); Wire(_suspReboundR);
@@ -792,6 +794,7 @@ namespace ApocalypterSteeringMod.Persistence
                 _steerMaxAngle.Value = sc.MaxSteerAngle;
                 _steerSlipMode.Value = sc.SlipLimitMode.ToString();
                 _steerSlipStrength.Value = sc.SlipLimitStrength;
+                _steerAckermann.Value = sc.AckermannAmount;
 
                 _suspEnabled.Value = SuspensionSettings.Enabled;
                 _suspPreset.Value = SuspensionSettings.ActivePreset != null ? SuspensionSettings.ActivePreset.Name : "Stock";
@@ -1114,6 +1117,7 @@ namespace ApocalypterSteeringMod.Persistence
             sc.MaxSteerAngle = _steerMaxAngle.Value;
             sc.SlipLimitMode = ParseSlipLimitMode(_steerSlipMode.Value);
             sc.SlipLimitStrength = _steerSlipStrength.Value;
+            sc.AckermannAmount = _steerAckermann.Value;
             // Restore the BasedOn preset's curves first (fallback for missing or
             // garbage config strings), then override with parsed config values.
             sc.RestoreBaseCurve();
