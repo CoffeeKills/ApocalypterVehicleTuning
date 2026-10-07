@@ -21,7 +21,17 @@ grep -o '"[^"]\{3,\}"' plugin/Runtime/SettingsPanel.cs plugin/Runtime/SettingsPa
 up from 476 at 0.10.0: the four coarse/trim slider titles and their hints, the trim hint
 shared by both rows. 0.11.2 changes the trim hint's text in place — "…+-100 kg…" became
 "…+-50 kg…" — so the count stays 479: no string added, none removed. 0.11.3 changes no
-strings at all — the two-numbers fix is the row getters only — so the count stays 479.)
+strings at all — the two-numbers fix is the row getters only — so the count stays 479.
+0.12.0 sweep: **500** unique quoted strings — the slip-limit mode labels (`Hard`, `Blend`,
+`Pushback`) plus the `Slip limit strength` slider title and hint; the stability assist's
+`Counter-steer`, `Yaw dampen`, `Both` labels, the `Stability` section title, the
+`Stability strength` slider title and hint, and the steering-master-switch note; the
+`Ackermann amount` slider title and hint; the split tabs' page titles (`Alignment`, `Grip`),
+the per-tab reset labels (`Reset all alignment`, `Reset tires & grip` — replacing
+`Reset wheels & tires` — and `Reset all gearbox`), and the two revised hotkey hints
+(Keys 1-8 → 1-9, 0 = Settings); the merged `Tires & grip` and `Transmission & shifting`
+titles are gone. `AlignmentPage`, `GripPage`, `GearboxPage`, `SlipLimitMode`, `StabilityMode`
+and `StabilityNote` are internal object names caught by the sweep, never shown.)
 
 Not every hit is a display string: internal object names (`AeroPage`, `ApocalypterSettingsCanvas`,
 `ApocalypterSteeringMod_Button`, `Dim`, `Footer`, `Body`, `Description`, `Default*`) and format

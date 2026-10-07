@@ -1,4 +1,4 @@
-Apocalypter Vehicle Tuning 0.11.3-alpha
+Apocalypter Vehicle Tuning 0.12.0-alpha
 ======================================
 
 An in-game tuning panel for every vehicle in Apocalypter: steering,
@@ -59,6 +59,18 @@ NOTES
   target. If the strip ever shows the wrong car, set Telemetry ->
   DebugPick = true in the mod config and send the "Telemetry pick:"
   lines from BepInEx\LogOutput.log.
+- New in 0.12.0: full steering lock while parked (flat-1 presets used
+  to fall back to vanilla below 1.5 m/s, so a stationary car steered
+  less than a moving one - true reverse stays vanilla); slip-limit
+  modes (Hard/Blend/Pushback) with a strength slider; a stability
+  assist (counter-steer / yaw-dampen / Both + strength) that works
+  with every steering preset, Vanilla included; an Ackermann amount
+  slider (0 = parallel front wheels, 1 = the vehicle's own geometry);
+  and eleven tabs - Alignment, Grip, Drivetrain and Gearbox each got
+  their own (hotkeys 1-9 plus 0 = Settings). Steering feel, mapped to
+  the knobs: wheel weight/friction/inertia = Speed + Smoothing, rack
+  geometry = Ackermann amount, hub-to-road compliance = the
+  Suspension tab's spring/damper/ARB sliders.
 - New in 0.11.3: the Weight tab's two numbers are now truly separate -
   the coarse row shows the coarse part and the trim row the trim part,
   and the applied weight is them added together. Dragging trim no

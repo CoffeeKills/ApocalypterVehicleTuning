@@ -1,7 +1,7 @@
 Apocalypter Vehicle Tuning - Changelog
 ======================================
 
-Current release: 0.11.3-alpha
+Current release: 0.12.0-alpha
 
 An in-game tuning panel for every vehicle in Apocalypter: steering,
 suspension, wheel alignment, aero, brakes, tire grip, drivetrain,
@@ -11,6 +11,38 @@ pause menu) to open the panel.
 
 Need help? Contact @OddlyTugs on Discord for assistance.
 
+
+New in 0.12.0-alpha
+-------------------
+
+- Full lock while parked: the flat-1 steering presets used to hand
+  control back to vanilla below 1.5 m/s, so a stationary car steered
+  less than a moving one (the vehicle's own ~25 deg instead of the
+  preset's max angle). The fall-through is gone - the preset's lock
+  applies from 0 m/s. True reverse stays vanilla for every preset.
+- Slip-limit modes + strength (Steering tab): Hard clamps into the
+  slip window (strength 0 = no limit, 1 = the old brick-wall clamp),
+  Blend mixes the raw target toward the window boundary, Pushback
+  pushes the overshoot back inside the window. The defaults reproduce
+  0.11.3 exactly.
+- Stability assist (Assists tab): Counter-steer steers into slides,
+  Yaw-dampen settles a twitchy rear, Both does both - each with a
+  strength slider. It works with every steering preset, Vanilla
+  included (the Steering master switch must be on), and stands down
+  below 1.5 m/s and while parked.
+- Ackermann amount (Steering tab): 0 = both front wheels parallel,
+  1 = the vehicle's own geometry (the 0.11.3 behavior), blend freely.
+- Eleven tabs: Alignment, Grip, Drivetrain and Gearbox now have their
+  own tabs (Steering, Suspension, Alignment, Grip, Drivetrain,
+  Gearbox, Brakes, Assists, Aero, Weight, Settings). Hotkeys: 1-9 for
+  the first nine tabs, 0 = Settings.
+- Steering feel, mapped to the knobs: wheel weight/friction/inertia =
+  the Steering tab's Speed and Smoothing sliders; rack geometry = the
+  Ackermann amount; hub-to-road compliance = the Suspension tab's
+  spring/damper/anti-roll-bar sliders.
+- No config migration needed: a 0.11.3 config loads as is. New keys:
+  [Steering.Custom] SlipLimitMode, SlipLimitStrength, AckermannAmount
+  and [Assists.Custom] StabilityMode, StabilityStrength.
 
 New in 0.11.3-alpha
 -------------------
