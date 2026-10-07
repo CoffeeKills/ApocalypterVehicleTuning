@@ -10,7 +10,7 @@ namespace ApocalypterSteeringMod.Patching
     /// (vehicle input linearity, speed-sensitive curve, smoothing, configured
     /// deg/s limit) plus a traction-edge clamp parameterized by the active
     /// SteeringPreset. Falls through to vanilla when disabled, for the Vanilla
-    /// preset, and for raw-input / hold-position / stationary / reverse driving.
+    /// preset, and for raw-input / hold-position / reverse driving.
     /// </summary>
     [HarmonyPatch(typeof(Steering), "CalculateSteerAngles")]
     public static class TractionEdgeSteeringPatch
@@ -67,21 +67,15 @@ namespace ApocalypterSteeringMod.Patching
                 return true;
             }
 
-            // A return curve that holds at rest takes over low-speed steering; a
-            // symmetric one (flat 1) keeps vanilla's own guards untouched so every
-            // other configuration behaves exactly as before.
-            bool holdsAtRest = preset.ReturnCurve.Evaluate(0f) < 0.999f;
-            if (!holdsAtRest)
+            // True reverse stays vanilla for every preset (0.2.0 parked parking
+            // maneuvers there); a gentle backward roll is treated as stopped.
+            // 0.12.0: the old below-1.5-m/s vanilla fall-through for flat-1 return
+            // curves is gone — the preset's full lock now applies while stationary
+            // and at creep speeds too (the reported "stationary steering is default"
+            // bug). Safe at rest: the traction clamp self-gates on
+            // forwardVel >= MIN_TRACTION_SPEED, so nothing below it is affected.
+            if (forwardVel < -MIN_TRACTION_SPEED)
             {
-                if (forwardVel < MIN_TRACTION_SPEED)
-                {
-                    return true;
-                }
-            }
-            else if (forwardVel < -MIN_TRACTION_SPEED)
-            {
-                // True reverse stays vanilla even with a hold curve; a gentle
-                // backward roll is treated as stopped.
                 return true;
             }
 
@@ -109,7 +103,7 @@ namespace ApocalypterSteeringMod.Patching
             // Sideslip angle beta: velocity direction relative to the nose.
             // Positive = sliding right (rear stepped out to the left). The traction
             // model is only defined above MIN_TRACTION_SPEED, so it is skipped below
-            // (a hold-curve preset still steers there, without the clamp).
+            // (the preset still steers there, without the clamp).
             float bodySlipDeg = 0f;
             if (forwardVel >= MIN_TRACTION_SPEED
                 && (preset.TractionClampEnabled || preset.OppositeLockBoost > 1f))

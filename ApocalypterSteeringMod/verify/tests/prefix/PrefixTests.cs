@@ -194,9 +194,24 @@ public static class PrefixTests
             Check(TractionEdgeSteeringPatch.Prefix(s), "true reverse falls through with a hold curve");
             SteeringPreset.Custom.ReturnCurve = EditableCurve.Flat(1f);
 
-            // Flat-1 return keeps the old low-speed guard: below 1.5 m/s -> vanilla.
+            // ... and with a flat-1 return (every non-hold preset).
+            Check(TractionEdgeSteeringPatch.Prefix(s), "true reverse falls through with a flat-1 return");
+
+            // 0.12.0: the below-1.5-m/s vanilla fall-through is gone — a flat-1 preset's
+            // full lock applies while stationary and while creeping forward (0.11.3 and
+            // earlier used the vehicle's own lock there, the reported stationary bug).
+            s.degreesPerSecondLimit = 100000f;
+            s.angle = 0f;
+            vc.input.Steering = 1f;
+            vc.Speed = 0f;
+            vc.vehicleRigidbody.velocity = new Vector3(0f, 0f, 0f);
+            Check(!TractionEdgeSteeringPatch.Prefix(s) && s.angle > 29f,
+                "flat-1 return: full lock is reached while stationary (angle " + s.angle.ToString("0.0") + ")");
+            s.angle = 0f;
+            vc.Speed = 0.5f;
             vc.vehicleRigidbody.velocity = new Vector3(0f, 0f, 0.5f);
-            Check(TractionEdgeSteeringPatch.Prefix(s), "flat-1 return keeps the vanilla low-speed fall-through");
+            Check(!TractionEdgeSteeringPatch.Prefix(s) && s.angle > 29f,
+                "flat-1 return: full lock is reached at creep speed (angle " + s.angle.ToString("0.0") + ")");
             vc.vehicleRigidbody.velocity = new Vector3(0f, 0f, 20f);
             vc.Speed = 20f;
             s.degreesPerSecondLimit = 100000f;
