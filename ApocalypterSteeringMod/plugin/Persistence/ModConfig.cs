@@ -28,7 +28,8 @@ namespace ApocalypterSteeringMod.Persistence
         private static ConfigEntry<string> _steerPreset;
         private static ConfigEntry<bool> _matchGameSteeringSpeed;
         private static ConfigEntry<string> _steerBasedOn;
-        private static ConfigEntry<float> _steerRate, _steerSmoothing, _steerSlip, _steerOppLock, _steerLinExp, _steerMaxAngle;
+        private static ConfigEntry<float> _steerRate, _steerSmoothing, _steerSlip, _steerOppLock, _steerLinExp, _steerMaxAngle, _steerSlipStrength;
+        private static ConfigEntry<string> _steerSlipMode;
         private static ConfigEntry<bool> _steerUseVehicleCurve;
         private static ConfigEntry<string> _steerLockCurve, _steerReturnCurve;
         // Legacy v0.3.x curve knobs — bound for one-time migration, then removed.
@@ -245,6 +246,10 @@ namespace ApocalypterSteeringMod.Persistence
                 "Input linearity exponent (1 = linear, below 1 = sharper near center, above 1 = gentler).");
             _steerMaxAngle = BindRange("Steering.Custom", "MaxSteerAngle", 0f, Limits.MaxSteerAngleMin, Limits.MaxSteerAngleMax,
                 "Override the vehicle's own steering lock in degrees (0 = each vehicle's own). High values give drift-style extra angle.");
+            _steerSlipMode = _config.Bind("Steering.Custom", "SlipLimitMode", "Hard",
+                "How the traction clamp applies the slip window: Hard, Blend or Pushback.");
+            _steerSlipStrength = BindRange("Steering.Custom", "SlipLimitStrength", 1f, Limits.StrengthMin, Limits.StrengthMax,
+                "How firmly the slip limit applies (0 = off, 1 = full; Hard @ 1 is the 0.11.3 behavior).");
 
             // Legacy v0.3.x keys — read once for migration, then removed.
             _legacySteerCurveScale = BindRange("Steering.Custom", "SpeedCurveScale", 1f, Limits.CurveScaleMin, Limits.CurveScaleMax, "Legacy.");
@@ -476,6 +481,7 @@ namespace ApocalypterSteeringMod.Persistence
             Wire(_steerRate); Wire(_steerSmoothing); Wire(_steerUseVehicleCurve); Wire(_steerLockCurve);
             Wire(_steerReturnCurve); Wire(_steerTraction);
             Wire(_steerSlip); Wire(_steerOppLock); Wire(_steerLinearityOverride); Wire(_steerLinExp); Wire(_steerMaxAngle);
+            Wire(_steerSlipMode); Wire(_steerSlipStrength);
             Wire(_suspEnabled); Wire(_suspPreset); Wire(_suspSplit); Wire(_suspBasedOn);
             Wire(_suspSpringF); Wire(_suspSpringR); Wire(_suspHeightF); Wire(_suspHeightR);
             Wire(_suspBumpF); Wire(_suspBumpR); Wire(_suspReboundF); Wire(_suspReboundR);
@@ -784,6 +790,8 @@ namespace ApocalypterSteeringMod.Persistence
                 _steerLinearityOverride.Value = sc.LinearityOverride;
                 _steerLinExp.Value = sc.LinearityExponent;
                 _steerMaxAngle.Value = sc.MaxSteerAngle;
+                _steerSlipMode.Value = sc.SlipLimitMode.ToString();
+                _steerSlipStrength.Value = sc.SlipLimitStrength;
 
                 _suspEnabled.Value = SuspensionSettings.Enabled;
                 _suspPreset.Value = SuspensionSettings.ActivePreset != null ? SuspensionSettings.ActivePreset.Name : "Stock";
@@ -983,6 +991,13 @@ namespace ApocalypterSteeringMod.Persistence
             return PresetCodec.TryParseName(value, out m) ? m : GearboxMode.Stock;
         }
 
+        /// <summary>Names only (case-insensitive); numbers and unknown names fall back to Hard.</summary>
+        public static SlipLimitMode ParseSlipLimitMode(string value)
+        {
+            SlipLimitMode m;
+            return PresetCodec.TryParseName(value, out m) ? m : SlipLimitMode.Hard;
+        }
+
         // ------------------------------------------------- per-vehicle tunes (0.9.0)
 
         /// <summary>The blob format: one line per tune, VehicleName|Category|code.
@@ -1097,6 +1112,8 @@ namespace ApocalypterSteeringMod.Persistence
             sc.LinearityOverride = _steerLinearityOverride.Value;
             sc.LinearityExponent = _steerLinExp.Value;
             sc.MaxSteerAngle = _steerMaxAngle.Value;
+            sc.SlipLimitMode = ParseSlipLimitMode(_steerSlipMode.Value);
+            sc.SlipLimitStrength = _steerSlipStrength.Value;
             // Restore the BasedOn preset's curves first (fallback for missing or
             // garbage config strings), then override with parsed config values.
             sc.RestoreBaseCurve();

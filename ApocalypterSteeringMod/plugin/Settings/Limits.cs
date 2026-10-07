@@ -19,6 +19,8 @@ namespace ApocalypterSteeringMod.Settings
         public const float ReturnScaleMin = 0.1f, ReturnScaleMax = 1f;  // legacy v0.3.x key only
         public const float LinExpMin = 0.1f, LinExpMax = 5f;
         public const float MaxSteerAngleMin = 0f, MaxSteerAngleMax = 70f;
+        // 0.12.0: shared 0..1 range for the slip-limit strength, Ackermann amount and stability strength.
+        public const float StrengthMin = 0f, StrengthMax = 1f;
 
         // Suspension fine-tune sliders (legacy v3.1 multiplier on top of the preset).
         public const float UserMin = 0.5f, UserMax = 2f;

@@ -167,8 +167,8 @@ public static class Tests
             "new categories all opt-in (off by default)");
         SteeringPreset c0 = SteeringPreset.Custom;
         Check(Near(c0.RateMultiplier, 1f) && Near(c0.SlipAngleDeg, 8.5f) && Near(c0.OppositeLockBoost, 1.75f) && c0.UseVehicleCurve && !c0.LinearityOverride
-              && c0.ReturnCurve.Serialize() == "0:1;1:1",
-            "steering Custom defaults == v2.0.0 behaviour (vehicle curve + symmetric return)");
+              && c0.ReturnCurve.Serialize() == "0:1;1:1" && c0.SlipLimitMode == SlipLimitMode.Hard && Near(c0.SlipLimitStrength, 1f),
+            "steering Custom defaults == v2.0.0 behaviour (vehicle curve + symmetric return; Hard slip limit @ 1 = the 0.11.3 clamp)");
 
         Console.WriteLine("Steering preset semantics (preset-book)");
         SteeringPreset drift = SteeringPreset.FindBuiltIn("Drift");
@@ -221,10 +221,12 @@ public static class Tests
 
         Console.WriteLine("Out-of-range and legacy config values");
         string legacy = Path.Combine(dir, "legacy.cfg");
-        File.WriteAllText(legacy, "[Steering.Custom]\nRateMultiplier = 99\nSlipAngleDeg = -4\n\n[Suspension]\nPreset = Street\n\n[Drivetrain.Custom]\nPowerScale = 99\nDiffFrontMode = Warp\n");
+        File.WriteAllText(legacy, "[Steering.Custom]\nRateMultiplier = 99\nSlipAngleDeg = -4\nSlipLimitMode = Warp\nSlipLimitStrength = 99\n\n[Suspension]\nPreset = Street\n\n[Drivetrain.Custom]\nPowerScale = 99\nDiffFrontMode = Warp\n");
         ModConfig.Load(new ConfigFile(legacy, true));
         Check(Near(SteeringPreset.Custom.RateMultiplier, Limits.RateMax), "steering RateMultiplier 99 clamped to " + Limits.RateMax);
         Check(Near(SteeringPreset.Custom.SlipAngleDeg, Limits.SlipMin), "steering SlipAngleDeg -4 clamped to " + Limits.SlipMin);
+        Check(SteeringPreset.Custom.SlipLimitMode == SlipLimitMode.Hard, "steering SlipLimitMode 'Warp' falls back to Hard");
+        Check(Near(SteeringPreset.Custom.SlipLimitStrength, Limits.StrengthMax), "steering SlipLimitStrength 99 clamped to " + Limits.StrengthMax);
         Check(SuspensionSettings.ActivePreset == SuspensionPreset.Stock, "v3.0 preset 'Street' maps to Stock");
         Check(Near(DrivetrainPreset.Custom.PowerScale, Limits.PowerMax), "drivetrain PowerScale 99 clamped to " + Limits.PowerMax);
         Check(DrivetrainPreset.Custom.DiffFrontMode == DiffMode.Stock, "DiffFrontMode 'Warp' falls back to Stock");
@@ -1853,6 +1855,7 @@ public static class Tests
                 s.LockCurve = EditableCurve.FromPoints(0f, 1f, 0.3f, 0.5f, 1f, 0.2f);
                 s.ReturnCurve = EditableCurve.FromPoints(0f, 0f, 1f, 0.7f);
                 s.TractionClampEnabled = false; s.SlipAngleDeg = 6.25f; s.OppositeLockBoost = 1.1f;
+                s.SlipLimitMode = SlipLimitMode.Blend; s.SlipLimitStrength = 0.6f;
                 s.LinearityOverride = true; s.LinearityExponent = 1.35f; s.BasedOn = "Drift";
                 break;
             case PresetCategory.Alignment:
@@ -3623,15 +3626,19 @@ public static class Tests
         string[] added = { "Drivetrain.Custom|DiffCenterMode", "Gearbox.Custom|SpreadRatios", "Gearbox.Custom|ShiftUpFactor", "Gearbox.Custom|ShiftDownFactor",
             "Gearbox.Custom|KickdownScale", "Telemetry|Cells", "Gearbox|DebugHooks", "Steering.Custom|MaxSteerAngle",
             "General|ResetOnSaveSwitch", "General|LastSave", "General|LastSaveStamp", "PerVehicle|Tunes",
-            "Weight|Enabled", "Weight|Preset", "Weight.Custom|BasedOn", "Weight.Custom|FrontKg", "Weight.Custom|RearKg" };
+            "Weight|Enabled", "Weight|Preset", "Weight.Custom|BasedOn", "Weight.Custom|FrontKg", "Weight.Custom|RearKg",
+            "Steering.Custom|SlipLimitMode", "Steering.Custom|SlipLimitStrength" };
         bool all = newKeys.Count == oldKeys.Count + added.Length;
         foreach (string k in added) all &= newKeys.ContainsKey(k);
         if (!all) foreach (string k in newKeys.Keys) if (!oldKeys.ContainsKey(k)) Console.WriteLine("  new key: " + k);
-        Check(all, "exactly seventeen keys added (0.8.0 adds MaxSteerAngle, ResetOnSaveSwitch, LastSave, LastSaveStamp; 0.9.0 adds PerVehicle|Tunes; 0.10.0 adds the five Weight keys)");
-        File.WriteAllText(path, after.Replace("ShiftUpFactor = 1", "ShiftUpFactor = 9").Replace("KickdownScale = 1", "KickdownScale = 0.1").Replace("DiffCenterMode = Stock", "DiffCenterMode = 7"));
+        Check(all, "exactly nineteen keys added (0.8.0 adds MaxSteerAngle, ResetOnSaveSwitch, LastSave, LastSaveStamp; 0.9.0 adds PerVehicle|Tunes; 0.10.0 adds the five Weight keys; 0.12.0 adds the two slip-limit keys)");
+        File.WriteAllText(path, after.Replace("ShiftUpFactor = 1", "ShiftUpFactor = 9").Replace("KickdownScale = 1", "KickdownScale = 0.1").Replace("DiffCenterMode = Stock", "DiffCenterMode = 7")
+            .Replace("SlipLimitMode = Hard", "SlipLimitMode = Warp").Replace("SlipLimitStrength = 1", "SlipLimitStrength = 9"));
         ModConfig.Load(new ConfigFile(path, true));
         Check(Near(GearboxPreset.Custom.ShiftUpFactor, Limits.ShiftFactorMax) && Near(GearboxPreset.Custom.KickdownScale, Limits.KickdownMin)
-              && DrivetrainPreset.Custom.DiffCenterMode == DiffMode.Stock, "new keys clamp to Limits; a numeric DiffCenterMode falls back to Stock");
+              && DrivetrainPreset.Custom.DiffCenterMode == DiffMode.Stock && SteeringPreset.Custom.SlipLimitMode == SlipLimitMode.Hard
+              && Near(SteeringPreset.Custom.SlipLimitStrength, Limits.StrengthMax),
+            "new keys clamp to Limits; a numeric DiffCenterMode falls back to Stock; SlipLimitMode 'Warp' falls back to Hard");
         GearboxPreset tmp = new GearboxPreset { Name = "t" };
         string based;
         PresetCodec.Result r = PresetCodec.ParseInto(PresetCategory.Gearbox, "AVT1|Gearbox|Custom|BasedOn=Truck|ShiftUpFactor=0.7|KickdownScale=1.5", tmp, out based);

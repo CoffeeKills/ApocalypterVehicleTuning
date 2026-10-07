@@ -1,6 +1,18 @@
 namespace ApocalypterSteeringMod.Settings
 {
     /// <summary>
+    /// How the traction clamp applies the peak-grip slip window (0.12.0).
+    /// Hard = brick wall at the window edge; Blend = the clamped value mixed
+    /// into the target; Pushback = overshoot is reflected back inside.
+    /// </summary>
+    public enum SlipLimitMode
+    {
+        Hard,
+        Blend,
+        Pushback
+    }
+
+    /// <summary>
     /// One steering behavior preset. Non-Vanilla presets feed the traction-edge
     /// patch; Vanilla skips the patch body entirely and leaves stock NWH steering.
     /// The Custom instance is what the settings panel edits: touching any control
@@ -53,6 +65,11 @@ namespace ApocalypterSteeringMod.Settings
         // 0.8.0: override the vehicle's own steering lock (degrees; 0 = the vehicle's own).
         // High values give drift-style extra angle; the whole steer pipeline uses this cap.
         public float MaxSteerAngle = 0f;
+
+        // 0.12.0: how the traction clamp applies the peak-grip slip window, and
+        // how firmly. Hard @ 1 = the 0.11.3 brick-wall clamp exactly.
+        public SlipLimitMode SlipLimitMode = SlipLimitMode.Hard;
+        public float SlipLimitStrength = 1f;
 
         // Custom only: the built-in preset this was copied from ("" = none).
         // Persisted so the preset's curves can be restored after a restart.
@@ -187,6 +204,8 @@ namespace ApocalypterSteeringMod.Settings
             LinearityOverride = src.LinearityOverride;
             LinearityExponent = src.LinearityExponent;
             MaxSteerAngle = src.MaxSteerAngle;
+            SlipLimitMode = src.SlipLimitMode;
+            SlipLimitStrength = src.SlipLimitStrength;
         }
 
         /// <summary>A real tunable preset by config name (never Custom / Vanilla), or null.</summary>

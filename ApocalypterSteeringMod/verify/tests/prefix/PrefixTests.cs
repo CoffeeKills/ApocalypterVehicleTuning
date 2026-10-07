@@ -243,6 +243,57 @@ public static class PrefixTests
             SteeringPreset.Custom.TractionClampEnabled = true;
             Check(s.angle <= 45.001f && s.angle > 44f,
                 "MaxSteerAngle 45 overrides a 30-deg car's lock (angle " + s.angle.ToString("0.0") + ")");
+
+            // 0.12.0: slip-limit mode + strength. Straight 20 m/s, full input, no
+            // slide: slip = 0 -> the window is +/-8.5 deg on a 30-deg car, the
+            // pre-clamp target is 30. Hard @ 1 is the 0.11.3 brick wall exactly;
+            // strength 0 disables the clamp. Pushback reflects overshoot back
+            // inside the window (a 30-deg request above +8.5 lands at -8.5 @ 1).
+            s.angle = 0f;
+            vc.input.Steering = 1f;
+            vc.Speed = 20f;
+            vc.vehicleRigidbody.velocity = new Vector3(0f, 0f, 20f);
+            vc.vehicleRigidbody.angularVelocity = new Vector3(0f, 0f, 0f);
+            SteeringPreset.Custom.SlipLimitMode = SlipLimitMode.Hard;
+            SteeringPreset.Custom.SlipLimitStrength = 1f;
+            TractionEdgeSteeringPatch.Prefix(s);
+            Check(Near(s.angle, 8.5f), "Hard @ 1 clamps to the slip window (angle " + s.angle.ToString("0.00") + ")");
+            s.angle = 0f;
+            SteeringPreset.Custom.SlipLimitStrength = 0.5f;
+            TractionEdgeSteeringPatch.Prefix(s);
+            Check(Near(s.angle, 19.25f), "Hard @ 0.5 widens the window halfway (angle " + s.angle.ToString("0.00") + ")");
+            s.angle = 0f;
+            SteeringPreset.Custom.SlipLimitStrength = 0f;
+            TractionEdgeSteeringPatch.Prefix(s);
+            Check(Near(s.angle, 30f), "Hard @ 0 disables the clamp (angle " + s.angle.ToString("0.00") + ")");
+
+            s.angle = 0f;
+            SteeringPreset.Custom.SlipLimitMode = SlipLimitMode.Blend;
+            SteeringPreset.Custom.SlipLimitStrength = 1f;
+            TractionEdgeSteeringPatch.Prefix(s);
+            Check(Near(s.angle, 8.5f), "Blend @ 1 clamps fully (angle " + s.angle.ToString("0.00") + ")");
+            s.angle = 0f;
+            SteeringPreset.Custom.SlipLimitStrength = 0.5f;
+            TractionEdgeSteeringPatch.Prefix(s);
+            Check(Near(s.angle, 19.25f), "Blend @ 0.5 mixes halfway (angle " + s.angle.ToString("0.00") + ")");
+            s.angle = 0f;
+            SteeringPreset.Custom.SlipLimitStrength = 0f;
+            TractionEdgeSteeringPatch.Prefix(s);
+            Check(Near(s.angle, 30f), "Blend @ 0 leaves the target alone (angle " + s.angle.ToString("0.00") + ")");
+
+            s.angle = 0f;
+            SteeringPreset.Custom.SlipLimitMode = SlipLimitMode.Pushback;
+            SteeringPreset.Custom.SlipLimitStrength = 1f;
+            TractionEdgeSteeringPatch.Prefix(s);
+            Check(Near(s.angle, -8.5f), "Pushback @ 1 mirrors the overshoot inside the window (angle " + s.angle.ToString("0.00") + ")");
+            s.angle = 0f;
+            SteeringPreset.Custom.SlipLimitStrength = 0.5f;
+            TractionEdgeSteeringPatch.Prefix(s);
+            Check(Near(s.angle, -2.25f), "Pushback @ 0.5 pushes halfway back (angle " + s.angle.ToString("0.00") + ")");
+            s.angle = 0f;
+            SteeringPreset.Custom.SlipLimitStrength = 0f;
+            TractionEdgeSteeringPatch.Prefix(s);
+            Check(Near(s.angle, 8.5f), "Pushback @ 0 lands on the window edge (angle " + s.angle.ToString("0.00") + ")");
         }
         catch (Exception ex)
         {

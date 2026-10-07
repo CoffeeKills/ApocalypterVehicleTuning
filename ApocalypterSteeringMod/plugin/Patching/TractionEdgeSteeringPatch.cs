@@ -125,7 +125,30 @@ namespace ApocalypterSteeringMod.Patching
                 // returns a value beyond maximumSteerAngle.
                 float lowLimit = Mathf.Clamp(bodySlipDeg + slipLeadDeg - preset.SlipAngleDeg, -maxSteer, maxSteer);
                 float highLimit = Mathf.Clamp(bodySlipDeg + slipLeadDeg + preset.SlipAngleDeg, -maxSteer, maxSteer);
-                target = Mathf.Clamp(target, lowLimit, highLimit);
+
+                // 0.12.0: slip-limit mode + strength (s). Hard@1 is the 0.11.3 brick
+                // wall exactly; s=0 disables the clamp. Blend mixes the clamped value
+                // into the target; Pushback reflects overshoot back inside the window.
+                float s = preset.SlipLimitStrength;
+                switch (preset.SlipLimitMode)
+                {
+                    case SlipLimitMode.Blend:
+                        target = Mathf.Lerp(target, Mathf.Clamp(target, lowLimit, highLimit), s);
+                        break;
+                    case SlipLimitMode.Pushback:
+                        if (target > highLimit)
+                        {
+                            target = Mathf.Clamp(highLimit - s * (target - highLimit), lowLimit, highLimit);
+                        }
+                        else if (target < lowLimit)
+                        {
+                            target = Mathf.Clamp(lowLimit + s * (lowLimit - target), lowLimit, highLimit);
+                        }
+                        break;
+                    default: // Hard
+                        target = Mathf.Clamp(target, Mathf.Lerp(-maxSteer, lowLimit, s), Mathf.Lerp(maxSteer, highLimit, s));
+                        break;
+                }
             }
 
             // Vanilla smoothing, with the vehicle's configured rate limit

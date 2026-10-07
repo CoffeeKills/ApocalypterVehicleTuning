@@ -188,6 +188,8 @@ namespace ApocalypterSteeringMod.Settings
                 F<SteeringPreset>("SlipAngleDeg", Limits.SlipMin, Limits.SlipMax, p => p.SlipAngleDeg, (p, v) => p.SlipAngleDeg = v),
                 F<SteeringPreset>("OppositeLockBoost", Limits.OppLockMin, Limits.OppLockMax, p => p.OppositeLockBoost, (p, v) => p.OppositeLockBoost = v),
                 F<SteeringPreset>("MaxSteerAngle", Limits.MaxSteerAngleMin, Limits.MaxSteerAngleMax, p => p.MaxSteerAngle, (p, v) => p.MaxSteerAngle = v),
+                Tx<SteeringPreset>("SlipLimitMode", p => p.SlipLimitMode.ToString(), (p, s) => { SlipLimitMode m; if (!TryParseName(s, out m)) return false; p.SlipLimitMode = m; return true; }),
+                F<SteeringPreset>("SlipLimitStrength", Limits.StrengthMin, Limits.StrengthMax, p => p.SlipLimitStrength, (p, v) => p.SlipLimitStrength = v),
                 B<SteeringPreset>("LinearityOverride", p => p.LinearityOverride, (p, v) => p.LinearityOverride = v),
                 F<SteeringPreset>("LinearityExponent", Limits.LinExpMin, Limits.LinExpMax, p => p.LinearityExponent, (p, v) => p.LinearityExponent = v)
             };

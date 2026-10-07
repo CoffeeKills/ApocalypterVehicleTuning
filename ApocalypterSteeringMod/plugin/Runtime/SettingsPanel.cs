@@ -39,6 +39,7 @@ namespace ApocalypterSteeringMod.Runtime
         };
         private static readonly string[] DiffModeLabels = { "Stock", "Open", "Locked", "LSD" };
         private static readonly string[] ModeLabels = { "Stock", "Manual", "Automatic" };
+        private static readonly string[] SlipLimitModeLabels = { "Hard", "Blend", "Pushback" };
         private static readonly string[] CornerLabels = { "Top left", "Top right", "Bottom left", "Bottom right" };
 
         public GameObject Root;
@@ -520,10 +521,14 @@ namespace ApocalypterSteeringMod.Runtime
 
         /// <summary>Grid of preset buttons; the active one is filled with the accent colour.</summary>
         private void AddPresetButtons(RectTransform content, string name, int count, int perRowWide, int perRowNarrow,
-            Func<int, string> label, Func<int> active, Action<int> select)
+            Func<int, string> label, Func<int> active, Action<int> select, Func<bool> enabled = null)
         {
             const float h = PanelLayout.PresetButtonHeight, gap = PanelLayout.PresetGap;
             RectTransform block = AddBlock(content, name, h, false, out LayoutElement le);
+            if (enabled != null)
+            {
+                BindGroup(block.gameObject.AddComponent<CanvasGroup>(), enabled);
+            }
 
             var images = new Image[count];
             var texts = new Text[count];
@@ -893,6 +898,23 @@ namespace ApocalypterSteeringMod.Runtime
                 () => Shown.MaxSteerAngle, v => EditSteering(p => p.MaxSteerAngle = v),
                 () => SteeringSettings.Reference().MaxSteerAngle,
                 v => v < 0.1f ? "own" : v.ToString("0") + "°");
+            // 0.12.0: how the clamp applies the slip window, and how firmly.
+            AddPresetButtons(t, "SlipLimitMode", SlipLimitModeLabels.Length, 3, 3,
+                i => SlipLimitModeLabels[i],
+                () => (int)Shown.SlipLimitMode,
+                i =>
+                {
+                    if ((int)Shown.SlipLimitMode != i)
+                    {
+                        EditSteering(p => p.SlipLimitMode = (SlipLimitMode)i);
+                    }
+                },
+                () => Shown.TractionClampEnabled);
+            AddSlider(t, "Slip limit strength", "How firmly the slip limit applies (Hard @ 100% = the 0.11.3 behavior)",
+                Limits.StrengthMin, Limits.StrengthMax,
+                () => Shown.SlipLimitStrength, v => EditSteering(p => p.SlipLimitStrength = v),
+                () => SteeringSettings.Reference().SlipLimitStrength, UiStrings.Percent,
+                () => Shown.TractionClampEnabled);
 
             AddSectionTitle(c, "Game setting");
             Text gameHint = AddOption(c, "Follow game's steering speed", "",
