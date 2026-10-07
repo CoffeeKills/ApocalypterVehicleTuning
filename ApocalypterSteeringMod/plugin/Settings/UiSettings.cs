@@ -71,7 +71,7 @@ namespace ApocalypterSteeringMod.Settings
             return TelemetryCorner.TopLeft;
         }
 
-        /// <summary>A stored tab index, clamped into 0..9 (garbage = 0).</summary>
+        /// <summary>A stored tab index, clamped into 0..10 (garbage = 0).</summary>
         public static int ClampTab(int tab)
         {
             return tab < Limits.LastTabMin || tab > Limits.LastTabMax ? 0 : tab;

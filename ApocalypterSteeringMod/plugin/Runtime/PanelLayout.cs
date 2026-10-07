@@ -355,12 +355,12 @@ namespace ApocalypterSteeringMod.Runtime
             return font;
         }
 
-        /// <summary>Digit hotkeys while the panel is open: 1..9 -> tabs 0..8, 0 -> tab 8; else -1.</summary>
+        /// <summary>Digit hotkeys while the panel is open: 1..9 -> tabs 0..8, 0 -> tab 10; else -1.</summary>
         public static int TabForDigit(int digit)
         {
             if (digit == 0)
             {
-                return 8;
+                return 10;
             }
             return digit >= 1 && digit <= 9 ? digit - 1 : -1;
         }

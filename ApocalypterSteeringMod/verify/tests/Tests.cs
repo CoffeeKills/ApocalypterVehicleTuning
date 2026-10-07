@@ -2051,10 +2051,11 @@ public static class Tests
         Check(GearboxPreset.Custom.GearCount == 12 && Near(GearboxPreset.Custom.Scale(3), 0.25f), "gear count clamped to 12, gear factor to 0.25");
         Check(GearboxPreset.Custom.TransmissionMode == GearboxMode.Stock && UiSettings.TelemetryPosition == TelemetryCorner.TopLeft,
             "numeric / unknown enum names fall back (Stock, TopLeft)");
-        Check(Near(UiSettings.PanelWidth, 1000f) && Near(UiSettings.PanelScale, 0.3f) && UiSettings.LastTab == 8, "panel width/scale/last tab clamped");
+        Check(Near(UiSettings.PanelWidth, 1000f) && Near(UiSettings.PanelScale, 0.3f) && UiSettings.LastTab == 10, "panel width/scale/last tab clamped");
         Check(ModConfig.ParseGearboxMode(" manual ") == GearboxMode.Manual && UiSettings.ParseCorner("topright") == TelemetryCorner.TopRight,
             "names parse case/space-tolerant");
-        Check(UiSettings.ClampTab(-3) == 0 && UiSettings.ClampTab(10) == 0 && UiSettings.ClampTab(7) == 7, "LastTab parse: garbage -> first tab");
+        Check(UiSettings.ClampTab(-3) == 0 && UiSettings.ClampTab(10) == 10 && UiSettings.ClampTab(11) == 0 && UiSettings.ClampTab(7) == 7,
+            "LastTab parse: garbage -> first tab, 10 is the new Settings tab");
 
         // Round trip of the new sections.
         ResetAllCategories();
@@ -2135,10 +2136,11 @@ public static class Tests
         Check(Near(PanelLayout.ScaleFactor(1080f, 1f), 1f) && Near(PanelLayout.ScaleFactor(2160f, 1f), 2f) && Near(PanelLayout.ScaleFactor(1080f, 0.5f), 0.5f),
             "scale factor = Screen.height / 1080 x PanelScale (x1 renders like 0.5.0)");
 
-        Check(PanelLayout.TabForDigit(1) == 0 && PanelLayout.TabForDigit(8) == 7 && PanelLayout.TabForDigit(9) == 8 && PanelLayout.TabForDigit(0) == 8 && PanelLayout.TabForDigit(10) == -1,
-            "digit hotkeys: 1..9 -> tabs 1..9, 0 -> tab 9 (Settings)");
-        Check(SettingsPanel.TabCount == 9 && SettingsPanel.TabNames.Length == 9 && SettingsPanel.TabNames[7] == "Weight" && SettingsPanel.TabNames[8] == "Settings",
-            "nine tabs, Weight second-last, Settings last");
+        Check(PanelLayout.TabForDigit(1) == 0 && PanelLayout.TabForDigit(8) == 7 && PanelLayout.TabForDigit(9) == 8 && PanelLayout.TabForDigit(0) == 10 && PanelLayout.TabForDigit(10) == -1,
+            "digit hotkeys: 1..9 -> tabs 1..9, 0 -> the Settings tab");
+        Check(SettingsPanel.TabCount == 11 && SettingsPanel.TabNames.Length == 11 && SettingsPanel.TabNames[2] == "Alignment" && SettingsPanel.TabNames[3] == "Grip"
+              && SettingsPanel.TabNames[5] == "Gearbox" && SettingsPanel.TabNames[9] == "Weight" && SettingsPanel.TabNames[10] == "Settings",
+            "eleven tabs: alignment/grip and drivetrain/gearbox split out, Settings last");
 
         Check(GearGraph.RouteDrag(true, 3, true) == GearGraph.DragRoute.MoveBar && GearGraph.RouteDrag(true, -1, true) == GearGraph.DragRoute.ScrollList
               && GearGraph.RouteDrag(false, 3, true) == GearGraph.DragRoute.ScrollList && GearGraph.RouteDrag(true, -1, false) == GearGraph.DragRoute.None,
