@@ -349,12 +349,88 @@ public static class PrefixTests
             SteeringPreset.Custom.SlipLimitStrength = 0f;
             TractionEdgeSteeringPatch.Prefix(s);
             Check(Near(s.angle, 8.5f), "Pushback @ 0 lands on the window edge (angle " + s.angle.ToString("0.00") + ")");
+
+            // 0.12.0: stability assist. Expected angles are computed with the same
+            // operations as the patch (same constants, same order), so the pins are
+            // bit-comparable without hardcoding irrationals.
+            SteeringPreset.Custom.TractionClampEnabled = false;   // isolate the assist from the slip clamp
+            float assistBodySlip = Mathf.Atan2(10f, 20f) * Mathf.Rad2Deg;
+            float assistLead = (Mathf.Max(0.5f, 2.6f) * 0.45f) / 20f * (1f * Mathf.Rad2Deg);
+
+            s.angle = 0f;
+            vc.input.Steering = 1f;
+            vc.Speed = 20f;
+            vc.vehicleRigidbody.velocity = new Vector3(10f, 0f, 20f);   // sliding right: bodySlip > 0
+            vc.vehicleRigidbody.angularVelocity = new Vector3(0f, 0f, 0f);
+            AssistsSettings.Enabled = true;
+            AssistsSettings.SetPresetByName("Custom");
+            AssistsPreset.Custom.StabilityMode = StabilityMode.CounterSteer;
+            AssistsPreset.Custom.StabilityStrength = 1f;
+            TractionEdgeSteeringPatch.Prefix(s);
+            Check(Near(s.angle, 30f - assistBodySlip), "CounterSteer @ 1 shifts the target by -bodySlip (angle " + s.angle.ToString("0.00") + ")");
+            s.angle = 0f;
+            AssistsPreset.Custom.StabilityStrength = 0.5f;
+            TractionEdgeSteeringPatch.Prefix(s);
+            Check(Near(s.angle, 30f - assistBodySlip * 0.5f), "CounterSteer @ 0.5 shifts half as much (angle " + s.angle.ToString("0.00") + ")");
+
+            s.angle = 0f;
+            vc.vehicleRigidbody.velocity = new Vector3(0f, 0f, 20f);   // straight, but yawing
+            vc.vehicleRigidbody.angularVelocity = new Vector3(0f, 1f, 0f);
+            AssistsPreset.Custom.StabilityMode = StabilityMode.YawDampen;
+            AssistsPreset.Custom.StabilityStrength = 1f;
+            TractionEdgeSteeringPatch.Prefix(s);
+            Check(Near(s.angle, 30f - assistLead), "YawDampen @ 1 shifts the target by -slipLead (angle " + s.angle.ToString("0.00") + ")");
+
+            s.angle = 0f;
+            vc.vehicleRigidbody.velocity = new Vector3(10f, 0f, 20f);   // sliding and yawing
+            AssistsPreset.Custom.StabilityMode = StabilityMode.Both;
+            AssistsPreset.Custom.StabilityStrength = 0.5f;
+            TractionEdgeSteeringPatch.Prefix(s);
+            Check(Near(s.angle, 30f - (assistBodySlip + assistLead) * 0.5f),
+                "Both @ 0.5 adds the two shifts, halved (angle " + s.angle.ToString("0.00") + ")");
+
+            // Gating: no shift with the master switch off, or the mode Off.
+            s.angle = 0f;
+            AssistsSettings.Enabled = false;
+            TractionEdgeSteeringPatch.Prefix(s);
+            Check(Near(s.angle, 30f), "assists master off -> no assist shift (angle " + s.angle.ToString("0.00") + ")");
+            AssistsSettings.Enabled = true;
+            AssistsPreset.Custom.StabilityMode = StabilityMode.Off;
+            s.angle = 0f;
+            TractionEdgeSteeringPatch.Prefix(s);
+            Check(Near(s.angle, 30f), "StabilityMode Off -> no assist shift (angle " + s.angle.ToString("0.00") + ")");
+            AssistsPreset.Custom.StabilityMode = StabilityMode.CounterSteer;
+
+            // The assist steers even under the Vanilla steering preset (0.12.0):
+            // the prefix runs a vanilla-mimic base instead of falling through.
+            s.angle = 0f;
+            vc.vehicleRigidbody.velocity = new Vector3(10f, 0f, 20f);
+            vc.vehicleRigidbody.angularVelocity = new Vector3(0f, 0f, 0f);
+            AssistsPreset.Custom.StabilityStrength = 1f;
+            SteeringSettings.Select(SteeringPreset.Vanilla);
+            Check(!TractionEdgeSteeringPatch.Prefix(s) && Near(s.angle, 30f - assistBodySlip),
+                "Vanilla preset + assist: the prefix steers (vanilla-mimic base + assist, angle " + s.angle.ToString("0.00") + ")");
+
+            // MatchGameSteeringSpeed must not scale the vanilla mimic (0.12.0):
+            // factor 100 on a 10 deg/s car would give 20 deg/tick if applied.
+            s.angle = 0f;
+            vc.vehicleRigidbody.velocity = new Vector3(0f, 0f, 20f);
+            vc.vehicleRigidbody.angularVelocity = new Vector3(0f, 0f, 0f);
+            SteeringSettings.MatchGameSteeringSpeed = true;
+            SteeringSettings.GameSteeringSpeedFactor = 100f;
+            s.degreesPerSecondLimit = 10f;
+            TractionEdgeSteeringPatch.Prefix(s);
+            Check(Near(s.angle, 0.2f), "Vanilla preset + assist: the game-steering-speed factor is skipped (angle " + s.angle.ToString("0.00") + ")");
+            SteeringSettings.MatchGameSteeringSpeed = false;
+            s.degreesPerSecondLimit = 100000f;
+            SteeringSettings.Select(SteeringPreset.Custom);
         }
         catch (Exception ex)
         {
             Check(false, "prefix threw: " + ex);
         }
         SteeringPreset.Custom.ResetToDefaults();
+        AssistsSettings.ResetAll();
     }
 
 }

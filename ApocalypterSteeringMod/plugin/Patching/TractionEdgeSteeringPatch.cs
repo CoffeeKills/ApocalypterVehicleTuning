@@ -10,7 +10,8 @@ namespace ApocalypterSteeringMod.Patching
     /// (vehicle input linearity, speed-sensitive curve, smoothing, configured
     /// deg/s limit) plus a traction-edge clamp parameterized by the active
     /// SteeringPreset. Falls through to vanilla when disabled, for the Vanilla
-    /// preset, and for raw-input / hold-position / reverse driving.
+    /// preset without the stability assist, and for raw-input / hold-position /
+    /// reverse driving.
     /// </summary>
     [HarmonyPatch(typeof(Steering), "CalculateSteerAngles")]
     public static class TractionEdgeSteeringPatch
@@ -23,6 +24,27 @@ namespace ApocalypterSteeringMod.Patching
 
         // Front-axle-to-CG distance approximation for the yaw slip lead (a/v factor).
         private const float FRONT_AXLE_WHEELBASE_FRACTION = 0.45f;
+
+        // 0.12.0: a vanilla-mimic preset. The stability assist works with every
+        // steering preset, including Vanilla; when only the assist is wanted, the
+        // pipeline runs under this preset so Vanilla steering still happens —
+        // just computed here instead of by NWH (same curves, same rates).
+        private static readonly SteeringPreset VanillaLite = new SteeringPreset
+        {
+            Name = "VanillaLite",
+            Label = "VanillaLite",
+            UseVehicleCurve = true,
+            LockCurve = EditableCurve.Flat(1f),
+            ReturnCurve = EditableCurve.Flat(1f),
+            TractionClampEnabled = false,
+            OppositeLockBoost = 1f,
+            LinearityOverride = false,
+            LinearityExponent = 1f,
+            MaxSteerAngle = 0f,
+            SlipLimitMode = SlipLimitMode.Hard,
+            SlipLimitStrength = 1f,
+            AckermannAmount = 1f
+        };
 
         // Cached accessors for Steering's private smoothing state. Resolved once,
         // instead of allocating Traverse objects every physics tick.
@@ -43,10 +65,19 @@ namespace ApocalypterSteeringMod.Patching
             // 0.9.0: a vehicle with its own saved tune uses it even when the global is
             // Vanilla; everyone else falls back to the global active preset.
             SteeringPreset preset = SteeringSettings.Book.ForVehicle(vc != null && vc.gameObject != null ? vc.gameObject.name : "");
-            if (preset == null || preset.IsVanilla)
+            // 0.12.0: the stability assist works with every steering preset, including
+            // Vanilla. When it is wanted, a vanilla-mimic preset (VanillaLite) drives
+            // the pipeline so the assist still steers; when it is not, Vanilla keeps
+            // its pure fall-through.
+            AssistsPreset assists = AssistsSettings.Book.ForVehicle(vc != null && vc.gameObject != null ? vc.gameObject.name : "");
+            bool wantAssist = AssistsSettings.Enabled
+                && assists.StabilityMode != StabilityMode.Off && assists.StabilityStrength > 0.001f;
+            bool vanillaPreset = preset == null || preset.IsVanilla;
+            if (vanillaPreset && !wantAssist)
             {
                 return true;
             }
+            SteeringPreset p = vanillaPreset ? VanillaLite : preset;
             Rigidbody rb = vc.vehicleRigidbody;
             float steeringInput = vc.input.Steering;
 
@@ -83,16 +114,16 @@ namespace ApocalypterSteeringMod.Patching
             // 0.8.0: the preset's MaxSteerAngle overrides the vehicle's own lock (0 = the
             // vehicle's own; high values for drift tunes). The whole pipeline — curve,
             // linearity, traction bounds, rate limiting — uses this cap.
-            float maxSteer = preset.MaxSteerAngle > 0.1f ? preset.MaxSteerAngle : __instance.maximumSteerAngle;
-            float smoothTime = __instance.speedSensitiveSmoothingCurve.Evaluate(speedNorm) * preset.SmoothingScale;
+            float maxSteer = p.MaxSteerAngle > 0.1f ? p.MaxSteerAngle : __instance.maximumSteerAngle;
+            float smoothTime = __instance.speedSensitiveSmoothingCurve.Evaluate(speedNorm) * p.SmoothingScale;
 
             // Lock-at-speed: the vehicle's own curve, or the preset's editable one.
-            float curveValue = preset.UseVehicleCurve
+            float curveValue = p.UseVehicleCurve
                 ? __instance.speedSensitiveSteeringCurve.Evaluate(speedNorm)
-                : preset.LockCurve.Evaluate(speedNorm);
+                : p.LockCurve.Evaluate(speedNorm);
 
-            float linearity = preset.LinearityOverride
-                ? Mathf.Pow(Mathf.Abs(steeringInput), preset.LinearityExponent)
+            float linearity = p.LinearityOverride
+                ? Mathf.Pow(Mathf.Abs(steeringInput), p.LinearityExponent)
                 : __instance.linearity.Evaluate(Mathf.Abs(steeringInput));
 
             float target = curveValue * maxSteer * linearity * (steeringInput < 0f ? -1f : 1f);
@@ -103,34 +134,36 @@ namespace ApocalypterSteeringMod.Patching
             // Sideslip angle beta: velocity direction relative to the nose.
             // Positive = sliding right (rear stepped out to the left). The traction
             // model is only defined above MIN_TRACTION_SPEED, so it is skipped below
-            // (the preset still steers there, without the clamp).
+            // (the preset still steers there, without the clamp). 0.12.0: the
+            // stability assist shares these inputs, so they are also computed when
+            // only the assist needs them.
             float bodySlipDeg = 0f;
+            float slipLeadDeg = 0f;
             if (forwardVel >= MIN_TRACTION_SPEED
-                && (preset.TractionClampEnabled || preset.OppositeLockBoost > 1f))
+                && (p.TractionClampEnabled || p.OppositeLockBoost > 1f || wantAssist))
             {
                 bodySlipDeg = Mathf.Atan2(localVel.x, forwardVel) * Mathf.Rad2Deg;
-            }
-
-            if (preset.TractionClampEnabled && forwardVel >= MIN_TRACTION_SPEED)
-            {
                 // Yaw-rate lead: front-axle slip contribution of the chassis rotation,
                 // lead = (a / v) * yawRate with 'a' approximated from the wheelbase.
                 float frontAxleOffset = Mathf.Max(0.5f, vc.wheelbase) * FRONT_AXLE_WHEELBASE_FRACTION;
-                float slipLeadDeg = frontAxleOffset / forwardVel * (rb.angularVelocity.y * Mathf.Rad2Deg);
+                slipLeadDeg = frontAxleOffset / forwardVel * (rb.angularVelocity.y * Mathf.Rad2Deg);
+            }
 
+            if (p.TractionClampEnabled && forwardVel >= MIN_TRACTION_SPEED)
+            {
                 // Peak-grip limits. Steering beyond these scrubs the front tires:
                 // opposite lock grows with the slide; steering into the slide is suppressed.
                 // Bounds are clamped to the vehicle's lock BEFORE use. Without this, a slide
                 // bigger than (slip window + max lock) makes low > high, and Mathf.Clamp then
                 // returns a value beyond maximumSteerAngle.
-                float lowLimit = Mathf.Clamp(bodySlipDeg + slipLeadDeg - preset.SlipAngleDeg, -maxSteer, maxSteer);
-                float highLimit = Mathf.Clamp(bodySlipDeg + slipLeadDeg + preset.SlipAngleDeg, -maxSteer, maxSteer);
+                float lowLimit = Mathf.Clamp(bodySlipDeg + slipLeadDeg - p.SlipAngleDeg, -maxSteer, maxSteer);
+                float highLimit = Mathf.Clamp(bodySlipDeg + slipLeadDeg + p.SlipAngleDeg, -maxSteer, maxSteer);
 
                 // 0.12.0: slip-limit mode + strength (s). Hard@1 is the 0.11.3 brick
                 // wall exactly; s=0 disables the clamp. Blend mixes the clamped value
                 // into the target; Pushback reflects overshoot back inside the window.
-                float s = preset.SlipLimitStrength;
-                switch (preset.SlipLimitMode)
+                float s = p.SlipLimitStrength;
+                switch (p.SlipLimitMode)
                 {
                     case SlipLimitMode.Blend:
                         target = Mathf.Lerp(target, Mathf.Clamp(target, lowLimit, highLimit), s);
@@ -151,10 +184,28 @@ namespace ApocalypterSteeringMod.Patching
                 }
             }
 
+            // 0.12.0: stability assist — shifts the steer target against the slide
+            // (counter-steer), the yaw rate (dampen) or both, scaled by strength.
+            // Applied after the slip limit so the rate limiter can't kill counter-steer.
+            if (wantAssist && forwardVel >= MIN_TRACTION_SPEED)
+            {
+                float assistDeg;
+                switch (assists.StabilityMode)
+                {
+                    case StabilityMode.CounterSteer: assistDeg = -bodySlipDeg; break;
+                    case StabilityMode.YawDampen: assistDeg = -slipLeadDeg; break;
+                    default: assistDeg = -(bodySlipDeg + slipLeadDeg); break;   // Both
+                }
+                target += assistDeg * assists.StabilityStrength;
+                target = Mathf.Clamp(target, -maxSteer, maxSteer);
+            }
+
             // Vanilla smoothing, with the vehicle's configured rate limit
-            // (boosted while catching a slide).
-            float rateLimit = __instance.degreesPerSecondLimit * preset.RateMultiplier;
-            if (SteeringSettings.MatchGameSteeringSpeed)
+            // (boosted while catching a slide). The game-steering-speed factor is
+            // skipped for the vanilla mimic (0.12.0): it is meant for the mod's
+            // own pipeline, not for scaling vanilla rates.
+            float rateLimit = __instance.degreesPerSecondLimit * p.RateMultiplier;
+            if (SteeringSettings.MatchGameSteeringSpeed && !vanillaPreset)
             {
                 rateLimit *= SteeringSettings.GameSteeringSpeedFactor;
             }
@@ -163,7 +214,7 @@ namespace ApocalypterSteeringMod.Patching
                              || (target < 0f && bodySlipDeg < -OPPOSITE_LOCK_SLIP_THRESHOLD);
             if (oppositeLock)
             {
-                rateLimit *= preset.OppositeLockBoost;
+                rateLimit *= p.OppositeLockBoost;
             }
 
             float steerVelocity = SteerVelocityRef(__instance);
@@ -182,13 +233,13 @@ namespace ApocalypterSteeringMod.Patching
             float current = __instance.angle;
             if (Mathf.Abs(smoothedTarget) < Mathf.Abs(current) && smoothedTarget * current >= 0f)
             {
-                rateLimit *= preset.ReturnCurve.Evaluate(speedNorm);
+                rateLimit *= p.ReturnCurve.Evaluate(speedNorm);
             }
 
             __instance.angle = Mathf.MoveTowards(__instance.angle, smoothedTarget, rateLimit * vc.fixedDeltaTime);
 
             // Apply Ackermann geometry, blended per the preset's amount (0.12.0).
-            ApplyWheelAngles(__instance, preset.AckermannAmount);
+            ApplyWheelAngles(__instance, p.AckermannAmount);
 
             return false;
         }

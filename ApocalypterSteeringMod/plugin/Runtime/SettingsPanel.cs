@@ -40,6 +40,7 @@ namespace ApocalypterSteeringMod.Runtime
         private static readonly string[] DiffModeLabels = { "Stock", "Open", "Locked", "LSD" };
         private static readonly string[] ModeLabels = { "Stock", "Manual", "Automatic" };
         private static readonly string[] SlipLimitModeLabels = { "Hard", "Blend", "Pushback" };
+        private static readonly string[] StabilityModeLabels = { "Off", "Counter-steer", "Yaw dampen", "Both" };
         private static readonly string[] CornerLabels = { "Top left", "Top right", "Bottom left", "Bottom right" };
 
         public GameObject Root;
@@ -1672,6 +1673,25 @@ namespace ApocalypterSteeringMod.Runtime
                 () => AssistsSettings.Shown.TcsCutMultiplier, v => EditAssists(p => p.TcsCutMultiplier = v),
                 () => AssistsSettings.Reference().TcsCutMultiplier, UiStrings.Percent,
                 () => AssistsSettings.Shown.TcsEnabled);
+
+            AddSectionTitle(c, "Stability");
+            AddPresetButtons(c, "StabilityMode", StabilityModeLabels.Length, 4, 2,
+                i => StabilityModeLabels[i],
+                () => (int)AssistsSettings.Shown.StabilityMode,
+                i =>
+                {
+                    if ((int)AssistsSettings.Shown.StabilityMode != i)
+                    {
+                        EditAssists(p => p.StabilityMode = (StabilityMode)i);
+                    }
+                });
+            AddSlider(c, "Stability strength", "How firmly the assist steers into slides (0 = off)",
+                Limits.StrengthMin, Limits.StrengthMax,
+                () => AssistsSettings.Shown.StabilityStrength, v => EditAssists(p => p.StabilityStrength = v),
+                () => AssistsSettings.Reference().StabilityStrength, UiStrings.Percent,
+                () => AssistsSettings.Shown.StabilityMode != StabilityMode.Off);
+            Text stabNote = AddNote(c, "StabilityNote", 30f, 14);
+            stabNote.text = "Stability needs the Steering master switch on. It works with every steering preset, including Vanilla.";
 
             Text status = AddNote(content, "Status", 44f, 14);
             _refreshers.Add(() =>

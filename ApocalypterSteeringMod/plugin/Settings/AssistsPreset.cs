@@ -1,6 +1,19 @@
 namespace ApocalypterSteeringMod.Settings
 {
     /// <summary>
+    /// How the stability assist steers while sliding (0.12.0). CounterSteer
+    /// points the front wheels into the slide; YawDampen counters the chassis
+    /// yaw rate at the front axle; Both adds the two shifts together.
+    /// </summary>
+    public enum StabilityMode
+    {
+        Off,
+        CounterSteer,
+        YawDampen,
+        Both
+    }
+
+    /// <summary>
     /// Stability assist presets. Implemented entirely through NWH's own public
     /// delegate hooks (brakes.brakeTorqueModifiers / engine.powerModifiers) —
     /// no vehicle fields are written, no modules are required. The game's own
@@ -20,6 +33,12 @@ namespace ApocalypterSteeringMod.Settings
         public float TcsCutoffSpeed = 2f;
         public float TcsCutMultiplier = 0.01f;
 
+        // 0.12.0: steering stability assist — counter-steer into slides and/or
+        // damp yaw at the front axle, scaled by StabilityStrength (0..1). Off
+        // in every built-in preset: they keep their 0.11.3 feel untouched.
+        public StabilityMode StabilityMode = StabilityMode.Off;
+        public float StabilityStrength = 0.5f;
+
         public string Label => Name;
         public string BasedOn { get; set; } = "";
         public bool CanEdit => true;
@@ -35,6 +54,8 @@ namespace ApocalypterSteeringMod.Settings
             TcsSlipThreshold = o.TcsSlipThreshold;
             TcsCutoffSpeed = o.TcsCutoffSpeed;
             TcsCutMultiplier = o.TcsCutMultiplier;
+            StabilityMode = o.StabilityMode;
+            StabilityStrength = o.StabilityStrength;
         }
 
         public static readonly AssistsPreset[] Presets;

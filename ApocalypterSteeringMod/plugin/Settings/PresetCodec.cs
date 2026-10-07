@@ -259,7 +259,9 @@ namespace ApocalypterSteeringMod.Settings
                 B<AssistsPreset>("TcsEnabled", p => p.TcsEnabled, (p, v) => p.TcsEnabled = v),
                 F<AssistsPreset>("TcsSlipThreshold", Limits.SlipThrMin, Limits.SlipThrMax, p => p.TcsSlipThreshold, (p, v) => p.TcsSlipThreshold = v),
                 F<AssistsPreset>("TcsCutoffSpeed", Limits.CutoffSpeedMin, Limits.CutoffSpeedMax, p => p.TcsCutoffSpeed, (p, v) => p.TcsCutoffSpeed = v),
-                F<AssistsPreset>("TcsCutMultiplier", Limits.CutMultMin, Limits.CutMultMax, p => p.TcsCutMultiplier, (p, v) => p.TcsCutMultiplier = v)
+                F<AssistsPreset>("TcsCutMultiplier", Limits.CutMultMin, Limits.CutMultMax, p => p.TcsCutMultiplier, (p, v) => p.TcsCutMultiplier = v),
+                Tx<AssistsPreset>("StabilityMode", p => p.StabilityMode.ToString(), (p, s) => { StabilityMode m; if (!TryParseName(s, out m)) return false; p.StabilityMode = m; return true; }),
+                F<AssistsPreset>("StabilityStrength", Limits.StrengthMin, Limits.StrengthMax, p => p.StabilityStrength, (p, v) => p.StabilityStrength = v)
             };
 
             var align = new List<Field>

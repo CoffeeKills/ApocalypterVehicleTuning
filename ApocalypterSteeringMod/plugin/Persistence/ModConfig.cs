@@ -77,6 +77,8 @@ namespace ApocalypterSteeringMod.Persistence
         private static ConfigEntry<bool> _assistsAbsEnabled, _assistsTcsEnabled;
         private static ConfigEntry<float> _assistsAbsThr, _assistsAbsCut, _assistsAbsMult,
             _assistsTcsThr, _assistsTcsCut, _assistsTcsMult;
+        private static ConfigEntry<string> _assistsStabMode;
+        private static ConfigEntry<float> _assistsStabStrength;
 
         // Alignment (0.6.0)
         private static ConfigEntry<bool> _alignEnabled, _alignPerWheel;
@@ -372,6 +374,8 @@ namespace ApocalypterSteeringMod.Persistence
             _assistsTcsThr = BindRange("Assists.Custom", "TcsSlipThreshold", 0.1f, Limits.SlipThrMin, Limits.SlipThrMax, "TCS slip threshold.");
             _assistsTcsCut = BindRange("Assists.Custom", "TcsCutoffSpeed", 2f, Limits.CutoffSpeedMin, Limits.CutoffSpeedMax, "TCS cutoff speed (m/s).");
             _assistsTcsMult = BindRange("Assists.Custom", "TcsCutMultiplier", 0.01f, Limits.CutMultMin, Limits.CutMultMax, "Power modifier while TCS cuts.");
+            _assistsStabMode = _config.Bind("Assists.Custom", "StabilityMode", "Off", "Stability assist mode: Off, CounterSteer, YawDampen, Both.");
+            _assistsStabStrength = BindRange("Assists.Custom", "StabilityStrength", 0.5f, Limits.StrengthMin, Limits.StrengthMax, "Stability assist strength.");
         }
 
         private static void BindAlignment()
@@ -502,6 +506,7 @@ namespace ApocalypterSteeringMod.Persistence
             Wire(_assistsEnabled); Wire(_assistsPreset); Wire(_assistsBasedOn);
             Wire(_assistsAbsEnabled); Wire(_assistsAbsThr); Wire(_assistsAbsCut); Wire(_assistsAbsMult);
             Wire(_assistsTcsEnabled); Wire(_assistsTcsThr); Wire(_assistsTcsCut); Wire(_assistsTcsMult);
+            Wire(_assistsStabMode); Wire(_assistsStabStrength);
             Wire(_alignEnabled); Wire(_alignPreset); Wire(_alignPerWheel); Wire(_alignBasedOn);
             Wire(_alignCasterF); Wire(_alignCasterR); Wire(_alignToeF); Wire(_alignToeR);
             for (int r = 0; r < 4; r++)
@@ -870,6 +875,8 @@ namespace ApocalypterSteeringMod.Persistence
                 _assistsTcsThr.Value = tc.TcsSlipThreshold;
                 _assistsTcsCut.Value = tc.TcsCutoffSpeed;
                 _assistsTcsMult.Value = tc.TcsCutMultiplier;
+                _assistsStabMode.Value = tc.StabilityMode.ToString();
+                _assistsStabStrength.Value = tc.StabilityStrength;
 
                 _alignEnabled.Value = AlignmentSettings.Enabled;
                 _alignPreset.Value = AlignmentSettings.ActivePreset != null ? AlignmentSettings.ActivePreset.Name : "Stock";
@@ -999,6 +1006,13 @@ namespace ApocalypterSteeringMod.Persistence
         {
             SlipLimitMode m;
             return PresetCodec.TryParseName(value, out m) ? m : SlipLimitMode.Hard;
+        }
+
+        /// <summary>Names only (case-insensitive); numbers and unknown names fall back to Off.</summary>
+        public static StabilityMode ParseStabilityMode(string value)
+        {
+            StabilityMode m;
+            return PresetCodec.TryParseName(value, out m) ? m : StabilityMode.Off;
         }
 
         // ------------------------------------------------- per-vehicle tunes (0.9.0)
@@ -1207,6 +1221,8 @@ namespace ApocalypterSteeringMod.Persistence
             tc.TcsSlipThreshold = _assistsTcsThr.Value;
             tc.TcsCutoffSpeed = _assistsTcsCut.Value;
             tc.TcsCutMultiplier = _assistsTcsMult.Value;
+            tc.StabilityMode = ParseStabilityMode(_assistsStabMode.Value);
+            tc.StabilityStrength = _assistsStabStrength.Value;
 
             AlignmentSettings.Enabled = _alignEnabled.Value;
             AlignmentSettings.SetPresetByName(_alignPreset.Value);
